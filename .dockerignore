@@ -1,0 +1,17 @@
+**
+!Dockerfile
+!.dockerignore
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!.npmrc
+!index.html
+!tsconfig.json
+!tsconfig.server.json
+!vite.config.ts
+!src/
+!src/**
+!server/
+!server/**
+!shared/
+!shared/**

@@ -1,0 +1,29 @@
+services:
+  dashboard:
+    build: .
+    user: "1000:1000"
+    init: true
+    restart: "no"
+    stop_grace_period: 30s
+    environment:
+      HOME: /home/user
+      HOST: 0.0.0.0
+      PORT: "4317"
+    ports:
+      - target: 4317
+        published: "4317"
+        host_ip: 192.0.2.10
+        protocol: tcp
+    volumes:
+      # The identical HOME path supplies both Claude and Codex session history.
+      - type: bind
+        source: /home/user
+        target: /home/user
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ./data
+        # Queue, runs, dispatch settings, and usage samples persist across image updates.
+        target: /app/data
+        bind:
+          create_host_path: false

@@ -1,0 +1,173 @@
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { expect, it } from "vitest";
+import { QueueStore } from "../server/queue.js";
+import { taskInput, temporary } from "./helpers";
+
+it("atomically creates private queue state and persists tasks while excluding prompts from public views", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    expect(task).toMatchObject({
+      title: "Fix a test",
+      model: "opus",
+      status: "pending",
+      priority: 0,
+    });
+    expect(JSON.stringify(store.snapshot())).not.toMatch(
+      /PRIVATE|prompt|whoami|[a-f\d]{8}-[a-f\d]{4}-/,
+    );
+    const disk = JSON.parse(await readFile(`${temp.path}/queue.json`, "utf8"));
+    expect(disk.tasks[0].prompt).toContain("PRIVATE PROMPT");
+    expect((await QueueStore.open(temp.path)).snapshot().tasks).toEqual(
+      store.snapshot().tasks,
+    );
+    expect(await readdir(temp.path)).toEqual(["queue.json"]);
+    expect((await stat(`${temp.path}/queue.json`)).mode & 0o777).toBe(0o600);
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("rejects missing, relative, outside-home and symlink-escaped workdirs and malformed task fields", async () => {
+  const { symlink } = await import("node:fs/promises");
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    await symlink("/etc", `${temp.path}/escape`);
+    for (const workdir of [
+      "relative",
+      "/etc",
+      "/home/userander",
+      `${temp.path}/missing`,
+      `${temp.path}/escape`,
+    ]) {
+      await expect(store.create(taskInput(workdir))).rejects.toThrow(
+        /directory/,
+      );
+    }
+    for (const patch of [
+      { title: "" },
+      { prompt: "" },
+      { model: "--bad" },
+      { priority: -1 },
+      { maxTurns: 0 },
+      { preferredWindowStart: 24 },
+      { earliestStart: "not-a-date" },
+    ]) {
+      await expect(
+        store.create({ ...taskInput(temp.path), ...patch }),
+      ).rejects.toThrow();
+    }
+    expect(store.snapshot().tasks).toHaveLength(0);
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("edits pending tasks, preserves omitted prompts, serializes claims, retries failure and reorders priorities", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const [a, b] = await Promise.all([
+      store.create(taskInput(temp.path)),
+      store.create({ ...taskInput(temp.path), provider: "codex" }),
+    ]);
+    expect(b.model).toBe("gpt-6-astra");
+    await store.update(a.id, { title: "Updated title" });
+    await store.reorder([b.id, a.id]);
+    expect(store.snapshot().tasks.map((t) => t.id)).toEqual([b.id, a.id]);
+    const results = await Promise.allSettled([
+      store.claim(a.id),
+      store.claim(b.id),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([
+      "fulfilled",
+      "rejected",
+    ]);
+    expect((results[0] as PromiseFulfilledResult<unknown>).value).toMatchObject(
+      { prompt: taskInput(temp.path).prompt },
+    );
+    await expect(store.update(a.id, { title: "Cannot edit" })).rejects.toThrow(
+      /pending/,
+    );
+    await expect(store.delete(a.id)).rejects.toThrow(/running/);
+    await store.finish(a.id, "failed");
+    await store.retry(a.id);
+    await store.claim(a.id);
+    await store.finish(a.id, "completed");
+    await expect(store.retry(a.id)).rejects.toThrow(/failed/);
+    await store.delete(a.id);
+    await store.delete(b.id);
+    expect(store.snapshot().tasks).toHaveLength(0);
+    expect((await QueueStore.open(temp.path)).snapshot().tasks).toHaveLength(0);
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("disables auto-dispatch and recovers interrupted tasks on restart without overwriting corrupt state", async () => {
+  const { writeFile } = await import("node:fs/promises");
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    await store.setAutoDispatch(true);
+    await store.claim(task.id);
+    const restarted = await QueueStore.open(temp.path);
+    expect(restarted.snapshot()).toMatchObject({
+      autoDispatch: false,
+      tasks: [{ status: "failed" }],
+    });
+    await writeFile(`${temp.path}/queue.json`, "{broken");
+    await expect(QueueStore.open(temp.path)).rejects.toThrow();
+    expect(await readFile(`${temp.path}/queue.json`, "utf8")).toBe("{broken");
+    await writeFile(
+      `${temp.path}/queue.json`,
+      '{"version":1,"tasks":[{"status":"pending"}]}',
+    );
+    await expect(QueueStore.open(temp.path)).rejects.toThrow();
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("can reopen a task whose accepted working directory is the allowed home itself", async () => {
+  const temp = await temporary();
+  try {
+    const queue = await QueueStore.open(temp.path);
+    await queue.create(taskInput("/home/user"));
+    const reopened = await QueueStore.open(temp.path);
+    const task = reopened.snapshot().tasks[0];
+    expect(task).not.toHaveProperty("workdir");
+    expect((await reopened.claim(task.id)).workdir).toBe("/home/user");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("drops legacy budget estimates from saved tasks atomically without losing them", async () => {
+  const temp = await temporary();
+  try {
+    const queue = await QueueStore.open(temp.path);
+    await queue.create(taskInput(temp.path));
+    await queue.create({ ...taskInput(temp.path), provider: "codex" });
+    const path = `${temp.path}/queue.json`;
+    const current = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(
+      path,
+      JSON.stringify({
+        ...current,
+        tasks: current.tasks.map((task: object) => ({
+          ...task,
+          budgetEstimate: 5,
+        })),
+      }),
+    );
+    const migrated = await QueueStore.open(temp.path);
+    expect(migrated.snapshot().tasks).toHaveLength(2);
+    for (const task of migrated.snapshot().tasks)
+      expect(task).not.toHaveProperty("budgetEstimate");
+    expect(JSON.parse(await readFile(path, "utf8"))).toEqual(current);
+    expect(await readdir(temp.path)).toEqual(["queue.json"]);
+    expect((await stat(path)).mode & 0o777).toBe(0o600);
+  } finally {
+    await temp.cleanup();
+  }
+});

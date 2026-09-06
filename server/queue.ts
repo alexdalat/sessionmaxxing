@@ -1,0 +1,215 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import type {
+  PublicTask,
+  QueueSnapshot,
+  Task,
+  TaskInput,
+  TaskStatus,
+} from "../shared/types.js";
+import { atomicJson, DomainError, id } from "./storage.js";
+import { validateFields, validateWorkdir } from "./validation.js";
+
+interface QueueState {
+  version: 1;
+  autoDispatch: boolean;
+  tasks: Task[];
+}
+export function publicTask(task: Task): PublicTask {
+  return {
+    id: task.id,
+    title: task.title,
+    provider: task.provider,
+    model: task.model,
+    priority: task.priority,
+    status: task.status,
+    createdAt: task.createdAt,
+    earliestStart: task.earliestStart,
+    preferredWindowStart: task.preferredWindowStart,
+    maxTurns: task.maxTurns,
+  };
+}
+export class QueueStore {
+  private chain: Promise<unknown> = Promise.resolve();
+  private constructor(
+    private path: string,
+    private state: QueueState,
+  ) {}
+  static async open(directory: string) {
+    const path = join(directory, "queue.json");
+    let state: QueueState;
+    try {
+      state = JSON.parse(await readFile(path, "utf8"));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      state = { version: 1, autoDispatch: false, tasks: [] };
+      await atomicJson(path, state);
+    }
+    if (
+      state.version !== 1 ||
+      typeof state.autoDispatch !== "boolean" ||
+      !Array.isArray(state.tasks)
+    )
+      throw new DomainError(
+        "Queue state is invalid. Restore a valid queue.json before starting.",
+        500,
+      );
+    let migrated = false;
+    const ids = new Set<string>();
+    for (const task of state.tasks as (Task & { budgetEstimate?: number })[]) {
+      if ("budgetEstimate" in task) {
+        delete task.budgetEstimate;
+        migrated = true;
+      }
+      validateFields(task);
+      if (
+        !/^[a-f0-9]{24}$/.test(task.id) ||
+        ids.has(task.id) ||
+        typeof task.workdir !== "string" ||
+        !(
+          task.workdir === "/home/user" ||
+          task.workdir.startsWith("/home/user/")
+        ) ||
+        !Number.isFinite(Date.parse(task.createdAt)) ||
+        !["pending", "running", "completed", "failed", "cancelled"].includes(
+          task.status,
+        )
+      )
+        throw new DomainError("Queue task metadata is invalid.", 500);
+      ids.add(task.id);
+    }
+    const interrupted = state.tasks.some((t) => t.status === "running");
+    if (state.autoDispatch || interrupted || migrated) {
+      state.autoDispatch = false;
+      for (const task of state.tasks)
+        if (task.status === "running") task.status = "failed";
+      await atomicJson(path, state);
+    }
+    return new QueueStore(path, state);
+  }
+  snapshot(): QueueSnapshot {
+    return {
+      autoDispatch: this.state.autoDispatch,
+      tasks: this.state.tasks
+        .map(publicTask)
+        .sort(
+          (a, b) =>
+            a.priority - b.priority || a.createdAt.localeCompare(b.createdAt),
+        ),
+    };
+  }
+  private transact<T>(
+    change: (state: QueueState) => T | Promise<T>,
+  ): Promise<T> {
+    const operation = this.chain.then(async () => {
+      const draft = structuredClone(this.state);
+      const result = await change(draft);
+      await atomicJson(this.path, draft);
+      this.state = draft;
+      return result;
+    });
+    this.chain = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }
+  async create(input: TaskInput) {
+    validateFields(input);
+    const workdir = await validateWorkdir(input.workdir);
+    return this.transact((state) => {
+      const task: Task = {
+        ...input,
+        workdir,
+        id: id(),
+        model:
+          input.model || (input.provider === "claude" ? "opus" : "gpt-6-astra"),
+        status: "pending",
+        createdAt: new Date().toISOString(),
+      };
+      state.tasks.push(task);
+      return publicTask(task);
+    });
+  }
+
+  private find(state: QueueState, taskId: string) {
+    const task = state.tasks.find((t) => t.id === taskId);
+    if (!task) throw new DomainError("Task not found.", 404);
+    return task;
+  }
+  async update(taskId: string, patch: Partial<TaskInput>) {
+    return this.transact(async (state) => {
+      const task = this.find(state, taskId);
+      if (task.status !== "pending")
+        throw new DomainError("Only pending tasks can be edited.");
+      const updated = { ...task, ...patch };
+      if (
+        patch.provider &&
+        patch.provider !== task.provider &&
+        patch.model === undefined
+      )
+        updated.model = patch.provider === "claude" ? "opus" : "gpt-6-astra";
+      validateFields(updated);
+      updated.workdir = await validateWorkdir(updated.workdir);
+      Object.assign(task, updated);
+      return publicTask(task);
+    });
+  }
+  async delete(taskId: string) {
+    return this.transact((state) => {
+      if (this.find(state, taskId).status === "running")
+        throw new DomainError("Cancel the running task before deleting it.");
+      state.tasks = state.tasks.filter((t) => t.id !== taskId);
+    });
+  }
+  async reorder(taskIds: string[]) {
+    return this.transact((state) => {
+      const pending = state.tasks.filter((t) => t.status === "pending");
+      if (
+        taskIds.length !== pending.length ||
+        new Set(taskIds).size !== pending.length ||
+        pending.some((t) => !taskIds.includes(t.id))
+      )
+        throw new DomainError("Provide each pending task exactly once.", 400);
+      taskIds.forEach((taskId, priority) => {
+        this.find(state, taskId).priority = priority;
+      });
+    });
+  }
+  async claim(taskId: string): Promise<Task> {
+    return this.transact((state) => {
+      if (state.tasks.some((t) => t.status === "running"))
+        throw new DomainError("A task is already running.");
+      const task = this.find(state, taskId);
+      if (task.status !== "pending")
+        throw new DomainError("Only pending tasks can run.");
+      task.status = "running";
+      return structuredClone(task);
+    });
+  }
+  async finish(
+    taskId: string,
+    status: Extract<TaskStatus, "completed" | "failed" | "cancelled">,
+  ) {
+    return this.transact((state) => {
+      const task = this.find(state, taskId);
+      if (task.status !== "running")
+        throw new DomainError("Only a running task can finish.");
+      task.status = status;
+    });
+  }
+  async retry(taskId: string) {
+    return this.transact((state) => {
+      const task = this.find(state, taskId);
+      if (task.status !== "failed")
+        throw new DomainError("Only failed tasks can be retried.");
+      task.status = "pending";
+      return publicTask(task);
+    });
+  }
+  async setAutoDispatch(enabled: boolean) {
+    return this.transact((state) => {
+      state.autoDispatch = enabled;
+    });
+  }
+}

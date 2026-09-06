@@ -1,0 +1,173 @@
+import { access } from "node:fs/promises";
+import { join } from "node:path";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { startDashboard } from "../server/main.js";
+import { temporary, usageSnapshot } from "./helpers";
+
+vi.mock("../server/history.js", () => ({
+  readHistory: async () => ({
+    events: [],
+    health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
+  }),
+}));
+
+beforeEach(() => vi.stubEnv("HOST", undefined));
+afterEach(() => vi.unstubAllEnvs());
+
+const fetchUsage = async (at: Date) =>
+  usageSnapshot({ fetchedAt: at.toISOString() });
+
+it("uses the persistent runtime data directory for dispatch settings and usage samples", async () => {
+  const temp = await temporary();
+  const app = await startDashboard({
+    port: 0,
+    dataDirectory: temp.path,
+    development: true,
+    fetchUsage,
+  });
+  try {
+    const response = await app.inject({
+      method: "PUT",
+      url: "/api/dispatch-settings",
+      payload: { sessionReservePercent: 30, weeklyMarginPercent: 5 },
+    });
+    expect(response.statusCode).toBe(200);
+    const { DispatchSettingsStore } = await import(
+      "../server/dispatch-settings.js"
+    );
+    expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual(
+      response.json().settings,
+    );
+    await app.inject({ method: "POST", url: "/api/usage/refresh" });
+    const { UsageHistoryStore } = await import("../server/usage-history.js");
+    expect(
+      (await UsageHistoryStore.open(temp.path)).recent(new Date()),
+    ).toHaveLength(1);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it.each([undefined, "127.0.0.1"])(
+  "binds loopback with HOST=%s, owns an exclusive runtime lock, and releases it on server shutdown",
+  async (host) => {
+    vi.stubEnv("HOST", host);
+    const temp = await temporary();
+    const options = {
+      port: 0,
+      dataDirectory: temp.path,
+      development: true,
+      fetchUsage,
+      loadHistory: async () => ({
+        events: [],
+        health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
+      }),
+    };
+    try {
+      const app = await startDashboard(options);
+      try {
+        expect(app.server.address()).toMatchObject({ address: "127.0.0.1" });
+        await expect(startDashboard(options)).rejects.toThrow(/already|lock/);
+        expect((await app.inject("/api/queue")).json()).toMatchObject({
+          autoDispatch: false,
+          tasks: [],
+        });
+      } finally {
+        await app.close();
+      }
+      const restarted = await startDashboard(options);
+      await restarted.close();
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
+
+it("binds all container interfaces when HOST is explicitly 0.0.0.0 and still validates requests", async () => {
+  vi.stubEnv("HOST", "0.0.0.0");
+  const temp = await temporary();
+  try {
+    const app = await startDashboard({
+      port: 0,
+      dataDirectory: temp.path,
+      development: true,
+      fetchUsage,
+    });
+    try {
+      expect(app.server.address()).toMatchObject({ address: "0.0.0.0" });
+      const allowed = await app.inject({
+        url: "/api/queue",
+        headers: {
+          host: "192.0.2.10:4317",
+          origin: "http://192.0.2.10:4317",
+        },
+      });
+      expect(allowed.statusCode).toBe(200);
+      expect(allowed.json()).toEqual({
+        autoDispatch: false,
+        tasks: [],
+        runnerError: null,
+        planning: (await app.inject("/api/dispatch-settings")).json(),
+      });
+      const denied = await app.inject({
+        url: "/api/queue",
+        headers: { host: "192.168.1.10:4317" },
+      });
+      expect(denied.statusCode).toBe(403);
+    } finally {
+      await app.close();
+    }
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("rejects unsupported HOST values before touching runtime state", async () => {
+  const temp = await temporary();
+  const dataDirectory = join(temp.path, "runtime");
+  try {
+    for (const host of ["", "localhost", "192.168.1.10", "::", "0.0.0.0 "]) {
+      vi.stubEnv("HOST", host);
+      await expect(
+        startDashboard({
+          port: 0,
+          dataDirectory,
+          development: true,
+          fetchUsage,
+        }).then((app) => app.close()),
+      ).rejects.toThrow("HOST must be 127.0.0.1 or 0.0.0.0.");
+      await expect(access(dataDirectory)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    }
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("wires persisted dispatch settings and live usage planning into the dashboard lifecycle", async () => {
+  const temp = await temporary();
+  const app = await startDashboard({
+    port: 0,
+    dataDirectory: temp.path,
+    development: true,
+    fetchUsage,
+  });
+  try {
+    const response = await app.inject("/api/dispatch-settings");
+    expect(response.statusCode).toBe(200);
+    const { DispatchSettingsStore } = await import(
+      "../server/dispatch-settings.js"
+    );
+    expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual(
+      response.json().settings,
+    );
+    expect((await app.inject("/api/queue")).json().planning).toEqual(
+      response.json(),
+    );
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});

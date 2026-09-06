@@ -1,0 +1,27 @@
+{
+  "five_hour": {
+    "utilization": 16.0,
+    "resets_at": "2026-09-06T16:09:00.000000+00:00"
+  },
+  "seven_day": {
+    "utilization": 2.0,
+    "resets_at": "2026-09-13T07:53:00.000000+00:00"
+  },
+  "seven_day_oauth_apps": null,
+  "seven_day_opus": null,
+  "seven_day_sonnet": null,
+  "extra_usage": {
+    "is_enabled": false,
+    "monthly_limit": null,
+    "used_credits": null,
+    "utilization": null
+  },
+  "limits": [
+    {
+      "kind": "weekly_scoped",
+      "scope": { "model": { "display_name": "Fable" } },
+      "percent": 4.0,
+      "resets_at": 1789285980
+    }
+  ]
+}
