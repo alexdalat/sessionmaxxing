@@ -19,6 +19,8 @@ export function publicTask(task: Task): PublicTask {
   return {
     id: task.id,
     title: task.title,
+    prompt: task.prompt,
+    workdir: task.workdir,
     provider: task.provider,
     model: task.model,
     priority: task.priority,
@@ -79,8 +81,7 @@ export class QueueStore {
       ids.add(task.id);
     }
     const interrupted = state.tasks.some((t) => t.status === "running");
-    if (state.autoDispatch || interrupted || migrated) {
-      state.autoDispatch = false;
+    if (interrupted || migrated) {
       for (const task of state.tasks)
         if (task.status === "running") task.status = "failed";
       await atomicJson(path, state);
@@ -201,8 +202,8 @@ export class QueueStore {
   async retry(taskId: string) {
     return this.transact((state) => {
       const task = this.find(state, taskId);
-      if (task.status !== "failed")
-        throw new DomainError("Only failed tasks can be retried.");
+      if (task.status !== "failed" && task.status !== "cancelled")
+        throw new DomainError("Only failed or cancelled tasks can be retried.");
       task.status = "pending";
       return publicTask(task);
     });

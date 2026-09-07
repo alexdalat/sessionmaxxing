@@ -1,17 +1,13 @@
 import type { UsageReport, UsageState } from "../shared/types.js";
 import type { FetchUsage } from "./claude-usage.js";
-import {
-  sessionWindows,
-  toSample,
-  type UsageHistoryStore,
-} from "./usage-history.js";
+import { sessionWindows, type UsageHistoryStore } from "./usage-history.js";
 
 export const USAGE_POLL_MS = 5 * 60_000;
 export const USAGE_MIN_REFRESH_MS = 30_000;
 
 /** Polls Anthropic's usage endpoint, keeps the last good snapshot, and records samples. */
 export class UsageMonitor {
-  private state: UsageState = { snapshot: null, error: null };
+  private state: UsageState;
   private inflight?: Promise<UsageState>;
   private timer?: ReturnType<typeof setInterval>;
   private lastFetchAt = Number.NEGATIVE_INFINITY;
@@ -19,7 +15,9 @@ export class UsageMonitor {
     private fetchUsage: FetchUsage,
     private history: UsageHistoryStore,
     private now: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.state = { snapshot: history.snapshot(), error: null };
+  }
 
   current(): UsageState {
     return structuredClone(this.state);
@@ -52,7 +50,7 @@ export class UsageMonitor {
     try {
       const snapshot = await this.fetchUsage(now);
       this.state = { snapshot, error: null };
-      await this.history.add(toSample(snapshot));
+      await this.history.record(snapshot);
     } catch (error) {
       this.state = {
         snapshot: this.state.snapshot,

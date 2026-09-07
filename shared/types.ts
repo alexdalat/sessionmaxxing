@@ -79,12 +79,24 @@ export interface OfficialUsage {
   percent: number;
   resetsAt: string | null;
 }
-/** Anthropic's own rate-limit utilization for the signed-in Claude Max account. */
+/** Anthropic's own rate-limit utilization for the signed-in Claude account. */
 export interface UsageSnapshot {
   fetchedAt: string;
+  plan: string | null;
   session: OfficialUsage;
   weekly: OfficialUsage;
   fable: OfficialUsage | null;
+}
+const PLAN_LABELS: Record<string, string> = {
+  pro: "Claude Pro",
+  max: "Claude Max",
+};
+export function planLabel(plan: string | null): string {
+  if (plan === null) return "Claude";
+  return (
+    PLAN_LABELS[plan] ??
+    `Claude ${plan.charAt(0).toUpperCase()}${plan.slice(1)}`
+  );
 }
 export interface UsageState {
   snapshot: UsageSnapshot | null;
@@ -98,10 +110,20 @@ export interface UsageSample {
   weeklyResetsAt: string | null;
   fable: number | null;
 }
+export const MINUTE_MS = 60_000;
+/**
+ * Anthropic's usage endpoint returns `resets_at` with sub-second jitter between
+ * polls of the same window, so samples are grouped by reset rounded to a minute.
+ */
+export function resetMinute(resetsAt: string): number {
+  return Math.round(Date.parse(resetsAt) / MINUTE_MS);
+}
 export interface SessionWindow {
   start: string;
   end: string;
-  peakPercent: number;
+  /** Null when no official sample covered the window and it was inferred from local activity. */
+  peakPercent: number | null;
+  activeMinutes: number;
   samples: number;
 }
 export interface UsageReport extends UsageState {
@@ -144,6 +166,24 @@ export const PROVIDER_LABELS = {
   claude: "Claude",
   codex: "Codex",
 } as const;
+export const PROVIDER_MODELS: Record<
+  Provider,
+  readonly { value: string; label: string }[]
+> = {
+  claude: [
+    { value: "fable", label: "Fable 5.1" },
+    { value: "opus", label: "Opus" },
+    { value: "sonnet", label: "Sonnet" },
+    { value: "haiku", label: "Haiku" },
+  ],
+  codex: [
+    { value: "gpt-6-astra", label: "GPT-6 Astra" },
+    { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
+    { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
+    { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
+    { value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
+  ],
+};
 export type TaskStatus =
   | "pending"
   | "running"
@@ -171,7 +211,7 @@ export interface TaskGate {
   status: "ready" | "waiting" | "running" | "finished";
   reason: string;
 }
-export type PublicTask = Omit<Task, "prompt" | "workdir"> & {
+export type PublicTask = Task & {
   gate?: TaskGate;
 };
 export interface QueueSnapshot {
@@ -196,16 +236,46 @@ export interface Run {
 
 export const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
 
+const HOURS_PER_HALF_DAY = 12;
+const clockHour = (hour: number) =>
+  hour % HOURS_PER_HALF_DAY || HOURS_PER_HALF_DAY;
+export const hourLabel = (hour: number) =>
+  `${clockHour(hour)} ${hour < HOURS_PER_HALF_DAY ? "AM" : "PM"}`;
+export const localTimestamp = (time: string | number) =>
+  new Intl.DateTimeFormat("en-US", {
+    timeZone: TIME_ZONE,
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(time));
+export const shortHourLabel = (hour: number) =>
+  `${clockHour(hour)}${hour < HOURS_PER_HALF_DAY ? "a" : "p"}`;
+
 export interface DispatchSettings {
   sessionReservePercent: number;
   weeklyMarginPercent: number;
+  quietHoursOnly: boolean;
+  quietStartHours: number;
 }
 export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   sessionReservePercent: 25,
   weeklyMarginPercent: 10,
+  quietHoursOnly: true,
+  quietStartHours: 8,
 };
 export const MAX_SESSION_RESERVE_PERCENT = 90;
 export const MAX_WEEKLY_MARGIN_PERCENT = 50;
+export const MAX_QUIET_START_HOURS = 24;
+/** Local start hours whose five-hour window has historically been quiet enough for auto-dispatch. */
+export interface QuietHours {
+  startHours: number[] | null;
+  error: string | null;
+  nowHour: number;
+  active: boolean;
+  nextStartHour: number | null;
+}
 export const WEEKLY_HARD_CEILING_PERCENT = 95;
 export interface BucketGate {
   percent: number | null;
@@ -224,5 +294,6 @@ export interface PlanningSnapshot {
   session: BucketGate;
   weekly: BucketGate;
   fable: BucketGate | null;
+  quiet: QuietHours;
   providers: Record<Provider, DispatchGate>;
 }

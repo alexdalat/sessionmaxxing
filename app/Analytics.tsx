@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+"use client";
 import {
   CartesianGrid,
   Line,
@@ -8,32 +8,11 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type {
-  Analytics,
-  DailyActivity,
-  Mix,
-  QueueSnapshot,
-  UsageReport,
-} from "../shared/types";
-import { HOURS } from "../shared/types";
-import { api } from "./api";
-import { DispatchPanel } from "./DispatchPanel";
-import { SessionWindows } from "./SessionWindows";
-import { UsagePanel } from "./UsagePanel";
-import { usePolling } from "./usePolling";
-import { WEEKLY_COLOR, WeeklyPace } from "./WeeklyPace";
+import type { Analytics, DailyActivity, Mix } from "../shared/types";
+import { HOURS, hourLabel, shortHourLabel } from "../shared/types";
+import { WEEKLY_COLOR } from "./WeeklyPace";
 export const number = (value: number) =>
   new Intl.NumberFormat("en-US").format(value);
-const CLOCK_TICK_MS = 60_000;
-const USAGE_POLL_MS = 30_000;
-function useClock() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 export function runningTotals(daily: DailyActivity[]) {
   let activeMinutes = 0;
@@ -73,63 +52,11 @@ function MixList({ title, items }: { title: string; items: Mix[] }) {
   );
 }
 
-export function Overview({
-  data,
-  onOpenQueue,
-}: {
-  data: Analytics;
-  onOpenQueue: () => void;
-}) {
-  const queue = usePolling<QueueSnapshot>("/api/queue");
-  const usage = usePolling<UsageReport>("/api/usage", USAGE_POLL_MS);
-  const [refreshing, setRefreshing] = useState(false);
-  const now = useClock();
+export function AnalyticsView({ data }: { data: Analytics }) {
   const max = Math.max(1, ...data.heatmap.map((c) => c.activeMinutes));
   const cumulative = runningTotals(data.daily);
-  const planning = queue.data?.planning;
   return (
     <>
-      {usage.error && (
-        <p className="error" role="alert">
-          {usage.error}
-        </p>
-      )}
-      <UsagePanel
-        usage={usage.data}
-        planning={planning}
-        budgets={data.claudeBudgets}
-        now={now}
-        busy={refreshing}
-        onRefresh={async () => {
-          setRefreshing(true);
-          try {
-            await api("/api/usage/refresh", { method: "POST" });
-            usage.reload();
-            queue.reload();
-          } finally {
-            setRefreshing(false);
-          }
-        }}
-      />
-      <div className="two-column">
-        <SessionWindows windows={usage.data?.windows} now={now} />
-        {planning ? (
-          <DispatchPanel
-            planning={planning}
-            tasks={queue.data?.tasks}
-            autoDispatch={queue.data?.autoDispatch}
-            onSaved={queue.reload}
-            onOpenQueue={onOpenQueue}
-          />
-        ) : (
-          <p className="muted">Loading dispatch status…</p>
-        )}
-      </div>
-      <WeeklyPace
-        samples={usage.data?.samples}
-        snapshot={usage.data?.snapshot ?? null}
-        marginPercent={planning?.settings.weeklyMarginPercent ?? 0}
-      />
       <div className="section-heading">
         <h2>Last {data.days} days</h2>
         <span className="muted">Local transcripts · Eastern time</span>
@@ -216,7 +143,7 @@ export function Overview({
                 <th scope="col">Day</th>
                 {HOURS.map((h) => (
                   <th scope="col" key={h}>
-                    {String(h).padStart(2, "0")}
+                    {shortHourLabel(h)}
                   </th>
                 ))}
               </tr>
@@ -236,7 +163,7 @@ export function Overview({
                               ? `rgb(113 112 255 / ${0.2 + (0.8 * c.activeMinutes) / max})`
                               : "#191a1b",
                           }}
-                          aria-label={`${day} ${c.hour}:00, ${c.activeMinutes} active minutes, ${c.responses} responses`}
+                          aria-label={`${day} ${hourLabel(c.hour)}, ${c.activeMinutes} active minutes, ${c.responses} responses`}
                           title={`${c.activeMinutes} active minutes · ${c.responses} responses`}
                         >
                           <span className="sr-only">{c.activeMinutes}</span>

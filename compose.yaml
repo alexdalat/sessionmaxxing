@@ -14,6 +14,10 @@ services:
         published: "4317"
         host_ip: 192.0.2.10
         protocol: tcp
+      - target: 4317
+        published: "4317"
+        host_ip: 127.0.0.1
+        protocol: tcp
     volumes:
       # The identical HOME path supplies both Claude and Codex session history.
       - type: bind

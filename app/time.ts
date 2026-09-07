@@ -1,4 +1,6 @@
-import { TIME_ZONE } from "../shared/types";
+import { hourLabel, TIME_ZONE } from "../shared/types";
+
+export { localTimestamp } from "../shared/types";
 
 const MINUTES_PER_DAY = 24 * 60;
 const DAY_MS = 86_400_000;
@@ -11,22 +13,13 @@ const formatter = new Intl.DateTimeFormat("en-CA", {
   minute: "2-digit",
   hourCycle: "h23",
 });
-export const localTimestamp = (time: string | number) =>
-  new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(time));
 export const localClock = (time: string | number) =>
   new Intl.DateTimeFormat("en-US", {
     timeZone: TIME_ZONE,
     hour: "numeric",
     minute: "2-digit",
   }).format(new Date(time));
-export const hour = (n: number) => `${String(n).padStart(2, "0")}:00`;
+export const hour = hourLabel;
 
 /** Eastern calendar date plus the fraction of that day already elapsed. */
 export function easternDay(time: string | number) {

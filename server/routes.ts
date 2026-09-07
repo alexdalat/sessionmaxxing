@@ -35,16 +35,20 @@ export function registerQueueRoutes(
   app: FastifyInstance,
   queue: QueueStore,
   runner: Runner,
+  now: () => Date,
   getPlanning?: () => PlanningSnapshot,
 ) {
   const plannedTask = (task: PublicTask) =>
-    getPlanning ? { ...task, gate: taskGate(task, getPlanning()) } : task;
+    getPlanning
+      ? { ...task, gate: taskGate(task, getPlanning(), now()) }
+      : task;
   app.get(
     "/api/queue",
     { schema: { querystring: emptyQuerySchema } },
     async () => {
       const planning = getPlanning?.();
       const snapshot = queue.snapshot();
+      const at = now();
       return {
         ...snapshot,
         ...(planning
@@ -52,7 +56,7 @@ export function registerQueueRoutes(
               planning,
               tasks: snapshot.tasks.map((task) => ({
                 ...task,
-                gate: taskGate(task, planning),
+                gate: taskGate(task, planning, at),
               })),
             }
           : {}),

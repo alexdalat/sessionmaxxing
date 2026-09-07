@@ -38,13 +38,15 @@ export function shiftDate(date: string, days: number) {
     .toISOString()
     .slice(0, 10);
 }
-function count(events: ActivityEvent[]) {
+function countTimes(times: number[]) {
   return {
-    responses: events.length,
-    activeMinutes: new Set(
-      events.map((e) => Math.floor(Date.parse(e.timestamp) / MINUTE_MS)),
-    ).size,
+    responses: times.length,
+    activeMinutes: new Set(times.map((time) => Math.floor(time / MINUTE_MS)))
+      .size,
   };
+}
+function count(events: ActivityEvent[]) {
+  return countTimes(events.map((e) => Date.parse(e.timestamp)));
 }
 function mix(events: ActivityEvent[], key: "model" | "project") {
   const values = new Map<string, number>();
@@ -211,12 +213,10 @@ export function localStart(date: string, hour: number): number {
 }
 function opportunities(events: ActivityEvent[], now: Date) {
   const today = localParts(now).date;
-  const recent = events.filter(
-    (e) =>
-      Date.parse(e.timestamp) >=
-        localStart(shiftDate(today, -PLANNER_DAYS - 1), 0) &&
-      Date.parse(e.timestamp) <= now.getTime(),
-  );
+  const earliest = localStart(shiftDate(today, -PLANNER_DAYS - 1), 0);
+  const recent = events
+    .map((e) => Date.parse(e.timestamp))
+    .filter((time) => time >= earliest && time <= now.getTime());
   return Array.from({ length: 24 }, (_, startHour) => {
     let activeMinutes = 0;
     let responses = 0;
@@ -232,11 +232,8 @@ function opportunities(events: ActivityEvent[], now: Date) {
     );
     for (const date of dates) {
       const start = localStart(date, startHour);
-      const totals = count(
-        recent.filter((e) => {
-          const time = Date.parse(e.timestamp);
-          return time >= start && time < start + BLOCK_MS;
-        }),
+      const totals = countTimes(
+        recent.filter((time) => time >= start && time < start + BLOCK_MS),
       );
       activeMinutes += totals.activeMinutes;
       responses += totals.responses;
@@ -258,26 +255,44 @@ function opportunities(events: ActivityEvent[], now: Date) {
   );
 }
 
-function currentBlock(events: ActivityEvent[], now: Date) {
+export interface ActivityBlock {
+  start: number;
+  end: number;
+  events: ActivityEvent[];
+}
+export function activityBlocks(
+  events: ActivityEvent[],
+  now: Date,
+): ActivityBlock[] {
   const past = events
     .filter((e) => Date.parse(e.timestamp) <= now.getTime())
     .sort((a, b) => a.timestamp.localeCompare(b.timestamp));
-  let start: number | undefined;
-  let block: ActivityEvent[] = [];
+  const blocks: ActivityBlock[] = [];
   for (const event of past) {
     const time = Date.parse(event.timestamp);
-    if (start === undefined || time >= start + BLOCK_MS) {
-      start = Math.floor(time / MINUTE_MS) * MINUTE_MS;
-      block = [];
+    const open = blocks[blocks.length - 1];
+    if (open && time < open.end) open.events.push(event);
+    else {
+      const start = Math.floor(time / MINUTE_MS) * MINUTE_MS;
+      blocks.push({ start, end: start + BLOCK_MS, events: [event] });
     }
-    block.push(event);
   }
-  if (start === undefined || now.getTime() >= start + BLOCK_MS) return null;
-  const totals = count(block);
+  return blocks;
+}
+
+export function activeMinutes(events: ActivityEvent[]) {
+  return count(events).activeMinutes;
+}
+
+function currentBlock(events: ActivityEvent[], now: Date) {
+  const blocks = activityBlocks(events, now);
+  const block = blocks[blocks.length - 1];
+  if (!block || now.getTime() >= block.end) return null;
+  const totals = count(block.events);
   return {
-    start: new Date(start).toISOString(),
-    end: new Date(start + BLOCK_MS).toISOString(),
-    elapsedMinutes: Math.floor((now.getTime() - start) / MINUTE_MS),
+    start: new Date(block.start).toISOString(),
+    end: new Date(block.end).toISOString(),
+    elapsedMinutes: Math.floor((now.getTime() - block.start) / MINUTE_MS),
     ...totals,
     utilization: totals.activeMinutes / BLOCK_MINUTES,
     remainingMinutes: BLOCK_MINUTES - totals.activeMinutes,

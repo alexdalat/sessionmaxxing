@@ -23,8 +23,7 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
       "--output-format",
       "stream-json",
       "--verbose",
-      "--permission-mode",
-      "acceptEdits",
+      "--dangerously-skip-permissions",
       "--max-turns",
       "10",
     ],
@@ -62,6 +61,11 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
       (call) => call[1].filter((arg) => arg === base.prompt).length === 1,
     ),
   ).toBe(true);
+  expect(
+    spawn.mock.calls.map((call) =>
+      call[1].includes("--dangerously-skip-permissions"),
+    ),
+  ).toEqual([true, false]);
 });
 it("bounds previews and redacts arbitrary text, credentials, environment values, IDs, and message contents across chunks", async () => {
   const { OutputPreview } = await import("../server/output.js");

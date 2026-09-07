@@ -15,11 +15,13 @@ import {
   emptyQuerySchema,
   settingsSchema,
 } from "./dispatch-settings.js";
-import { readHistory } from "./history.js";
+import { createHistoryReader } from "./history.js";
 import type { QueueStore } from "./queue.js";
+import { QuietHoursCache } from "./quiet-hours.js";
 import { registerQueueRoutes } from "./routes.js";
 import type { Runner } from "./runner.js";
 import { DomainError } from "./storage.js";
+import { mergeSessionWindows } from "./usage-history.js";
 import type { UsageMonitor } from "./usage-monitor.js";
 
 const DASHBOARD_HOST =
@@ -33,6 +35,7 @@ export interface AppOptions {
   settings?: DispatchSettingsStore;
   usage?: UsageMonitor;
   now?: () => Date;
+  quietHoursTtlMs?: number;
 }
 export async function createApp(options: AppOptions = {}) {
   const app = Fastify({
@@ -41,7 +44,7 @@ export async function createApp(options: AppOptions = {}) {
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false } },
   });
   const loadHistory =
-    options.loadHistory ?? (() => readHistory(join(homedir(), ".claude")));
+    options.loadHistory ?? createHistoryReader(join(homedir(), ".claude"));
   const now = () => options.now?.() ?? new Date();
   app.addHook("onRequest", async (request, reply) => {
     const host = request.headers.host ?? "";
@@ -60,7 +63,7 @@ export async function createApp(options: AppOptions = {}) {
     reply.header("Referrer-Policy", "no-referrer");
     reply.header(
       "Content-Security-Policy",
-      "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
+      "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self'; img-src 'self' data:; object-src 'none'; frame-ancestors 'none'; base-uri 'none'",
     );
   });
   app.setErrorHandler((error, _request, reply) => {
@@ -112,27 +115,52 @@ export async function createApp(options: AppOptions = {}) {
   );
   if (options.usage) {
     const usage = options.usage;
+    const usageReport = async () => {
+      const report = usage.report();
+      return {
+        ...report,
+        windows: mergeSessionWindows(
+          report.windows,
+          (await loadHistory()).events,
+          now(),
+        ),
+      };
+    };
     app.get(
       "/api/usage",
       { schema: { querystring: emptyQuerySchema } },
-      async () => usage.report(),
+      usageReport,
     );
     app.post(
       "/api/usage/refresh",
       { schema: { querystring: emptyQuerySchema } },
       async () => {
         await usage.refresh();
-        return usage.report();
+        return usageReport();
       },
     );
   }
   let planning: (() => PlanningSnapshot) | undefined;
   if (options.settings && options.usage) {
     const { settings, usage } = options;
+    const quiet = new QuietHoursCache(
+      async () =>
+        aggregate(await loadHistory(), 30, now()).opportunities.map(
+          (window) => window.startHour,
+        ),
+      now,
+      options.quietHoursTtlMs,
+    );
     const getPlanning = () =>
-      planDispatch(settings.snapshot(), usage.current(), now());
+      planDispatch(
+        settings.snapshot(),
+        usage.current(),
+        now(),
+        quiet.current(),
+        options.runner?.lastRunEndedAt() ?? null,
+      );
     planning = getPlanning;
-    options.runner?.setPlanner(getPlanning);
+    options.runner?.setPlanner(getPlanning, () => usage.refresh());
     app.get(
       "/api/dispatch-settings",
       { schema: { querystring: emptyQuerySchema } },
@@ -148,12 +176,13 @@ export async function createApp(options: AppOptions = {}) {
     );
   }
   if (options.queue && options.runner)
-    registerQueueRoutes(app, options.queue, options.runner, planning);
+    registerQueueRoutes(app, options.queue, options.runner, now, planning);
   if (options.staticRoot)
     await app.register(fastifyStatic, {
       root: options.staticRoot,
       index: "index.html",
       dotfiles: "deny",
+      redirect: true,
     });
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: "Route not found." }),

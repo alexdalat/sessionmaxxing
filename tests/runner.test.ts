@@ -123,6 +123,7 @@ it("auto-dispatches only eligible preferred windows across midnight, respects ea
         {
           snapshot: {
             fetchedAt: "2026-09-06T05:29:00Z",
+            plan: "max",
             session: { percent: 10, resetsAt: "2026-09-06T09:00:00Z" },
             weekly: { percent: 5, resetsAt: "2026-09-12T00:00:00Z" },
             fable: null,

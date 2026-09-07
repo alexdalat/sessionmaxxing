@@ -2,7 +2,7 @@ import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanningSnapshot, Run, Task } from "../shared/types.js";
 import { localParts, localStart, shiftDate } from "./analytics.js";
-import { taskGate } from "./dispatch.js";
+import { taskGate, USAGE_PREDATES_RUN_REASON } from "./dispatch.js";
 import { OutputPreview } from "./output.js";
 import { launchProvider, type ProviderProcess } from "./providers.js";
 import type { QueueStore } from "./queue.js";
@@ -36,8 +36,21 @@ export class Runner {
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
   private getPlanning?: () => PlanningSnapshot;
-  setPlanner(planning: () => PlanningSnapshot) {
+  private refreshUsage?: () => Promise<unknown>;
+  setPlanner(
+    planning: () => PlanningSnapshot,
+    refreshUsage?: () => Promise<unknown>,
+  ) {
     this.getPlanning = planning;
+    this.refreshUsage = refreshUsage;
+  }
+  /** End time of the most recently finished run, so usage fetched before it is not trusted. */
+  lastRunEndedAt(): string | null {
+    let latest: string | null = null;
+    for (const run of this.runs)
+      if (run.endedAt !== null && (latest === null || run.endedAt > latest))
+        latest = run.endedAt;
+    return latest;
   }
   error: string | null = null;
   private constructor(
@@ -296,14 +309,21 @@ export class Runner {
       return;
     this.ticking = true;
     try {
-      const planning = this.getPlanning();
-      const now = this.now().getTime();
+      let planning = this.getPlanning();
+      if (
+        planning.providers.claude.reason === USAGE_PREDATES_RUN_REASON &&
+        this.refreshUsage
+      ) {
+        await this.refreshUsage();
+        planning = this.getPlanning();
+      }
+      const at = this.now();
+      const now = at.getTime();
       const today = localParts(now).date;
       const eligible = this.store.snapshot().tasks.find((task) => {
         if (
           task.status !== "pending" ||
-          taskGate(task, planning).status !== "ready" ||
-          (task.earliestStart && Date.parse(task.earliestStart) > now)
+          taskGate(task, planning, at).status !== "ready"
         )
           return false;
         if (task.preferredWindowStart === null) return true;

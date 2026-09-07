@@ -43,18 +43,23 @@ function modelWindow(limits: unknown, model: RegExp): OfficialUsage | null {
   });
   return entry ? bucket(entry, "model") : null;
 }
-export function parseUsageResponse(body: unknown, now: Date): UsageSnapshot {
+export function parseUsageResponse(
+  body: unknown,
+  now: Date,
+  plan: string | null = null,
+): UsageSnapshot {
   if (!isRecord(body))
     throw new DomainError("Usage response is not a JSON object.", 502);
   return {
     fetchedAt: now.toISOString(),
+    plan,
     session: bucket(body.five_hour, "five_hour"),
     weekly: bucket(body.seven_day, "seven_day"),
     fable: modelWindow(body.limits, FABLE_MODEL),
   };
 }
 
-export async function readAccessToken(claudeDirectory: string, now: Date) {
+export async function readCredentials(claudeDirectory: string, now: Date) {
   let raw: string;
   try {
     raw = await readFile(join(claudeDirectory, ".credentials.json"), "utf8");
@@ -77,7 +82,13 @@ export async function readAccessToken(claudeDirectory: string, now: Date) {
       "Claude Code OAuth token expired. Run `claude` once to refresh it.",
       503,
     );
-  return oauth.accessToken;
+  return {
+    accessToken: oauth.accessToken,
+    subscriptionType:
+      typeof oauth.subscriptionType === "string"
+        ? oauth.subscriptionType
+        : null,
+  };
 }
 
 export type FetchUsage = (now: Date) => Promise<UsageSnapshot>;
@@ -86,10 +97,13 @@ export function officialUsageFetcher(
   fetchImpl: typeof fetch = fetch,
 ): FetchUsage {
   return async (now) => {
-    const token = await readAccessToken(claudeDirectory, now);
+    const { accessToken, subscriptionType } = await readCredentials(
+      claudeDirectory,
+      now,
+    );
     const response = await fetchImpl(USAGE_ENDPOINT, {
       headers: {
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${accessToken}`,
         "anthropic-beta": OAUTH_BETA,
         "User-Agent": USER_AGENT,
         Accept: "application/json",
@@ -103,6 +117,6 @@ export function officialUsageFetcher(
           : `Anthropic usage endpoint returned HTTP ${response.status}.`,
         502,
       );
-    return parseUsageResponse(await response.json(), now);
+    return parseUsageResponse(await response.json(), now, subscriptionType);
   };
 }

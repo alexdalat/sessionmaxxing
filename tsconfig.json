@@ -10,7 +10,25 @@
     "skipLibCheck": true,
     "esModuleInterop": true,
     "resolveJsonModule": true,
-    "types": ["node", "vite/client", "@testing-library/jest-dom"]
+    "types": ["node"],
+    "allowJs": true,
+    "incremental": true,
+    "isolatedModules": true,
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ]
   },
-  "include": ["src", "server", "shared", "tests", "*.ts"]
+  "include": [
+    "app",
+    "server",
+    "shared",
+    "tests",
+    "*.ts",
+    "next-env.d.ts",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
+  "exclude": [".next", "out", "dist", "node_modules"]
 }

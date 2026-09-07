@@ -5,7 +5,7 @@ import { startDashboard } from "../server/main.js";
 import { temporary, usageSnapshot } from "./helpers";
 
 vi.mock("../server/history.js", () => ({
-  readHistory: async () => ({
+  createHistoryReader: () => async () => ({
     events: [],
     health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
   }),
@@ -16,6 +16,16 @@ afterEach(() => vi.unstubAllEnvs());
 
 const fetchUsage = async (at: Date) =>
   usageSnapshot({ fetchedAt: at.toISOString() });
+async function quietHoursReady(
+  app: Awaited<ReturnType<typeof startDashboard>>,
+) {
+  for (let attempt = 0; attempt < 50; attempt++) {
+    if ((await app.inject("/api/dispatch-settings")).json().quiet.startHours)
+      return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error("Quiet hours were never computed.");
+}
 
 it("uses the persistent runtime data directory for dispatch settings and usage samples", async () => {
   const temp = await temporary();
@@ -29,7 +39,12 @@ it("uses the persistent runtime data directory for dispatch settings and usage s
     const response = await app.inject({
       method: "PUT",
       url: "/api/dispatch-settings",
-      payload: { sessionReservePercent: 30, weeklyMarginPercent: 5 },
+      payload: {
+        sessionReservePercent: 30,
+        weeklyMarginPercent: 5,
+        quietHoursOnly: true,
+        quietStartHours: 6,
+      },
     });
     expect(response.statusCode).toBe(200);
     const { DispatchSettingsStore } = await import(
@@ -96,6 +111,7 @@ it("binds all container interfaces when HOST is explicitly 0.0.0.0 and still val
     });
     try {
       expect(app.server.address()).toMatchObject({ address: "0.0.0.0" });
+      await quietHoursReady(app);
       const allowed = await app.inject({
         url: "/api/queue",
         headers: {
@@ -155,6 +171,7 @@ it("wires persisted dispatch settings and live usage planning into the dashboard
     fetchUsage,
   });
   try {
+    await quietHoursReady(app);
     const response = await app.inject("/api/dispatch-settings");
     expect(response.statusCode).toBe(200);
     const { DispatchSettingsStore } = await import(

@@ -23,6 +23,7 @@ export const usageSnapshot = (
   patch: Partial<UsageSnapshot> = {},
 ): UsageSnapshot => ({
   fetchedAt: "2026-09-06T12:00:00.000Z",
+  plan: "max",
   session: { percent: 16, resetsAt: "2026-09-06T16:09:00.000Z" },
   weekly: { percent: 2, resetsAt: "2026-09-13T07:53:00.000Z" },
   fable: { percent: 4, resetsAt: "2026-09-13T07:53:00.000Z" },

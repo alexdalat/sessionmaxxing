@@ -3,12 +3,18 @@ import { join } from "node:path";
 import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchSettings,
+  MAX_QUIET_START_HOURS,
   MAX_SESSION_RESERVE_PERCENT,
   MAX_WEEKLY_MARGIN_PERCENT,
 } from "../shared/types.js";
 import { atomicJson, DomainError, exactKeys } from "./storage.js";
 
-const KEYS = ["sessionReservePercent", "weeklyMarginPercent"] as const;
+const KEYS = [
+  "sessionReservePercent",
+  "weeklyMarginPercent",
+  "quietHoursOnly",
+  "quietStartHours",
+] as const;
 function numeric(value: unknown, max: number) {
   return (
     typeof value === "number" &&
@@ -23,10 +29,14 @@ export function validateSettings(
   if (
     !exactKeys(value, KEYS) ||
     !numeric(value.sessionReservePercent, MAX_SESSION_RESERVE_PERCENT) ||
-    !numeric(value.weeklyMarginPercent, MAX_WEEKLY_MARGIN_PERCENT)
+    !numeric(value.weeklyMarginPercent, MAX_WEEKLY_MARGIN_PERCENT) ||
+    typeof value.quietHoursOnly !== "boolean" ||
+    !Number.isInteger(value.quietStartHours) ||
+    !numeric(value.quietStartHours, MAX_QUIET_START_HOURS) ||
+    (value.quietStartHours as number) < 1
   )
     throw new DomainError(
-      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}% and a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%.`,
+      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, a quiet-hours flag, and 1 to ${MAX_QUIET_START_HOURS} quiet start hours.`,
       400,
     );
 }
@@ -44,6 +54,12 @@ export const settingsSchema = {
       type: "number",
       minimum: 0,
       maximum: MAX_WEEKLY_MARGIN_PERCENT,
+    },
+    quietHoursOnly: { type: "boolean" },
+    quietStartHours: {
+      type: "integer",
+      minimum: 1,
+      maximum: MAX_QUIET_START_HOURS,
     },
   },
 };
@@ -68,6 +84,19 @@ export class DispatchSettingsStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       state = { ...DEFAULT_DISPATCH_SETTINGS };
+      await atomicJson(path, state);
+    }
+    // Settings saved before quiet hours existed gain the defaults for the new keys.
+    if (
+      state !== null &&
+      typeof state === "object" &&
+      !Array.isArray(state) &&
+      Object.keys(state).every((key) =>
+        (KEYS as readonly string[]).includes(key),
+      ) &&
+      Object.keys(state).length < KEYS.length
+    ) {
+      state = { ...DEFAULT_DISPATCH_SETTINGS, ...state };
       await atomicJson(path, state);
     }
     try {

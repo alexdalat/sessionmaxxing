@@ -70,7 +70,7 @@ button:hover {
   background: #25262a;
 }
 button:disabled {
-  cursor: wait;
+  cursor: default;
   opacity: 0.6;
 }
 a {
@@ -162,7 +162,8 @@ main {
   width: 100%;
   max-width: 1500px;
   padding: 32px 40px 16px;
-  margin: auto;
+  margin: 0 auto;
+  align-self: start;
 }
 .page-header {
   display: flex;
@@ -240,6 +241,10 @@ td {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 20px;
+}
+.two-column > .panel {
+  display: flex;
+  flex-direction: column;
 }
 .mix-list {
   list-style: none;
@@ -477,25 +482,40 @@ progress::-webkit-progress-value {
   font-size: 12px;
   min-width: 0;
 }
-.queue-counts {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 12px;
-  margin: 0 0 8px;
-}
-.queue-counts dt {
-  color: #8a8f98;
-  font-size: 12px;
-}
-.queue-counts dd {
-  margin: 4px 0 0;
-  font-size: 22px;
-}
 .form-grid .full {
   grid-column: 1 / -1;
 }
 .form-grid p {
   margin: 0;
+}
+.field-label {
+  display: block;
+  margin-bottom: 6px;
+  color: #d0d6e0;
+  font-size: 12px;
+}
+.quiet-strip {
+  display: grid;
+  grid-template-columns: repeat(24, 1fr);
+  gap: 2px;
+}
+.quiet-strip > * {
+  height: 18px;
+  border-radius: 3px;
+}
+.quiet-strip .allowed {
+  outline: 1px solid #88d4a5;
+  outline-offset: -1px;
+}
+.quiet-axis {
+  position: relative;
+  height: 14px;
+  margin-top: 4px;
+}
+.quiet-axis span {
+  position: absolute;
+  font-size: 10px;
+  color: #8a8f98;
 }
 .form-grid input,
 .form-grid select,
@@ -542,11 +562,16 @@ progress::-webkit-progress-value {
 .queue-heading {
   flex-wrap: wrap;
 }
-.queue-heading label {
+.queue-tools {
   display: flex;
-  align-items: center;
   gap: 8px;
-  font-size: 12px;
+  align-items: center;
+  margin-left: auto;
+}
+.task-title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
 }
 .guardrail-fields {
   border: 0;
@@ -594,16 +619,55 @@ progress::-webkit-progress-value {
   color: #8a8f98;
   font-size: 11px;
 }
-.toggle {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  color: #d0d6e0;
+.queue-switch {
+  min-height: 32px;
+  padding: 6px 16px;
+  border-radius: 999px;
+  border: 0;
+  font-size: 12px;
 }
-.toggle input {
-  width: 18px;
-  height: 18px;
-  accent-color: #7170ff;
+.queue-switch[aria-checked="true"] {
+  background: #7170ff;
+  color: #fff;
+}
+.queue-switch[aria-checked="true"]:hover {
+  background: #828fff;
+}
+.queue-switch[aria-checked="false"] {
+  background: #191a1b;
+  color: #8a8f98;
+}
+.task-workdir {
+  font-family: "JetBrains Mono", monospace;
+}
+.task-prompt {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow: auto;
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  background: #191a1b;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 6px;
+}
+dialog.modal {
+  background: #0f1011;
+  color: #f7f8f8;
+  border: 1px solid #ffffff14;
+  border-radius: 12px;
+  padding: 0;
+  margin: auto;
+  width: min(640px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+}
+dialog.modal::backdrop {
+  background: #000000a6;
+}
+.modal-body {
+  padding: 20px 24px;
 }
 .run-preview {
   max-height: 250px;
@@ -778,25 +842,48 @@ progress::-webkit-progress-value {
   font-size: 13px;
   margin: 0 0 14px;
 }
-.dispatch-settings {
-  margin-top: 18px;
-}
-.dispatch-settings small {
+.dispatch-quiet {
   color: #8a8f98;
-  font-size: 11px;
+  font-size: 12px;
+  margin: -8px 0 14px;
+}
+.dispatch-counts {
+  color: #8a8f98;
+  font-size: 12px;
+  margin: 0;
+}
+.gate-row {
+  display: flex;
+  gap: 6px;
+}
+.toggle-field span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.toggle-field input {
+  width: 18px;
+  height: 18px;
+  accent-color: #7170ff;
 }
 .windows {
   display: grid;
+  grid-template-rows: repeat(7, minmax(22px, 1fr)) auto;
   gap: 6px;
   list-style: none;
   margin: 0;
   padding: 0;
+  flex: 1;
 }
 .windows-row {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
-  align-items: center;
+  align-items: stretch;
   gap: 10px;
+}
+.windows-day {
+  align-self: center;
 }
 .windows-day {
   font-size: 12px;
@@ -807,7 +894,7 @@ progress::-webkit-progress-value {
 }
 .windows-track {
   position: relative;
-  height: 22px;
+  min-height: 22px;
   background: #191a1b;
   border: 1px solid #ffffff0d;
   border-radius: 5px;
@@ -825,6 +912,8 @@ progress::-webkit-progress-value {
   padding-left: 4px;
   overflow: hidden;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
 }
 .windows-now {
   position: absolute;
@@ -833,24 +922,48 @@ progress::-webkit-progress-value {
   width: 2px;
   background: #f7f8f8;
 }
+.windows-hover {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 1px;
+  background: #8a8f98;
+  pointer-events: none;
+}
+.windows-axis .windows-track .windows-hover-label {
+  transform: translateX(-50%);
+  color: #f7f8f8;
+  background: #08090a;
+  padding: 0 4px;
+  font-family: "JetBrains Mono", monospace;
+}
+.windows-tooltip {
+  position: fixed;
+  transform: translate(12px, 12px);
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+  background: #191a1b;
+  border: 1px solid #ffffff20;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #d0d6e0;
+  pointer-events: none;
+  z-index: 10;
+}
+.windows-tooltip strong {
+  font-weight: 500;
+  color: #f7f8f8;
+}
 .windows-axis .windows-track {
-  height: 14px;
+  min-height: 14px;
   background: transparent;
   border: 0;
 }
-.windows-axis span {
+.windows-axis .windows-track span {
   position: absolute;
   font-size: 10px;
   color: #8a8f98;
-}
-.windows-list {
-  list-style: none;
-  padding: 0;
-  margin: 14px 0 0;
-  font-size: 11px;
-  color: #8a8f98;
-  max-height: 120px;
-  overflow: auto;
 }
 .usage-local {
   margin: 0;

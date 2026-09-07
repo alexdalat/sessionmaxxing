@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { aggregate } from "../server/analytics.js";
+import { activityBlocks, aggregate } from "../server/analytics.js";
 import type { ActivityEvent, HistoryData } from "../shared/types.js";
 
 const event = (
@@ -160,6 +160,7 @@ it("estimates Claude session, weekly and Fable windows from official reset times
   ]);
   const official = {
     fetchedAt: "2026-09-06T21:53:00.000Z",
+    plan: "max",
     session: { percent: 16, resetsAt: "2026-09-07T02:09:00.000Z" },
     weekly: { percent: 2, resetsAt: "2026-09-13T07:53:00.000Z" },
     fable: { percent: 0, resetsAt: null },
@@ -226,4 +227,27 @@ it("estimates Claude session, weekly and Fable windows from official reset times
     responses: 0,
     utilization: 0,
   });
+});
+
+it("opens a new activity block for an event exactly five hours after the block start", () => {
+  const blocks = activityBlocks(
+    [event("2026-09-06T00:00:30Z"), event("2026-09-06T05:00:00Z")],
+    new Date("2026-09-06T12:00:00Z"),
+  );
+  expect(blocks.map((block) => new Date(block.start).toISOString())).toEqual([
+    "2026-09-06T00:00:00.000Z",
+    "2026-09-06T05:00:00.000Z",
+  ]);
+});
+
+it("keeps an event one minute before the block end inside the same block", () => {
+  const blocks = activityBlocks(
+    [event("2026-09-06T00:00:30Z"), event("2026-09-06T04:59:00Z")],
+    new Date("2026-09-06T12:00:00Z"),
+  );
+  expect(blocks).toHaveLength(1);
+  expect(blocks[0].events).toHaveLength(2);
+  expect(new Date(blocks[0].end).toISOString()).toBe(
+    "2026-09-06T05:00:00.000Z",
+  );
 });

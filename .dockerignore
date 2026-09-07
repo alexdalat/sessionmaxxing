@@ -5,12 +5,12 @@
 !pnpm-lock.yaml
 !pnpm-workspace.yaml
 !.npmrc
-!index.html
 !tsconfig.json
 !tsconfig.server.json
-!vite.config.ts
-!src/
-!src/**
+!next.config.ts
+!postcss.config.mjs
+!app/
+!app/**
 !server/
 !server/**
 !shared/

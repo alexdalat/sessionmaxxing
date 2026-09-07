@@ -1,4 +1,5 @@
 import type { Run } from "../shared/types";
+import { ListSkeleton } from "./Skeleton";
 import { localTimestamp } from "./time";
 import { usePolling } from "./usePolling";
 export function Runs() {
@@ -16,7 +17,7 @@ export function Runs() {
           </button>
         </div>
       )}
-      {!data && !error && <p role="status">Loading runs…</p>}
+      {!data && !error && <ListSkeleton />}
       <p className="muted">
         Updates every two seconds. Previews contain safe event summaries;
         generated text and arbitrary output are redacted.

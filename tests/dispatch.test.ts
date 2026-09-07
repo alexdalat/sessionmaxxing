@@ -1,5 +1,11 @@
 import { expect, it } from "vitest";
-import { planDispatch, taskGate, weeklyPace } from "../server/dispatch.js";
+import {
+  planDispatch,
+  taskGate,
+  USAGE_PREDATES_RUN_REASON,
+  weeklyPace,
+} from "../server/dispatch.js";
+import type { QuietRanking } from "../server/quiet-hours.js";
 import { DEFAULT_DISPATCH_SETTINGS } from "../shared/types.js";
 import { usageSnapshot } from "./helpers";
 
@@ -8,7 +14,8 @@ const plan = (
   snapshot: ReturnType<typeof usageSnapshot> | null,
   error: string | null = null,
   settings = DEFAULT_DISPATCH_SETTINGS,
-) => planDispatch(settings, { snapshot, error }, now);
+  ranking?: QuietRanking,
+) => planDispatch(settings, { snapshot, error }, now, ranking);
 
 it("measures weekly pace as the elapsed share of the seven-day window", () => {
   expect(weeklyPace("2026-09-13T12:00:00Z", now)).toBe(0);
@@ -63,8 +70,8 @@ it("holds Claude tasks when the session exceeds its ceiling and treats an expire
   expect(expired.providers.claude.status).toBe("ready");
   expect(
     plan(usageSnapshot(), null, {
+      ...DEFAULT_DISPATCH_SETTINGS,
       sessionReservePercent: 90,
-      weeklyMarginPercent: 10,
     }).providers.claude.reason,
   ).toMatch(/Session at 16%, above the 10% ceiling/);
 });
@@ -112,27 +119,156 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
     pace: 50,
     ok: false,
   });
-  const base = { status: "pending" as const, provider: "claude" as const };
-  expect(taskGate({ ...base, model: "opus" }, planning).status).toBe("ready");
-  expect(taskGate({ ...base, model: "claude-fable-5-1" }, planning)).toEqual({
+  const base = {
+    status: "pending" as const,
+    provider: "claude" as const,
+    preferredWindowStart: 9,
+    earliestStart: null,
+  };
+  expect(taskGate({ ...base, model: "opus" }, planning, now).status).toBe(
+    "ready",
+  );
+  expect(
+    taskGate({ ...base, model: "claude-fable-5-1" }, planning, now),
+  ).toEqual({
     status: "waiting",
     reason: "Fable weekly at 70%, above the 60% ceiling",
   });
   expect(
-    taskGate({ ...base, provider: "codex", model: "gpt-6-astra" }, planning),
+    taskGate(
+      { ...base, provider: "codex", model: "gpt-6-astra" },
+      planning,
+      now,
+    ),
   ).toEqual({
     status: "ready",
     reason: "Codex runs do not touch Claude usage",
   });
   expect(
-    taskGate({ ...base, status: "running", model: "opus" }, planning),
+    taskGate({ ...base, status: "running", model: "opus" }, planning, now),
   ).toMatchObject({ status: "running" });
   expect(
-    taskGate({ ...base, status: "failed", model: "opus" }, planning),
+    taskGate({ ...base, status: "failed", model: "opus" }, planning, now),
   ).toEqual({ status: "finished", reason: "failed" });
   const noFable = plan(usageSnapshot({ fable: null }));
   expect(noFable.fable).toBeNull();
-  expect(taskGate({ ...base, model: "claude-fable-5-1" }, noFable).status).toBe(
-    "ready",
+  expect(
+    taskGate({ ...base, model: "claude-fable-5-1" }, noFable, now).status,
+  ).toBe("ready");
+});
+
+it("ranks quiet start hours, marks whether now is inside one, and names the next one", () => {
+  const ranking = {
+    ranking: [3, 2, 1, 0, 23, 22, 21, 20, 4, 5, 6],
+    error: null,
+  };
+  const eightAm = plan(
+    usageSnapshot(),
+    null,
+    {
+      ...DEFAULT_DISPATCH_SETTINGS,
+      quietStartHours: 8,
+    },
+    ranking,
   );
+  expect(eightAm.quiet).toEqual({
+    startHours: [0, 1, 2, 3, 20, 21, 22, 23],
+    error: null,
+    nowHour: 8,
+    active: false,
+    nextStartHour: 20,
+  });
+  const task = {
+    status: "pending" as const,
+    provider: "claude" as const,
+    model: "opus",
+    preferredWindowStart: null,
+    earliestStart: null,
+  };
+  expect(taskGate(task, eightAm, now)).toEqual({
+    status: "waiting",
+    reason: "Outside quiet hours · next 8 PM",
+  });
+  expect(
+    taskGate({ ...task, preferredWindowStart: 9 }, eightAm, now).status,
+  ).toBe("ready");
+  expect(
+    taskGate({ ...task, provider: "codex", model: "gpt-6-astra" }, eightAm, now)
+      .status,
+  ).toBe("ready");
+  const notComputed = plan(usageSnapshot(), null, DEFAULT_DISPATCH_SETTINGS, {
+    ranking: null,
+    error: "Local history could not be read.",
+  });
+  expect(taskGate(task, notComputed, now)).toEqual({
+    status: "waiting",
+    reason: "Quiet hours not computed yet (Local history could not be read.)",
+  });
+  const off = plan(
+    usageSnapshot(),
+    null,
+    {
+      ...DEFAULT_DISPATCH_SETTINGS,
+      quietHoursOnly: false,
+    },
+    ranking,
+  );
+  expect(taskGate(task, off, now).status).toBe("ready");
+  const midnight = planDispatch(
+    DEFAULT_DISPATCH_SETTINGS,
+    { snapshot: usageSnapshot(), error: null },
+    new Date("2026-09-06T05:30:00Z"),
+    ranking,
+  );
+  expect(midnight.quiet).toMatchObject({
+    nowHour: 1,
+    active: true,
+    nextStartHour: 2,
+  });
+  expect(
+    taskGate(task, midnight, new Date("2026-09-06T05:30:00Z")).status,
+  ).toBe("ready");
+});
+
+it("distrusts official usage fetched before the last run ended", () => {
+  const snapshot = usageSnapshot({ fetchedAt: "2026-09-06T11:55:00Z" });
+  const predates = planDispatch(
+    DEFAULT_DISPATCH_SETTINGS,
+    { snapshot, error: null },
+    now,
+    undefined,
+    "2026-09-06T11:56:00Z",
+  );
+  expect(predates.providers.claude).toEqual({
+    status: "waiting",
+    reason: USAGE_PREDATES_RUN_REASON,
+  });
+  expect(predates.providers.codex.status).toBe("ready");
+  const fresh = planDispatch(
+    DEFAULT_DISPATCH_SETTINGS,
+    { snapshot, error: null },
+    now,
+    undefined,
+    "2026-09-06T11:55:00Z",
+  );
+  expect(fresh.providers.claude.status).toBe("ready");
+});
+
+it("holds a task until its earliest start time and names that time", () => {
+  const planning = plan(usageSnapshot());
+  const task = {
+    status: "pending" as const,
+    provider: "claude" as const,
+    model: "opus",
+    preferredWindowStart: 9,
+    earliestStart: "2026-09-08T02:00:00Z",
+  };
+  expect(taskGate(task, planning, now)).toEqual({
+    status: "waiting",
+    reason: "Starts after Sep 7, 10:00 PM EDT",
+  });
+  expect(
+    taskGate({ ...task, earliestStart: "2026-09-05T02:00:00Z" }, planning, now)
+      .status,
+  ).toBe("ready");
 });

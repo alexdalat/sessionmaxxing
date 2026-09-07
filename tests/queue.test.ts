@@ -3,7 +3,7 @@ import { expect, it } from "vitest";
 import { QueueStore } from "../server/queue.js";
 import { taskInput, temporary } from "./helpers";
 
-it("atomically creates private queue state and persists tasks while excluding prompts from public views", async () => {
+it("atomically creates private queue state and persists tasks while including prompts and workdirs in public views", async () => {
   const temp = await temporary();
   try {
     const store = await QueueStore.open(temp.path);
@@ -14,9 +14,9 @@ it("atomically creates private queue state and persists tasks while excluding pr
       status: "pending",
       priority: 0,
     });
-    expect(JSON.stringify(store.snapshot())).not.toMatch(
-      /PRIVATE|prompt|whoami|[a-f\d]{8}-[a-f\d]{4}-/,
-    );
+    const snapshot = store.snapshot();
+    expect(snapshot.tasks[0].prompt).toBe(taskInput(temp.path).prompt);
+    expect(snapshot.tasks[0].workdir).toBe(temp.path);
     const disk = JSON.parse(await readFile(`${temp.path}/queue.json`, "utf8"));
     expect(disk.tasks[0].prompt).toContain("PRIVATE PROMPT");
     expect((await QueueStore.open(temp.path)).snapshot().tasks).toEqual(
@@ -93,8 +93,11 @@ it("edits pending tasks, preserves omitted prompts, serializes claims, retries f
     await store.finish(a.id, "failed");
     await store.retry(a.id);
     await store.claim(a.id);
+    await store.finish(a.id, "cancelled");
+    await store.retry(a.id);
+    await store.claim(a.id);
     await store.finish(a.id, "completed");
-    await expect(store.retry(a.id)).rejects.toThrow(/failed/);
+    await expect(store.retry(a.id)).rejects.toThrow(/failed or cancelled/);
     await store.delete(a.id);
     await store.delete(b.id);
     expect(store.snapshot().tasks).toHaveLength(0);
@@ -103,7 +106,7 @@ it("edits pending tasks, preserves omitted prompts, serializes claims, retries f
     await temp.cleanup();
   }
 });
-it("disables auto-dispatch and recovers interrupted tasks on restart without overwriting corrupt state", async () => {
+it("keeps auto-dispatch on and recovers interrupted tasks on restart without overwriting corrupt state", async () => {
   const { writeFile } = await import("node:fs/promises");
   const temp = await temporary();
   try {
@@ -113,7 +116,7 @@ it("disables auto-dispatch and recovers interrupted tasks on restart without ove
     await store.claim(task.id);
     const restarted = await QueueStore.open(temp.path);
     expect(restarted.snapshot()).toMatchObject({
-      autoDispatch: false,
+      autoDispatch: true,
       tasks: [{ status: "failed" }],
     });
     await writeFile(`${temp.path}/queue.json`, "{broken");
@@ -135,7 +138,7 @@ it("can reopen a task whose accepted working directory is the allowed home itsel
     await queue.create(taskInput("/home/user"));
     const reopened = await QueueStore.open(temp.path);
     const task = reopened.snapshot().tasks[0];
-    expect(task).not.toHaveProperty("workdir");
+    expect(task.workdir).toBe("/home/user");
     expect((await reopened.claim(task.id)).workdir).toBe("/home/user");
   } finally {
     await temp.cleanup();

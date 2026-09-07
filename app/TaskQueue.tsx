@@ -1,23 +1,21 @@
+"use client";
 import { useState } from "react";
 import type { PublicTask, QueueSnapshot, TaskInput } from "../shared/types";
 import { api } from "./api";
-import { TaskForm } from "./TaskForm";
+import { DispatchSettingsDialog } from "./DispatchSettingsDialog";
+import { displayOrder } from "./queueOrder";
+import { TaskListSkeleton } from "./Skeleton";
+import { TaskFormDialog } from "./TaskForm";
 import { hour, localTimestamp } from "./time";
 import { usePolling } from "./usePolling";
 
 const gateLabels = {
   ready: "Ready",
-  waiting: "Waiting for usage headroom",
+  waiting: "Waiting",
   running: "Running",
   finished: "Finished",
 };
-export function TaskQueue({
-  initialWindow,
-  onOpenDispatch,
-}: {
-  initialWindow?: number;
-  onOpenDispatch?: () => void;
-}) {
+export function TaskQueue() {
   const {
     data,
     error: loadError,
@@ -28,10 +26,12 @@ export function TaskQueue({
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<PublicTask>();
+  const [formOpen, setFormOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   async function mutate(
     path: string,
     method: string,
-    message: string,
+    message = "",
     body?: unknown,
   ) {
     setBusy(true);
@@ -61,19 +61,34 @@ export function TaskQueue({
       editing ? "Task updated." : "Task added.",
       input,
     );
-    if (saved) setEditing(undefined);
+    if (saved) {
+      setEditing(undefined);
+      setFormOpen(false);
+    }
     return saved;
+  }
+  function openAdd() {
+    setEditing(undefined);
+    setNotice("");
+    setFormOpen(true);
+  }
+  function closeForm() {
+    setFormOpen(false);
+    setEditing(undefined);
   }
   const pending = data?.tasks.filter((t) => t.status === "pending") ?? [];
   const running = data?.tasks.some((t) => t.status === "running");
-  const visibleTasks =
-    data?.tasks.filter(
-      (task) =>
-        filter === "all" ||
-        (filter === "finished"
-          ? !["pending", "running"].includes(task.status)
-          : task.status === "pending" && task.gate?.status === filter),
-    ) ?? [];
+  const ordered = displayOrder(data?.tasks ?? []);
+  const nextId = ordered.find(
+    (task) => task.status === "pending" && task.gate?.status === "ready",
+  )?.id;
+  const visibleTasks = ordered.filter(
+    (task) =>
+      filter === "all" ||
+      (filter === "finished"
+        ? !["pending", "running"].includes(task.status)
+        : task.status === "pending" && task.gate?.status === filter),
+  );
   function move(task: PublicTask, offset: number) {
     const ids = pending.map((t) => t.id);
     const index = ids.indexOf(task.id);
@@ -90,77 +105,74 @@ export function TaskQueue({
           </button>
         </div>
       )}
-      {!data && !loadError && <p role="status">Loading task queue…</p>}
       {notice && <p role="status">{notice}</p>}
-      <section className="panel">
-        <label className="toggle">
-          <input
-            type="checkbox"
-            checked={data?.autoDispatch ?? false}
-            disabled={!data || busy}
-            onChange={(e) =>
-              void mutate(
-                "/api/queue/auto",
-                "PUT",
-                e.target.checked
-                  ? "Auto-dispatch enabled."
-                  : "Auto-dispatch disabled.",
-                { enabled: e.target.checked },
-              )
-            }
-          />
-          Auto-dispatch
-        </label>
-        <p className="muted">
-          Runs one Ready task at a time in its preferred window while this
-          server is alive. Run now overrides usage headroom and schedule.
-        </p>
-        {data?.planning && (
-          <p className="dispatch-reason">
-            {data.planning.providers.claude.reason}
-          </p>
-        )}
-        {onOpenDispatch && (
-          <div className="actions">
-            <button type="button" onClick={onOpenDispatch}>
-              Dispatch settings
-            </button>
-          </div>
-        )}
-      </section>
       <section className="panel">
         <div className="section-heading queue-heading">
           <h2>Queued tasks</h2>
-          <label>
-            Task filter
+          <button
+            type="button"
+            role="switch"
+            aria-checked={data?.autoDispatch ?? false}
+            disabled={!data || busy}
+            className="queue-switch"
+            onClick={() =>
+              void mutate("/api/queue/auto", "PUT", "", {
+                enabled: !(data?.autoDispatch ?? false),
+              })
+            }
+          >
+            {data?.autoDispatch ? "Queue on" : "Queue off"}
+          </button>
+          <span className="queue-tools">
             <select
+              aria-label="Task filter"
               value={filter}
               onChange={(event) => setFilter(event.target.value)}
             >
               <option value="all">All</option>
               <option value="ready">Ready</option>
-              <option value="waiting">Waiting for headroom</option>
+              <option value="waiting">Waiting</option>
               <option value="finished">Finished</option>
             </select>
-          </label>
-          <span className="muted">
-            {pending.length} pending · lower priority runs first
+            <button
+              type="button"
+              disabled={!data?.planning}
+              onClick={() => setSettingsOpen(true)}
+            >
+              Settings
+            </button>
+            <button type="button" className="primary" onClick={openAdd}>
+              Add task
+            </button>
           </span>
         </div>
-        {visibleTasks.length ? (
+        {!data && !loadError ? (
+          <TaskListSkeleton />
+        ) : visibleTasks.length ? (
           visibleTasks.map((task) => (
             <article className="task-card" key={task.id}>
               <div>
-                <h3>{task.title}</h3>
+                <div className="task-title">
+                  <h3>{task.title}</h3>
+                  <span className={`status ${task.status}`}>{task.status}</span>
+                  {task.id === nextId && (
+                    <span className="gate gate-ready">Next</span>
+                  )}
+                </div>
                 <p>
                   {task.provider} · {task.model}
                 </p>
-                <span className={`status ${task.status}`}>{task.status}</span>
+                <p className="muted task-workdir">{task.workdir}</p>
+                <details>
+                  <summary>Prompt</summary>
+                  <pre className="task-prompt">{task.prompt}</pre>
+                </details>
                 <div className="task-schedule">
                   <span>Priority {task.priority}</span>
+                  <span>max {task.maxTurns} turns</span>
                   <span>
                     {task.preferredWindowStart === null
-                      ? "Any time"
+                      ? "Any quiet hour"
                       : `${hour(task.preferredWindowStart)} → ${hour((task.preferredWindowStart + 5) % 24)} Eastern`}
                   </span>
                   {task.earliestStart && (
@@ -169,7 +181,6 @@ export function TaskQueue({
                 </div>
               </div>
               <div className="task-budget">
-                <h3>Dispatch</h3>
                 <strong>
                   {task.gate ? gateLabels[task.gate.status] : "Unavailable"}
                 </strong>
@@ -199,6 +210,7 @@ export function TaskQueue({
                       onClick={() => {
                         setEditing(task);
                         setNotice("");
+                        setFormOpen(true);
                       }}
                     >
                       Edit
@@ -237,7 +249,7 @@ export function TaskQueue({
                     Cancel
                   </button>
                 )}
-                {task.status === "failed" && (
+                {(task.status === "failed" || task.status === "cancelled") && (
                   <button
                     type="button"
                     disabled={busy}
@@ -280,14 +292,23 @@ export function TaskQueue({
           </p>
         )}
       </section>
-      <TaskForm
-        key={editing?.id ?? `new-${initialWindow}`}
+      <TaskFormDialog
+        key={editing?.id ?? "new"}
+        open={formOpen}
         task={editing}
-        initialWindow={initialWindow}
         onSave={save}
         busy={busy}
-        onCancel={editing ? () => setEditing(undefined) : undefined}
+        onClose={closeForm}
       />
+      {data?.planning && (
+        <DispatchSettingsDialog
+          key={String(settingsOpen)}
+          open={settingsOpen}
+          settings={data.planning.settings}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={reload}
+        />
+      )}
     </>
   );
 }

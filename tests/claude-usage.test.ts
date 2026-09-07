@@ -26,7 +26,16 @@ const credentials = (patch: object = {}) =>
 afterEach(() => vi.restoreAllMocks());
 
 it("parses the five-hour, weekly and Fable windows from the OAuth usage payload", async () => {
-  expect(parseUsageResponse(await fixture(), now)).toEqual(usageSnapshot());
+  expect(parseUsageResponse(await fixture(), now, "max")).toEqual(
+    usageSnapshot(),
+  );
+});
+
+it("parses a plan without a Fable window into session and weekly only", async () => {
+  const { limits: _limits, ...body } = await fixture();
+  expect(parseUsageResponse(body, now, "pro")).toEqual(
+    usageSnapshot({ plan: "pro", fable: null }),
+  );
 });
 
 it("reports a missing Fable window as null and rejects payloads without the core windows", async () => {
@@ -60,6 +69,36 @@ it("sends the Claude Code OAuth token with the required beta and user-agent head
       "anthropic-beta": "oauth-2025-04-20",
       "User-Agent": expect.stringMatching(/^claude-code\//),
     });
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("carries the credential subscription type into the snapshot plan", async () => {
+  const temp = await temporary();
+  try {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: fixture,
+    })) as unknown as typeof fetch;
+    await writeFile(
+      `${temp.path}/.credentials.json`,
+      credentials({ subscriptionType: "pro" }),
+    );
+    expect((await officialUsageFetcher(temp.path, fetchImpl)(now)).plan).toBe(
+      "pro",
+    );
+    const { subscriptionType: _dropped, ...withoutPlan } = JSON.parse(
+      credentials(),
+    ).claudeAiOauth;
+    await writeFile(
+      `${temp.path}/.credentials.json`,
+      JSON.stringify({ claudeAiOauth: withoutPlan }),
+    );
+    expect(
+      (await officialUsageFetcher(temp.path, fetchImpl)(now)).plan,
+    ).toBeNull();
   } finally {
     await temp.cleanup();
   }
@@ -133,6 +172,7 @@ it("keeps the last good snapshot when a refresh fails, records samples, and coal
         start: "2026-09-06T11:09:00.000Z",
         end: "2026-09-06T16:09:00.000Z",
         peakPercent: 16,
+        activeMinutes: 0,
         samples: 1,
       },
     ]);

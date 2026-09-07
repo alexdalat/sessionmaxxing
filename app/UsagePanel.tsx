@@ -6,6 +6,7 @@ import {
   type ClaudeBudgets,
   type OfficialUsage,
   type PlanningSnapshot,
+  planLabel,
   type UsageState,
 } from "../shared/types";
 import { formatRemaining } from "./duration";
@@ -52,7 +53,7 @@ function Row({
     gate?.pace !== null && gate?.pace !== undefined
       ? `pace ${percent(gate.pace)}`
       : "",
-    gate ? `dispatch ceiling ${percent(gate.ceiling)}` : "",
+    gate ? `auto-dispatch limit ${percent(gate.ceiling)}` : "",
     localLine(budgets, bucket),
   ]
     .filter(Boolean)
@@ -93,7 +94,7 @@ function Row({
         {gate && (
           <div
             className="usage-mark usage-ceiling"
-            title={`Dispatch ceiling ${percent(gate.ceiling)}`}
+            title={`Auto-dispatch limit ${percent(gate.ceiling)}`}
             style={{ left: `${gate.ceiling}%` }}
           />
         )}
@@ -136,10 +137,14 @@ export function UsagePanel({
         fable: planning.fable,
       }
     : undefined;
+  const heading = `${planLabel(snapshot?.plan ?? null)} usage`;
+  const buckets = CLAUDE_BUCKETS.filter(
+    (bucket) => bucket !== "fable" || (snapshot?.fable ?? null) !== null,
+  );
   return (
-    <section className="panel usage-panel" aria-label="Claude Max usage">
+    <section className="panel usage-panel" aria-label={heading}>
       <div className="section-heading">
-        <h2>Claude Max usage</h2>
+        <h2>{heading}</h2>
         <span className="usage-meta">
           <span className="muted">
             {snapshot
@@ -156,7 +161,7 @@ export function UsagePanel({
           {usage.error}
         </p>
       )}
-      {CLAUDE_BUCKETS.map((bucket) => (
+      {buckets.map((bucket) => (
         <Row
           key={bucket}
           bucket={bucket}
@@ -168,7 +173,7 @@ export function UsagePanel({
       ))}
       <ul className="usage-legend" aria-hidden="true">
         <li className="key-pace">Pace</li>
-        <li className="key-ceiling">Dispatch ceiling</li>
+        <li className="key-ceiling">Auto-dispatch limit</li>
       </ul>
     </section>
   );

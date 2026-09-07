@@ -8,7 +8,11 @@
       "!!.pnpm-store",
       "!!data",
       "!!artifacts",
-      "!!tests/.tmp"
+      "!!tests/.tmp",
+      "!!.claude",
+      "!!.next",
+      "!!out",
+      "!!next-env.d.ts"
     ]
   },
   "formatter": { "indentStyle": "space" },

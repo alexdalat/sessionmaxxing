@@ -178,3 +178,149 @@ it("recognizes Fable model identifiers so Fable-specific usage can be estimated"
     "claude-fable-5",
   ]);
 });
+
+describe("incremental history reader", () => {
+  const MODEL = "claude-opus-4-6";
+  const assistantLine = (
+    id: string,
+    project: string,
+    timestamp: string,
+    outputTokens: number,
+  ) =>
+    `${JSON.stringify({
+      type: "assistant",
+      timestamp,
+      cwd: `/home/user/${project}`,
+      message: {
+        id,
+        model: MODEL,
+        content: "PRIVATE TEXT",
+        usage: { output_tokens: outputTokens },
+      },
+    })}\n`;
+  const expectedEvent = (
+    project: string,
+    timestamp: string,
+    outputTokens: number,
+  ) => ({
+    timestamp,
+    project,
+    model: MODEL,
+    inputTokens: 0,
+    outputTokens,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  });
+  async function fixture() {
+    const { mkdir, mkdtemp, writeFile } = await import("node:fs/promises");
+    await mkdir("tests/.tmp", { recursive: true });
+    const root = await mkdtemp("tests/.tmp/reader-");
+    await mkdir(`${root}/projects/alpha`, { recursive: true });
+    await mkdir(`${root}/projects/beta`, { recursive: true });
+    await writeFile(
+      `${root}/projects/alpha/a.jsonl`,
+      assistantLine("m1", "alpha", "2026-09-05T15:00:00Z", 2),
+    );
+    await writeFile(
+      `${root}/projects/beta/b.jsonl`,
+      assistantLine("m2", "beta", "2026-09-05T16:00:00Z", 3),
+    );
+    await writeFile(
+      `${root}/history.jsonl`,
+      `${JSON.stringify({ display: "PRIVATE HISTORY", timestamp: 1 })}\n`,
+    );
+    return root;
+  }
+  async function withFixture(run: (root: string) => Promise<void>) {
+    const { rm } = await import("node:fs/promises");
+    const root = await fixture();
+    try {
+      await run(root);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }
+
+  it("returns the same data on a second read when no file changed", async () => {
+    const { createHistoryReader } = await import("../server/history.js");
+    await withFixture(async (root) => {
+      const read = createHistoryReader(root);
+      const first = await read();
+      expect(first.events).toEqual([
+        expectedEvent("alpha", "2026-09-05T15:00:00.000Z", 2),
+        expectedEvent("beta", "2026-09-05T16:00:00.000Z", 3),
+      ]);
+      expect(first.health).toEqual({
+        files: 3,
+        lines: 3,
+        warnings: 0,
+        historyEntries: 1,
+      });
+      expect(await read()).toEqual(first);
+    });
+  });
+
+  it("picks up a line appended to one transcript and keeps events from untouched files", async () => {
+    const { appendFile } = await import("node:fs/promises");
+    const { createHistoryReader } = await import("../server/history.js");
+    await withFixture(async (root) => {
+      const read = createHistoryReader(root);
+      await read();
+      await appendFile(
+        `${root}/projects/alpha/a.jsonl`,
+        assistantLine("m3", "alpha", "2026-09-05T15:30:00Z", 5),
+      );
+      const result = await read();
+      expect(result.events).toEqual([
+        expectedEvent("alpha", "2026-09-05T15:00:00.000Z", 2),
+        expectedEvent("alpha", "2026-09-05T15:30:00.000Z", 5),
+        expectedEvent("beta", "2026-09-05T16:00:00.000Z", 3),
+      ]);
+      expect(result.health).toEqual({
+        files: 3,
+        lines: 4,
+        warnings: 0,
+        historyEntries: 1,
+      });
+    });
+  });
+
+  it("drops the events of a transcript that was deleted between reads", async () => {
+    const { rm } = await import("node:fs/promises");
+    const { createHistoryReader } = await import("../server/history.js");
+    await withFixture(async (root) => {
+      const read = createHistoryReader(root);
+      await read();
+      await rm(`${root}/projects/beta/b.jsonl`);
+      const result = await read();
+      expect(result.events).toEqual([
+        expectedEvent("alpha", "2026-09-05T15:00:00.000Z", 2),
+      ]);
+      expect(result.health).toEqual({
+        files: 2,
+        lines: 2,
+        warnings: 0,
+        historyEntries: 1,
+      });
+    });
+  });
+
+  it("dedups a message id shared by two files when only one of them was reparsed", async () => {
+    const { appendFile } = await import("node:fs/promises");
+    const { createHistoryReader } = await import("../server/history.js");
+    await withFixture(async (root) => {
+      const read = createHistoryReader(root);
+      await read();
+      await appendFile(
+        `${root}/projects/beta/b.jsonl`,
+        assistantLine("m1", "beta", "2026-09-05T15:00:00Z", 7),
+      );
+      const result = await read();
+      expect(result.events).toEqual([
+        expectedEvent("beta", "2026-09-05T15:00:00.000Z", 7),
+        expectedEvent("beta", "2026-09-05T16:00:00.000Z", 3),
+      ]);
+      expect(result.health.files).toBe(3);
+    });
+  });
+});
