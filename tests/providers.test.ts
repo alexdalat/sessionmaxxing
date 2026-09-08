@@ -12,7 +12,8 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
     createdAt: new Date().toISOString(),
     model: "opus",
   };
-  launchProvider(base, spawn);
+  const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
+  launchProvider(base, sessionId, spawn);
   expect(spawn).toHaveBeenLastCalledWith(
     "claude",
     [
@@ -26,6 +27,8 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
       "--dangerously-skip-permissions",
       "--max-turns",
       "10",
+      "--session-id",
+      sessionId,
     ],
     {
       cwd: "/home/user",
@@ -34,7 +37,11 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  launchProvider({ ...base, provider: "codex", model: "gpt-6-astra" }, spawn);
+  launchProvider(
+    { ...base, provider: "codex", model: "gpt-6-astra" },
+    sessionId,
+    spawn,
+  );
   expect(spawn).toHaveBeenLastCalledWith(
     "codex",
     [
@@ -66,6 +73,11 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
       call[1].includes("--dangerously-skip-permissions"),
     ),
   ).toEqual([true, false]);
+  expect(
+    spawn.mock.calls.map((call) => call[1].includes("--session-id")),
+  ).toEqual([true, false]);
+  launchProvider(base, null, spawn);
+  expect(spawn.mock.lastCall?.[1]).not.toContain("--session-id");
 });
 it("bounds previews and redacts arbitrary text, credentials, environment values, IDs, and message contents across chunks", async () => {
   const { OutputPreview } = await import("../server/output.js");

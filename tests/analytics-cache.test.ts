@@ -3,7 +3,7 @@ import {
   analyticsCacheKey,
   readCachedAnalytics,
   writeCachedAnalytics,
-} from "../app/analyticsCache.js";
+} from "../app/lib/analyticsCache.js";
 import { aggregate } from "../server/analytics.js";
 import type { ActivityEvent } from "../shared/types.js";
 
@@ -25,6 +25,7 @@ const event: ActivityEvent = {
   timestamp: "2026-09-05T14:31:02.104Z",
   project: "-home-user-workspace-claude-capacity-dashboard",
   model: "claude-opus-4-5-20251101",
+  source: "local",
   inputTokens: 12,
   outputTokens: 431,
   cacheReadTokens: 118_402,

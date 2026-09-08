@@ -1,9 +1,10 @@
 "use client";
-import type { QueueSnapshot } from "../shared/types";
-import { Overview } from "./Overview";
-import { OverviewSkeleton } from "./Skeleton";
-import { useAnalytics } from "./useAnalytics";
-import { usePolling } from "./usePolling";
+import { Overview } from "@/app/components/overview/Overview";
+import { OverviewSkeleton } from "@/app/components/Skeletons";
+import { Button } from "@/app/components/ui/button";
+import { useAnalytics } from "@/app/hooks/useAnalytics";
+import { usePolling } from "@/app/hooks/usePolling";
+import type { QueueSnapshot } from "@/shared/types";
 
 export default function OverviewPage() {
   const { analytics, error, loading, refresh } = useAnalytics();
@@ -16,9 +17,9 @@ export default function OverviewPage() {
       {error && (
         <div className="error" role="alert">
           {error}{" "}
-          <button type="button" onClick={refresh}>
+          <Button type="button" variant="outline" size="sm" onClick={refresh}>
             Try again
-          </button>
+          </Button>
         </div>
       )}
       {loading && <OverviewSkeleton />}

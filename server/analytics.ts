@@ -1,5 +1,7 @@
 import {
+  ACTIVITY_SOURCES,
   type ActivityEvent,
+  type ActivitySource,
   type Analytics,
   BLOCK_MINUTES,
   type ClaudeBudgets,
@@ -106,6 +108,14 @@ export function aggregate(
     },
     models: mix(events, "model"),
     projects: mix(events, "project"),
+    sources: ACTIVITY_SOURCES.map((source) => {
+      const matching = events.filter((event) => event.source === source);
+      return {
+        source,
+        ...count(matching),
+        outputTokens: matching.reduce((n, e) => n + e.outputTokens, 0),
+      };
+    }),
     health: history.health,
   };
 }
@@ -211,10 +221,14 @@ export function localStart(date: string, hour: number): number {
     }) ?? candidates[candidates.length - 1]
   );
 }
+// Quiet hours describe when the person is not using Claude Code, so dispatched
+// and unattributed activity must not make a window look busy.
+const INTERACTIVE_SOURCE: ActivitySource = "local";
 function opportunities(events: ActivityEvent[], now: Date) {
   const today = localParts(now).date;
   const earliest = localStart(shiftDate(today, -PLANNER_DAYS - 1), 0);
   const recent = events
+    .filter((e) => e.source === INTERACTIVE_SOURCE)
     .map((e) => Date.parse(e.timestamp))
     .filter((time) => time >= earliest && time <= now.getTime());
   return Array.from({ length: 24 }, (_, startHour) => {

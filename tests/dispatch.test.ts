@@ -40,7 +40,7 @@ it("waits while official usage is missing or stale and says why", () => {
   expect(stale.providers.claude).toEqual({
     status: "waiting",
     reason:
-      "Official usage is 20 min old (Anthropic usage endpoint returned HTTP 503.)",
+      "Official usage is 20 min old · refresh to retry (Anthropic usage endpoint returned HTTP 503.)",
   });
   expect(stale.usageError).toMatch(/503/);
 });
@@ -59,7 +59,7 @@ it("holds Claude tasks when the session exceeds its ceiling and treats an expire
   });
   expect(busy.providers.claude).toEqual({
     status: "waiting",
-    reason: "Session at 80%, above the 75% ceiling",
+    reason: "Session 80%, over the 75% queue cutoff",
   });
   const expired = plan(
     usageSnapshot({
@@ -73,7 +73,7 @@ it("holds Claude tasks when the session exceeds its ceiling and treats an expire
       ...DEFAULT_DISPATCH_SETTINGS,
       sessionReservePercent: 90,
     }).providers.claude.reason,
-  ).toMatch(/Session at 16%, above the 10% ceiling/);
+  ).toMatch(/Session 16%, over the 10% queue cutoff/);
 });
 
 it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped at the hard ceiling", () => {
@@ -88,7 +88,7 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
     ok: false,
   });
   expect(ahead.providers.claude.reason).toBe(
-    "Weekly at 61%, above the 60% ceiling (pace 50% + 10% margin)",
+    "Weekly 61%, over the 60% queue cutoff (pace 50% + 10% margin)",
   );
   const ready = plan(
     usageSnapshot({ weekly: { percent: 59, resetsAt: halfway } }),
@@ -122,7 +122,7 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
   const base = {
     status: "pending" as const,
     provider: "claude" as const,
-    preferredWindowStart: 9,
+    preferredWindowStart: 8,
     earliestStart: null,
   };
   expect(taskGate({ ...base, model: "opus" }, planning, now).status).toBe(
@@ -132,7 +132,8 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
     taskGate({ ...base, model: "claude-fable-5-1" }, planning, now),
   ).toEqual({
     status: "waiting",
-    reason: "Fable weekly at 70%, above the 60% ceiling",
+    reason: "Fable weekly 70%, over the 60% queue cutoff",
+    eligibleAt: now.toISOString(),
   });
   expect(
     taskGate(
@@ -142,14 +143,15 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
     ),
   ).toEqual({
     status: "ready",
-    reason: "Codex runs do not touch Claude usage",
+    reason: "Codex tasks never wait on Claude usage",
+    eligibleAt: now.toISOString(),
   });
   expect(
     taskGate({ ...base, status: "running", model: "opus" }, planning, now),
-  ).toMatchObject({ status: "running" });
+  ).toMatchObject({ status: "running", eligibleAt: null });
   expect(
     taskGate({ ...base, status: "failed", model: "opus" }, planning, now),
-  ).toEqual({ status: "finished", reason: "failed" });
+  ).toEqual({ status: "finished", reason: "failed", eligibleAt: null });
   const noFable = plan(usageSnapshot({ fable: null }));
   expect(noFable.fable).toBeNull();
   expect(
@@ -188,9 +190,10 @@ it("ranks quiet start hours, marks whether now is inside one, and names the next
   expect(taskGate(task, eightAm, now)).toEqual({
     status: "waiting",
     reason: "Outside quiet hours · next 8 PM",
+    eligibleAt: "2026-09-07T00:00:00.000Z",
   });
   expect(
-    taskGate({ ...task, preferredWindowStart: 9 }, eightAm, now).status,
+    taskGate({ ...task, preferredWindowStart: 8 }, eightAm, now).status,
   ).toBe("ready");
   expect(
     taskGate({ ...task, provider: "codex", model: "gpt-6-astra" }, eightAm, now)
@@ -203,13 +206,14 @@ it("ranks quiet start hours, marks whether now is inside one, and names the next
   expect(taskGate(task, notComputed, now)).toEqual({
     status: "waiting",
     reason: "Quiet hours not computed yet (Local history could not be read.)",
+    eligibleAt: null,
   });
   const off = plan(
     usageSnapshot(),
     null,
     {
       ...DEFAULT_DISPATCH_SETTINGS,
-      quietHoursOnly: false,
+      busyHoursReservePercent: 25,
     },
     ranking,
   );
@@ -260,15 +264,166 @@ it("holds a task until its earliest start time and names that time", () => {
     status: "pending" as const,
     provider: "claude" as const,
     model: "opus",
-    preferredWindowStart: 9,
+    preferredWindowStart: 8,
     earliestStart: "2026-09-08T02:00:00Z",
   };
   expect(taskGate(task, planning, now)).toEqual({
     status: "waiting",
     reason: "Starts after Sep 7, 10:00 PM EDT",
+    eligibleAt: "2026-09-08T12:00:00.000Z",
   });
   expect(
     taskGate({ ...task, earliestStart: "2026-09-05T02:00:00Z" }, planning, now)
       .status,
   ).toBe("ready");
+});
+
+const pending = {
+  status: "pending" as const,
+  provider: "claude" as const,
+  model: "opus",
+  preferredWindowStart: null,
+  earliestStart: null,
+};
+const quietRanking = { ranking: [3, 2, 1, 0, 23, 22, 21, 20], error: null };
+
+it("becomes eligible at its earliest start, or at the next quiet hour after it", () => {
+  const fiveAmWednesday = "2026-09-09T09:00:00Z";
+  const noQuiet = plan(usageSnapshot(), null, {
+    ...DEFAULT_DISPATCH_SETTINGS,
+    busyHoursReservePercent: 25,
+  });
+  expect(
+    taskGate({ ...pending, earliestStart: fiveAmWednesday }, noQuiet, now)
+      .eligibleAt,
+  ).toBe("2026-09-09T09:00:00.000Z");
+  const quiet = plan(
+    usageSnapshot(),
+    null,
+    DEFAULT_DISPATCH_SETTINGS,
+    quietRanking,
+  );
+  expect(
+    taskGate({ ...pending, earliestStart: fiveAmWednesday }, quiet, now)
+      .eligibleAt,
+  ).toBe("2026-09-10T00:00:00.000Z");
+  const smallHours = plan(
+    usageSnapshot(),
+    null,
+    { ...DEFAULT_DISPATCH_SETTINGS, quietStartHours: 3 },
+    quietRanking,
+  );
+  expect(
+    taskGate({ ...pending, earliestStart: fiveAmWednesday }, smallHours, now)
+      .eligibleAt,
+  ).toBe("2026-09-10T05:00:00.000Z");
+});
+
+it("holds a task outside its preferred window, naming the window and its next start", () => {
+  const planning = plan(usageSnapshot());
+  expect(
+    taskGate({ ...pending, preferredWindowStart: 13 }, planning, now),
+  ).toEqual({
+    status: "waiting",
+    reason: "Outside window 1 PM → 6 PM",
+    eligibleAt: "2026-09-06T17:00:00.000Z",
+  });
+  expect(
+    taskGate({ ...pending, preferredWindowStart: 22 }, planning, now),
+  ).toMatchObject({
+    reason: "Outside window 10 PM → 3 AM",
+    eligibleAt: "2026-09-07T02:00:00.000Z",
+  });
+  expect(
+    taskGate({ ...pending, preferredWindowStart: 4 }, planning, now),
+  ).toMatchObject({ status: "ready", eligibleAt: now.toISOString() });
+});
+
+it("marks a task that can start right now as eligible now", () => {
+  const planning = plan(usageSnapshot(), null, {
+    ...DEFAULT_DISPATCH_SETTINGS,
+    busyHoursReservePercent: 25,
+  });
+  expect(taskGate(pending, planning, now)).toEqual({
+    status: "ready",
+    reason: "Session 16% of 75% · Weekly 2% of 12.5%",
+    eligibleAt: now.toISOString(),
+  });
+});
+
+const splitReserves = {
+  ...DEFAULT_DISPATCH_SETTINGS,
+  sessionReservePercent: 10,
+  busyHoursReservePercent: 70,
+  quietStartHours: 2,
+};
+const busySession = usageSnapshot({
+  session: { percent: 40, resetsAt: "2026-09-06T16:09:00.000Z" },
+});
+
+it("holds the session to the busy-hours reserve outside quiet hours", () => {
+  const planning = plan(busySession, null, splitReserves, {
+    ranking: [0, 1, 8, 9],
+    error: null,
+  });
+  expect(planning.quiet.active).toBe(false);
+  expect(planning.session).toEqual({
+    percent: 40,
+    ceiling: 30,
+    pace: null,
+    ok: false,
+  });
+  expect(planning.providers.claude).toEqual({
+    status: "waiting",
+    reason: "Session 40%, over the 30% queue cutoff (busy hours)",
+  });
+  expect(taskGate(pending, planning, now)).toEqual({
+    status: "waiting",
+    reason: "Session 40%, over the 30% queue cutoff (busy hours)",
+    eligibleAt: now.toISOString(),
+  });
+});
+
+it("holds the session to the quiet-hours reserve inside quiet hours", () => {
+  const planning = plan(busySession, null, splitReserves, {
+    ranking: [8, 9, 0, 1],
+    error: null,
+  });
+  expect(planning.quiet.active).toBe(true);
+  expect(planning.session).toEqual({
+    percent: 40,
+    ceiling: 90,
+    pace: null,
+    ok: true,
+  });
+  expect(taskGate(pending, planning, now)).toEqual({
+    status: "ready",
+    reason: "Session 40% of 90% · Weekly 2% of 12.5%",
+    eligibleAt: now.toISOString(),
+  });
+});
+
+it("applies the busy-hours reserve while the quiet ranking is still null", () => {
+  const planning = plan(busySession, null, splitReserves);
+  expect(planning.quiet.startHours).toBeNull();
+  expect(planning.session.ceiling).toBe(30);
+  expect(planning.providers.claude).toEqual({
+    status: "waiting",
+    reason: "Session 40%, over the 30% queue cutoff (busy hours)",
+  });
+});
+
+it("keeps a task without a preferred window waiting for quiet hours when the busy reserve is full", () => {
+  const planning = plan(
+    busySession,
+    null,
+    { ...DEFAULT_DISPATCH_SETTINGS, quietStartHours: 8 },
+    quietRanking,
+  );
+  expect(planning.session.ceiling).toBe(75);
+  expect(taskGate(pending, planning, now)).toEqual({
+    status: "waiting",
+    reason: "Outside quiet hours · next 8 PM",
+    eligibleAt: "2026-09-07T00:00:00.000Z",
+  });
 });

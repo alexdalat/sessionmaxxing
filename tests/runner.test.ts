@@ -1,10 +1,12 @@
-import { readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
 import { expect, it, vi } from "vitest";
 import { planDispatch } from "../server/dispatch.js";
 import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
-import { DEFAULT_DISPATCH_SETTINGS } from "../shared/types.js";
+import { DEFAULT_DISPATCH_SETTINGS, type Task } from "../shared/types.js";
 import { fakeChild, taskInput, temporary } from "./helpers";
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 it("runs one task at a time and persists safe run metadata and redacted logs on completion", async () => {
   const temp = await temporary();
@@ -242,6 +244,110 @@ it("persists bounded redacted previews while a provider is still running", async
       await runner.waitForIdle();
       await runner.close();
     }
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("launches a Claude run under a generated session id it persists but never lists", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    const child = fakeChild();
+    const launch = vi.fn<
+      (task: Task, sessionId: string | null) => typeof child
+    >(() => child);
+    const runner = await Runner.open(store, temp.path, { launch });
+    const run = await runner.start(task.id);
+    const sessionId = launch.mock.calls[0][1];
+    expect(sessionId).toMatch(UUID);
+    const metadata = JSON.parse(
+      await readFile(`${temp.path}/runs/${run.id}.json`, "utf8"),
+    );
+    expect(metadata.sessionId).toBe(sessionId);
+    expect(Object.keys(runner.list()[0])).not.toContain("sessionId");
+    expect(JSON.stringify(runner.list())).not.toContain(sessionId);
+    expect([...runner.dispatchedSessions()]).toEqual([sessionId]);
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("launches a Codex run without a session id and keeps it out of the dispatched sessions", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create({
+      ...taskInput(temp.path),
+      provider: "codex",
+      model: "gpt-6-astra",
+    });
+    const child = fakeChild();
+    const launch = vi.fn<
+      (task: Task, sessionId: string | null) => typeof child
+    >(() => child);
+    const runner = await Runner.open(store, temp.path, { launch });
+    const run = await runner.start(task.id);
+    expect(launch.mock.calls[0][1]).toBeNull();
+    expect(
+      JSON.parse(await readFile(`${temp.path}/runs/${run.id}.json`, "utf8"))
+        .sessionId,
+    ).toBeNull();
+    expect([...runner.dispatchedSessions()]).toEqual([]);
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("loads a run recorded before session ids were tracked and reports no dispatched session", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const id = "b".repeat(24);
+    await mkdir(`${temp.path}/runs`, { recursive: true });
+    await writeFile(
+      `${temp.path}/runs/${id}.json`,
+      JSON.stringify({
+        id,
+        taskId: "c".repeat(24),
+        title: "Legacy run",
+        provider: "claude",
+        model: "opus",
+        status: "completed",
+        startedAt: "2026-09-01T10:00:00.000Z",
+        endedAt: "2026-09-01T10:05:00.000Z",
+        durationMs: 300_000,
+        exitCode: 0,
+        error: null,
+      }),
+    );
+    await writeFile(`${temp.path}/runs/${id}.log`, JSON.stringify([]));
+    const runner = await Runner.open(store, temp.path);
+    expect([...runner.dispatchedSessions()]).toEqual([]);
+    expect(runner.list()).toEqual([
+      {
+        id,
+        taskId: "c".repeat(24),
+        title: "Legacy run",
+        provider: "claude",
+        model: "opus",
+        status: "completed",
+        startedAt: "2026-09-01T10:00:00.000Z",
+        endedAt: "2026-09-01T10:05:00.000Z",
+        durationMs: 300_000,
+        exitCode: 0,
+        error: null,
+        preview: [],
+      },
+    ]);
+    await runner.close();
   } finally {
     await temp.cleanup();
   }

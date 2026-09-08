@@ -11,13 +11,18 @@ it("recognizes timestamped Claude assistant responses without token counters", (
   );
   expect(result.events).toEqual([
     {
-      timestamp: "2026-09-06T12:00:10.000Z",
-      project: "Unknown project",
-      model: "Unknown model",
-      inputTokens: 0,
-      outputTokens: 0,
-      cacheReadTokens: 0,
-      cacheCreationTokens: 0,
+      event: {
+        timestamp: "2026-09-06T12:00:10.000Z",
+        project: "Unknown project",
+        model: "Unknown model",
+        source: "unknown",
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+      messageId: null,
+      sessionId: null,
     },
   ]);
   expect(result.warnings).toBe(0);
@@ -52,20 +57,28 @@ describe("transcript privacy boundary", () => {
     expect(result).toEqual({
       events: [
         {
-          timestamp: "2026-09-05T15:12:19.000Z",
-          project: "demo",
-          model: "claude-opus-4-6",
-          inputTokens: 8,
-          outputTokens: 12,
-          cacheReadTokens: 34,
-          cacheCreationTokens: 5,
+          event: {
+            timestamp: "2026-09-05T15:12:19.000Z",
+            project: "demo",
+            model: "claude-opus-4-6",
+            source: "unknown",
+            inputTokens: 8,
+            outputTokens: 12,
+            cacheReadTokens: 34,
+            cacheCreationTokens: 5,
+          },
+          messageId: "msg_1",
+          sessionId: null,
         },
       ],
       warnings: 1,
       lines: 3,
     });
+    expect(
+      JSON.stringify(result.events.map((parsed) => parsed.event)),
+    ).not.toMatch(/PRIVATE|sk-secret|OAuth|uuid|msg_1|content|8a23ad17/);
     expect(JSON.stringify(result)).not.toMatch(
-      /PRIVATE|sk-secret|OAuth|uuid|msg_1|content|8a23ad17/,
+      /PRIVATE|sk-secret|OAuth|uuid|content|8a23ad17/,
     );
   });
 });
@@ -140,7 +153,7 @@ it("redacts entire credential-shaped project directory names", () => {
       message: { model: "claude-opus-5", usage: { output_tokens: 1 } },
     });
     const result = parseTranscript(input);
-    expect(result.events[0].project).toBe("[redacted project]");
+    expect(result.events[0].event.project).toBe("[redacted project]");
     expect(JSON.stringify(result)).not.toContain(project);
   }
 });
@@ -157,7 +170,7 @@ it("rejects identifiers and credential-shaped strings hidden inside model metada
     )
     .join("\n");
   const result = parseTranscript(events);
-  expect(result.events.map((event) => event.model)).toEqual([
+  expect(result.events.map((parsed) => parsed.event.model)).toEqual([
     "Unknown model",
     "Unknown model",
   ]);
@@ -173,10 +186,60 @@ it("recognizes Fable model identifiers so Fable-specific usage can be estimated"
       }),
     )
     .join("\n");
-  expect(parseTranscript(events).events.map((event) => event.model)).toEqual([
-    "claude-fable-5-1",
-    "claude-fable-5",
-  ]);
+  expect(
+    parseTranscript(events).events.map((parsed) => parsed.event.model),
+  ).toEqual(["claude-fable-5-1", "claude-fable-5"]);
+});
+
+describe("transcript provenance", () => {
+  const line = (record: Record<string, unknown>) =>
+    JSON.stringify({
+      type: "assistant",
+      timestamp: "2026-09-06T12:00:00Z",
+      cwd: "/home/user/demo",
+      message: {
+        id: "msg_provenance",
+        model: "claude-opus-4-6",
+        usage: { output_tokens: 1 },
+      },
+      ...record,
+    });
+
+  it("marks an interactive Claude Code entrypoint as local activity", () => {
+    const result = parseTranscript(line({ entrypoint: "cli" }));
+    expect(result.events.map((parsed) => parsed.event.source)).toEqual([
+      "local",
+    ]);
+  });
+
+  it("marks a headless entrypoint and a record without one as unknown activity", () => {
+    const result = parseTranscript(
+      [line({ entrypoint: "sdk-cli" }), line({})].join("\n"),
+    );
+    expect(result.events.map((parsed) => parsed.event.source)).toEqual([
+      "unknown",
+      "unknown",
+    ]);
+  });
+
+  it("returns the session id and message id beside the event and never inside it", () => {
+    const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
+    const [parsed] = parseTranscript(
+      line({ sessionId, entrypoint: "sdk-cli" }),
+    ).events;
+    expect(parsed.sessionId).toBe(sessionId);
+    expect(parsed.messageId).toBe("msg_provenance");
+    expect(Object.keys(parsed.event)).not.toContain("sessionId");
+    expect(Object.keys(parsed.event)).not.toContain("messageId");
+    expect(JSON.stringify(parsed.event)).not.toMatch(/4f1c2b6e|msg_provenance/);
+  });
+
+  it("reports a session id that is not a uuid as absent", () => {
+    for (const sessionId of ["not-a-uuid", "", 42, null])
+      expect(
+        parseTranscript(line({ sessionId })).events[0].sessionId,
+      ).toBeNull();
+  });
 });
 
 describe("incremental history reader", () => {
@@ -206,6 +269,7 @@ describe("incremental history reader", () => {
     timestamp,
     project,
     model: MODEL,
+    source: "unknown",
     inputTokens: 0,
     outputTokens,
     cacheReadTokens: 0,

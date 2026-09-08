@@ -21,12 +21,12 @@ export type SpawnProvider = (
 ) => ProviderProcess;
 export interface ProviderAdapter {
   command: string;
-  args: (task: Task) => string[];
+  args: (task: Task, sessionId: string | null) => string[];
 }
 export const providerAdapters: Record<Provider, ProviderAdapter> = {
   claude: {
     command: "claude",
-    args: (task) => [
+    args: (task, sessionId) => [
       "-p",
       task.prompt,
       "--model",
@@ -37,6 +37,7 @@ export const providerAdapters: Record<Provider, ProviderAdapter> = {
       "--dangerously-skip-permissions",
       "--max-turns",
       String(task.maxTurns),
+      ...(sessionId === null ? [] : ["--session-id", sessionId]),
     ],
   },
   codex: {
@@ -57,11 +58,12 @@ export const providerAdapters: Record<Provider, ProviderAdapter> = {
 };
 export function launchProvider(
   task: Task,
+  sessionId: string | null,
   spawnProcess: SpawnProvider = spawn,
   adapters = providerAdapters,
 ): ProviderProcess {
   const adapter = adapters[task.provider];
-  return spawnProcess(adapter.command, adapter.args(task), {
+  return spawnProcess(adapter.command, adapter.args(task, sessionId), {
     cwd: task.workdir,
     shell: false,
     detached: true,

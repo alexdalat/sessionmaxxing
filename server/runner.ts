@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { PlanningSnapshot, Run, Task } from "../shared/types.js";
@@ -11,12 +12,17 @@ import { validateWorkdir } from "./validation.js";
 
 interface RunnerOptions {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
-  launch?: (task: Task) => ProviderProcess;
+  launch?: (task: Task, sessionId: string | null) => ProviderProcess;
   now?: () => Date;
 }
+/** A run plus the session id dispatched to Claude, which never leaves the server. */
+interface StoredRun extends Run {
+  sessionId: string | null;
+}
+const publicRun = ({ sessionId: _sessionId, ...run }: StoredRun): Run => run;
 interface Active {
   task: Task;
-  run: Run;
+  run: StoredRun;
   output: OutputPreview;
   child?: ProviderProcess;
   done: Promise<void>;
@@ -28,7 +34,7 @@ interface Active {
   writeChain: Promise<void>;
 }
 export class Runner {
-  private runs: Run[] = [];
+  private runs: StoredRun[] = [];
   private active?: Active;
   private starting = false;
   private startDone: Promise<void> = Promise.resolve();
@@ -67,7 +73,7 @@ export class Runner {
     await mkdir(runner.directory, { recursive: true, mode: 0o700 });
     for (const name of await readdir(runner.directory)) {
       if (!/^[a-f0-9]{24}\.json$/.test(name)) continue;
-      const saved: Run = JSON.parse(
+      const saved: Run & { sessionId?: unknown } = JSON.parse(
         await readFile(join(runner.directory, name), "utf8"),
       );
       if (
@@ -78,7 +84,7 @@ export class Runner {
       const preview = JSON.parse(
         await readFile(join(runner.directory, `${saved.id}.log`), "utf8"),
       );
-      const run: Run = {
+      const run: StoredRun = {
         id: saved.id,
         taskId: saved.taskId,
         title: saved.title,
@@ -92,6 +98,7 @@ export class Runner {
         error: saved.error
           ? "Previous run failed. See status or retry the task."
           : null,
+        sessionId: typeof saved.sessionId === "string" ? saved.sessionId : null,
         preview: new OutputPreview(preview).lines(),
       };
       if (run.status === "running") {
@@ -109,6 +116,7 @@ export class Runner {
   }
   list(): Run[] {
     return this.runs
+      .map(publicRun)
       .map((run) => ({
         ...run,
         preview:
@@ -122,7 +130,14 @@ export class Runner {
       }))
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
   }
-  private async persist(run: Run) {
+  /** Session ids this dashboard assigned to its own runs, used to attribute transcripts. */
+  dispatchedSessions(): ReadonlySet<string> {
+    const sessions = new Set<string>();
+    for (const run of this.runs)
+      if (run.sessionId !== null) sessions.add(run.sessionId);
+    return sessions;
+  }
+  private async persist(run: StoredRun) {
     const { preview, ...metadata } = run;
     await atomicJson(join(this.directory, `${run.id}.log`), preview);
     await atomicJson(join(this.directory, `${run.id}.json`), metadata);
@@ -138,7 +153,8 @@ export class Runner {
     });
     try {
       const task = await this.store.claim(taskId);
-      const run: Run = {
+      const sessionId = task.provider === "claude" ? randomUUID() : null;
+      const run: StoredRun = {
         id: id(),
         taskId: task.id,
         title: task.title,
@@ -150,6 +166,7 @@ export class Runner {
         durationMs: 0,
         exitCode: null,
         error: null,
+        sessionId,
         preview: [],
       };
       let resolve: () => void = () => {
@@ -177,7 +194,7 @@ export class Runner {
           await this.finish(active, null);
           return this.list().find((r) => r.id === run.id) as Run;
         }
-        const child = (this.options.launch ?? launchProvider)(task);
+        const child = (this.options.launch ?? launchProvider)(task, sessionId);
         active.child = child;
         for (const channel of ["stdout", "stderr"] as const) {
           child[channel]?.on("data", (chunk) => {

@@ -1,5 +1,5 @@
 "use client";
-import { Runs } from "../Runs";
+import { Runs } from "@/app/components/runs/Runs";
 
 export default function RunsPage() {
   return (

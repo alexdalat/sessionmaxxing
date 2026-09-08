@@ -1,18 +1,31 @@
-import { expect, it } from "vitest";
-import { describeHours, quietSummary, usageHue } from "../app/DispatchPanel";
-import { allowedStartHours } from "../app/QuietHoursStrip";
-import { displayOrder } from "../app/queueOrder";
-import { clockOfFraction } from "../app/SessionWindows";
-import { modelOptions } from "../app/TaskForm";
-import { easternDay } from "../app/time";
-import { dayTicks, paceSeries } from "../app/WeeklyPace";
+import { describe, expect, it } from "vitest";
+import { sourceRows } from "../app/lib/analyticsRows";
+import {
+  describeHours,
+  quietSummary,
+  usageHue,
+} from "../app/lib/dispatchSummary";
+import { modelOptions } from "../app/lib/models";
+import { dayTicks, paceSeries } from "../app/lib/pace";
+import { scoreSeries } from "../app/lib/planScore";
+import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
+import { allowedStartHours } from "../app/lib/quietHours";
+import { clockOfFraction } from "../app/lib/sessionWindows";
+import { easternDay } from "../app/lib/time";
 import type {
   Opportunity,
+  PlanScore as PlanScoreData,
   PublicTask,
+  SourceActivity,
   TaskGate,
   UsageSample,
 } from "../shared/types.js";
-import { FABLE_MODEL, PROVIDER_MODELS, planLabel } from "../shared/types.js";
+import {
+  DEFAULT_DISPATCH_SETTINGS,
+  FABLE_MODEL,
+  PROVIDER_MODELS,
+  planLabel,
+} from "../shared/types.js";
 import { usageSnapshot } from "./helpers";
 
 const samples: UsageSample[] = [
@@ -87,7 +100,7 @@ it("usage hue runs from green at zero to red at the ceiling and clamps past it",
   expect(usageHue(5, 0)).toBe(0);
 });
 
-it("quiet summary names the ranges and whether quiet hours are in effect", () => {
+it("quiet summary names the ranges, when they open, and the two session reserves", () => {
   const quiet = {
     startHours: [23, 0, 1, 2, 3, 4, 5, 6],
     error: null,
@@ -95,14 +108,28 @@ it("quiet summary names the ranges and whether quiet hours are in effect", () =>
     active: true,
     nextStartHour: 0,
   };
-  expect(quietSummary(quiet, true)).toBe("Quiet hours 11 PM–6 AM · in effect");
+  expect(quietSummary(quiet, DEFAULT_DISPATCH_SETTINGS)).toBe(
+    "Quiet hours 11 PM–6 AM · open now",
+  );
   expect(
     quietSummary(
       { ...quiet, nowHour: 14, active: false, nextStartHour: 23 },
-      true,
+      DEFAULT_DISPATCH_SETTINGS,
     ),
-  ).toBe("Quiet hours 11 PM–6 AM · next 11 PM");
-  expect(quietSummary(quiet, false)).toBe("Quiet hours off");
+  ).toBe("Quiet hours 11 PM–6 AM · opens 11 PM");
+  expect(
+    quietSummary(quiet, {
+      ...DEFAULT_DISPATCH_SETTINGS,
+      sessionReservePercent: 10,
+      busyHoursReservePercent: 70,
+    }),
+  ).toBe("Quiet hours 11 PM–6 AM keep 10% · other hours keep 70% · open now");
+  expect(
+    quietSummary(
+      { ...quiet, startHours: null, error: "Local history could not be read." },
+      DEFAULT_DISPATCH_SETTINGS,
+    ),
+  ).toBe("Quiet hours not computed yet (Local history could not be read.)");
 });
 
 it("day ticks land on each Eastern midnight inside the weekly window", () => {
@@ -198,6 +225,7 @@ const queued = (
   id: string,
   status: PublicTask["status"],
   gate: TaskGate["status"],
+  eligibleAt: string | null = null,
 ): PublicTask => ({
   id,
   title: id,
@@ -211,7 +239,7 @@ const queued = (
   earliestStart: null,
   preferredWindowStart: null,
   maxTurns: 40,
-  gate: { status: gate, reason: gate },
+  gate: { status: gate, reason: gate, eligibleAt },
 });
 
 it("shows running tasks, then ready, then waiting, then finished", () => {
@@ -229,19 +257,19 @@ it("shows running tasks, then ready, then waiting, then finished", () => {
   ]);
 });
 
-it("orders waiting tasks by earliest start, soonest first, with unscheduled ones ahead", () => {
+it("sorts waiting tasks by when they become eligible, unknown starts last in priority order", () => {
   const order = displayOrder([
-    {
-      ...queued("later", "pending", "waiting"),
-      earliestStart: "2026-09-09T03:27:00.000Z",
-    },
-    {
-      ...queued("tonight", "pending", "waiting"),
-      earliestStart: "2026-09-08T03:00:00.000Z",
-    },
-    queued("anytime", "pending", "waiting"),
+    queued("unknown-first", "pending", "waiting"),
+    queued("later", "pending", "waiting", "2026-09-09T03:27:00.000Z"),
+    queued("unknown-second", "pending", "waiting"),
+    queued("tonight", "pending", "waiting", "2026-09-08T03:00:00.000Z"),
   ]);
-  expect(order.map((task) => task.id)).toEqual(["anytime", "tonight", "later"]);
+  expect(order.map((task) => task.id)).toEqual([
+    "tonight",
+    "later",
+    "unknown-first",
+    "unknown-second",
+  ]);
 });
 
 it("keeps the server order within a group", () => {
@@ -261,4 +289,174 @@ it("keeps the server order within a group", () => {
 
 it("orders an empty queue as an empty list", () => {
   expect(displayOrder([])).toEqual([]);
+});
+
+describe("move targets", () => {
+  const tasks = [
+    queued("ready-a", "pending", "ready"),
+    queued("held-a", "pending", "waiting"),
+    queued("ready-b", "pending", "ready"),
+    queued("held-b", "pending", "waiting"),
+    queued("done", "completed", "finished"),
+  ];
+  const ordered = displayOrder(tasks);
+  const byId = (id: string) =>
+    tasks.find((task) => task.id === id) as PublicTask;
+
+  it("points at the on-screen neighbour inside the same gate group", () => {
+    expect(moveTarget(ordered, byId("ready-b"), -1)?.id).toBe("ready-a");
+    expect(moveTarget(ordered, byId("ready-a"), 1)?.id).toBe("ready-b");
+    expect(moveTarget(ordered, byId("held-b"), -1)?.id).toBe("held-a");
+  });
+
+  it("has no target at the top or bottom of a group", () => {
+    expect(moveTarget(ordered, byId("ready-a"), -1)).toBeUndefined();
+    expect(moveTarget(ordered, byId("ready-b"), 1)).toBeUndefined();
+    expect(moveTarget(ordered, byId("held-a"), -1)).toBeUndefined();
+    expect(moveTarget(ordered, byId("held-b"), 1)).toBeUndefined();
+    expect(moveTarget(ordered, byId("done"), -1)).toBeUndefined();
+  });
+
+  it("has no target between waiting tasks that become eligible at different times", () => {
+    const staggered = displayOrder([
+      queued("tonight", "pending", "waiting", "2026-09-08T03:00:00.000Z"),
+      queued("later", "pending", "waiting", "2026-09-09T03:00:00.000Z"),
+    ]);
+    expect(moveTarget(staggered, staggered[0], 1)).toBeUndefined();
+    expect(moveTarget(staggered, staggered[1], -1)).toBeUndefined();
+  });
+
+  it("points at a waiting neighbour that becomes eligible in the same minute", () => {
+    const together = displayOrder([
+      queued("first", "pending", "waiting", "2026-09-08T03:00:00.000Z"),
+      queued("second", "pending", "waiting", "2026-09-08T03:00:20.000Z"),
+    ]);
+    expect(moveTarget(together, together[0], 1)?.id).toBe("second");
+    expect(moveTarget(together, together[1], -1)?.id).toBe("first");
+  });
+
+  it("moves a task past its neighbour without disturbing tasks from other groups", () => {
+    const ids = ["ready-a", "held-a", "ready-b", "held-b"];
+    expect(movedPast(ids, "ready-b", "ready-a", -1)).toEqual([
+      "ready-b",
+      "ready-a",
+      "held-a",
+      "held-b",
+    ]);
+    expect(movedPast(ids, "held-a", "held-b", 1)).toEqual([
+      "ready-a",
+      "ready-b",
+      "held-b",
+      "held-a",
+    ]);
+  });
+});
+
+describe("source rows", () => {
+  const sources = (unknownResponses: number): SourceActivity[] => [
+    { source: "local", activeMinutes: 120, responses: 340, outputTokens: 9100 },
+    {
+      source: "dispatched",
+      activeMinutes: 45,
+      responses: 88,
+      outputTokens: 4200,
+    },
+    {
+      source: "unknown",
+      activeMinutes: unknownResponses ? 12 : 0,
+      responses: unknownResponses,
+      outputTokens: unknownResponses ? 700 : 0,
+    },
+  ];
+
+  it("hides the unattributed row when it has no responses", () => {
+    expect(sourceRows(sources(0)).map((row) => row.label)).toEqual([
+      "Local Claude Code",
+      "Dispatched tasks",
+      "Other",
+    ]);
+  });
+
+  it("shows the unattributed row with its counts when it has responses", () => {
+    const rows = sourceRows(sources(17));
+    expect(rows[2]).toEqual({
+      label: "Unattributed",
+      responses: 17,
+      activeMinutes: 12,
+      outputTokens: 700,
+      measured: true,
+    });
+  });
+
+  it("ends with an unmeasured Other row carrying no counts", () => {
+    for (const rows of [sourceRows(sources(0)), sourceRows(sources(17))]) {
+      expect(rows.at(-1)).toEqual({
+        label: "Other",
+        responses: 0,
+        activeMinutes: 0,
+        outputTokens: 0,
+        measured: false,
+      });
+      expect(rows.slice(0, -1).every((row) => row.measured)).toBe(true);
+    }
+  });
+});
+
+describe("plan score series", () => {
+  const plan: PlanScoreData = {
+    score: 71,
+    sessionCoverage: 62,
+    weeklyScore: 80,
+    days: [
+      { date: "2026-08-30", coverage: 40.5 },
+      { date: "2026-08-31", coverage: null },
+      { date: "2026-09-02", coverage: 88 },
+      { date: "2026-09-06", coverage: 12.5 },
+    ],
+    weeks: [
+      {
+        start: "2026-08-24T07:53:00.000Z",
+        end: "2026-08-31T07:53:00.000Z",
+        percent: 64,
+        score: 64,
+        complete: true,
+      },
+      {
+        start: "2026-08-31T07:53:00.000Z",
+        end: "2026-09-07T07:53:00.000Z",
+        percent: 45,
+        score: 80,
+        complete: false,
+      },
+    ],
+    generatedAt: "2026-09-06T14:00:00.000Z",
+  };
+
+  it("gives each day its coverage and the score of the week containing it", () => {
+    expect(scoreSeries(plan)).toContainEqual({
+      date: "2026-08-30",
+      coverage: 40.5,
+      weekly: 64,
+    });
+    expect(scoreSeries(plan)).toContainEqual({
+      date: "2026-09-02",
+      coverage: 88,
+      weekly: 80,
+    });
+  });
+
+  it("scores a date after the last week as null weekly", () => {
+    const series = scoreSeries({
+      ...plan,
+      days: [{ date: "2026-09-09", coverage: 30 }],
+    });
+    expect(series).toEqual([
+      { date: "2026-09-09", coverage: 30, weekly: null },
+    ]);
+  });
+
+  it("passes a day with no coverage through as null", () => {
+    const day = scoreSeries(plan).find((point) => point.date === "2026-08-31");
+    expect(day).toEqual({ date: "2026-08-31", coverage: null, weekly: 80 });
+  });
 });

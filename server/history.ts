@@ -2,11 +2,11 @@ import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { ActivityEvent, HistoryData } from "../shared/types.js";
+import type { HistoryData, ParsedEvent } from "../shared/types.js";
 import { parseTranscript } from "./parser.js";
 
 interface ParsedFile {
-  events: Array<{ key?: string; event: ActivityEvent }>;
+  events: ParsedEvent[];
   lines: number;
   warnings: number;
   historyEntries: number;
@@ -41,9 +41,17 @@ async function listFiles(root: string) {
   for (const project of await entries(join(root, "projects"))) {
     if (!project.isDirectory()) continue;
     const directory = join(root, "projects", project.name);
-    for (const file of await entries(directory))
-      if (file.isFile() && file.name.endsWith(".jsonl"))
+    for (const file of await entries(directory)) {
+      if (file.isFile() && file.name.endsWith(".jsonl")) {
         files.push(join(directory, file.name));
+        continue;
+      }
+      if (!file.isDirectory()) continue;
+      const subagents = join(directory, file.name, "subagents");
+      for (const agent of await entries(subagents))
+        if (agent.isFile() && agent.name.endsWith(".jsonl"))
+          files.push(join(subagents, agent.name));
+    }
   }
   files.push(join(root, "history.jsonl"));
   return files;
@@ -73,11 +81,7 @@ async function parseFile(path: string, isHistory: boolean) {
       }
       const transcript = parseTranscript(line);
       parsed.warnings += transcript.warnings;
-      if (!transcript.events.length) continue;
-      const record = JSON.parse(line);
-      const key =
-        typeof record.message?.id === "string" ? record.message.id : undefined;
-      parsed.events.push({ key, event: transcript.events[0] });
+      if (transcript.events.length) parsed.events.push(transcript.events[0]);
     }
   } catch (error) {
     if (missing(error)) return undefined;
@@ -90,10 +94,16 @@ async function parseFile(path: string, isHistory: boolean) {
 }
 
 /** History reader that reparses only the transcript files whose size or mtime changed. */
-export function createHistoryReader(root: string): () => Promise<HistoryData> {
+export function createHistoryReader(
+  root: string,
+  dispatchedSessions: () => ReadonlySet<string> = () => new Set<string>(),
+): () => Promise<HistoryData> {
   const cache = new Map<string, CachedFile>();
   const historyPath = join(root, "history.jsonl");
   return async () => {
+    // Read fresh every call: runs are dispatched while the process lives, and
+    // an unchanged transcript file keeps its cached parse.
+    const dispatched = dispatchedSessions();
     const data: HistoryData = {
       events: [],
       health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
@@ -115,12 +125,16 @@ export function createHistoryReader(root: string): () => Promise<HistoryData> {
       data.health.lines += file.lines;
       data.health.warnings += file.warnings;
       data.health.historyEntries += file.historyEntries;
-      for (const { key, event } of file.events) {
-        const index = key ? seen.get(key) : undefined;
-        if (index !== undefined) data.events[index] = event;
+      for (const { messageId, sessionId, event } of file.events) {
+        const attributed =
+          sessionId !== null && dispatched.has(sessionId)
+            ? { ...event, source: "dispatched" as const }
+            : event;
+        const index = messageId === null ? undefined : seen.get(messageId);
+        if (index !== undefined) data.events[index] = attributed;
         else {
-          if (key) seen.set(key, data.events.length);
-          data.events.push(event);
+          if (messageId !== null) seen.set(messageId, data.events.length);
+          data.events.push(attributed);
         }
       }
     }

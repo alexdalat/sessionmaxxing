@@ -13,7 +13,7 @@ import {
 import { activeMinutes, activityBlocks } from "./analytics.js";
 
 const DAY_MS = 86_400_000;
-export const HISTORY_DAYS = 14;
+export const HISTORY_DAYS = 90;
 export const WINDOW_DAYS = 7;
 const BLOCK_MS = BLOCK_MINUTES * MINUTE_MS;
 const SAMPLES_FILE = "usage-samples.jsonl";
@@ -33,8 +33,9 @@ export function toSample(snapshot: UsageSnapshot): UsageSample {
 export function sessionWindows(
   samples: UsageSample[],
   now: Date,
+  days = WINDOW_DAYS,
 ): SessionWindow[] {
-  const since = now.getTime() - WINDOW_DAYS * DAY_MS;
+  const since = now.getTime() - days * DAY_MS;
   const windows = new Map<number, SessionWindow & { peakPercent: number }>();
   for (const sample of samples) {
     const at = Date.parse(sample.at);

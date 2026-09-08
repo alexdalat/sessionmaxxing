@@ -1,6 +1,7 @@
 import { access, readFile, stat, writeFile } from "node:fs/promises";
 import { expect, it } from "vitest";
 import {
+  HISTORY_DAYS,
   mergeSessionWindows,
   sessionWindows,
   toSample,
@@ -81,10 +82,23 @@ it("keeps reset times a full five-hour block apart in separate windows", () => {
   expect(windows).toHaveLength(2);
 });
 
+it("keeps windows older than the seven-day default when asked for more days", () => {
+  const now = new Date("2026-09-06T12:00:00Z");
+  const samples = [
+    sample("2026-08-20T10:00:00Z", 55, "2026-08-20T14:00:00.000Z"),
+    sample("2026-09-05T01:00:00Z", 12, "2026-09-05T05:00:00.000Z"),
+  ];
+  expect(sessionWindows(samples, now).map((w) => w.peakPercent)).toEqual([12]);
+  expect(sessionWindows(samples, now, 30).map((w) => w.peakPercent)).toEqual([
+    55, 12,
+  ]);
+});
+
 const event = (timestamp: string): ActivityEvent => ({
   timestamp,
   project: "demo",
   model: "claude-opus-4-6",
+  source: "local",
   inputTokens: 1,
   outputTokens: 1,
   cacheReadTokens: 0,
@@ -180,28 +194,27 @@ it("reports no active minutes for sampled windows when there is no local activit
   ).toEqual([sampledWindow(0)]);
 });
 
-it("persists samples as private JSONL, drops samples older than fourteen days on open, and rejects corrupt lines", async () => {
+it("persists samples as private JSONL, drops samples older than ninety days on open, and rejects corrupt lines", async () => {
   const temp = await temporary();
+  const now = new Date("2026-09-06T12:00:00Z");
   try {
-    const store = await UsageHistoryStore.open(
-      temp.path,
-      new Date("2026-09-06T12:00:00Z"),
-    );
+    const store = await UsageHistoryStore.open(temp.path, now);
+    const ancient = usageSnapshot({ fetchedAt: "2026-05-01T00:00:00.000Z" });
     const old = usageSnapshot({ fetchedAt: "2026-08-01T00:00:00.000Z" });
     const fresh = usageSnapshot();
+    await store.record(ancient);
     await store.record(old);
     await store.record(fresh);
     const path = `${temp.path}/usage-samples.jsonl`;
     expect((await stat(path)).mode & 0o777).toBe(0o600);
-    expect((await readFile(path, "utf8")).trim().split("\n")).toHaveLength(2);
-    const reopened = await UsageHistoryStore.open(
-      temp.path,
-      new Date("2026-09-06T12:00:00Z"),
-    );
-    expect(reopened.recent(new Date("2026-09-06T12:00:00Z"))).toEqual([
+    expect((await readFile(path, "utf8")).trim().split("\n")).toHaveLength(3);
+    const reopened = await UsageHistoryStore.open(temp.path, now);
+    expect(reopened.recent(now, HISTORY_DAYS)).toEqual([
+      toSample(old),
       toSample(fresh),
     ]);
-    expect((await readFile(path, "utf8")).trim().split("\n")).toHaveLength(1);
+    expect(reopened.recent(now)).toEqual([toSample(fresh)]);
+    expect((await readFile(path, "utf8")).trim().split("\n")).toHaveLength(2);
     await writeFile(path, '{"at":"nope"}\n');
     await expect(UsageHistoryStore.open(temp.path)).rejects.toThrow(
       /unreadable sample/,

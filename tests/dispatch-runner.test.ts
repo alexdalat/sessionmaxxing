@@ -24,7 +24,10 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
   );
   const queue = await QueueStore.open(temp.path);
   const settings = await DispatchSettingsStore.open(temp.path);
-  await settings.save({ ...settings.snapshot(), quietHoursOnly: false });
+  await settings.save({
+    ...settings.snapshot(),
+    busyHoursReservePercent: 25,
+  });
   const child = fakeChild();
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
@@ -50,7 +53,8 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
       .tasks.find((task: { id: string }) => task.id === claude.id);
     expect(waiting.gate).toEqual({
       status: "waiting",
-      reason: "Session at 80%, above the 75% ceiling",
+      reason: "Session 80%, over the 75% queue cutoff",
+      eligibleAt: now().toISOString(),
     });
     sessionPercent = 30;
     clock += 60_000;
@@ -63,6 +67,7 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
     await settings.save({
       ...settings.snapshot(),
       sessionReservePercent: 80,
+      busyHoursReservePercent: 80,
     });
     await queue.create(taskInput(temp.path));
     await runner.tick();
@@ -71,7 +76,7 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
       (await app.inject("/api/queue")).json().planning.providers.claude,
     ).toEqual({
       status: "waiting",
-      reason: "Session at 30%, above the 20% ceiling",
+      reason: "Session 30%, over the 20% queue cutoff",
     });
   } finally {
     child.emit("close", 0);
@@ -99,7 +104,10 @@ it("refreshes official usage after a run ends before dispatching the next Claude
   );
   const queue = await QueueStore.open(temp.path);
   const settings = await DispatchSettingsStore.open(temp.path);
-  await settings.save({ ...settings.snapshot(), quietHoursOnly: false });
+  await settings.save({
+    ...settings.snapshot(),
+    busyHoursReservePercent: 25,
+  });
   const child = fakeChild();
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
@@ -124,6 +132,7 @@ it("refreshes official usage after a run ends before dispatching the next Claude
     expect(await gate()).toEqual({
       status: "waiting",
       reason: USAGE_PREDATES_RUN_REASON,
+      eligibleAt: now().toISOString(),
     });
     clock += USAGE_MIN_REFRESH_MS;
     await runner.tick();
@@ -131,7 +140,8 @@ it("refreshes official usage after a run ends before dispatching the next Claude
     expect(launch).toHaveBeenCalledTimes(1);
     expect(await gate()).toEqual({
       status: "waiting",
-      reason: "Session at 80%, above the 75% ceiling",
+      reason: "Session 80%, over the 75% queue cutoff",
+      eligibleAt: now().toISOString(),
     });
     sessionPercent = 30;
     clock += USAGE_MIN_REFRESH_MS;

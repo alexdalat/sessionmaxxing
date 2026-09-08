@@ -1,4 +1,9 @@
-import type { UsageReport, UsageState } from "../shared/types.js";
+import {
+  PLAN_SCORE_DAYS,
+  type UsageReport,
+  type UsageSample,
+  type UsageState,
+} from "../shared/types.js";
 import type { FetchUsage } from "./claude-usage.js";
 import { sessionWindows, type UsageHistoryStore } from "./usage-history.js";
 
@@ -31,6 +36,11 @@ export class UsageMonitor {
       samples,
       windows: sessionWindows(samples, now),
     };
+  }
+
+  /** One extra day so a session window straddling the first plan-score date is complete. */
+  samples(now: Date): UsageSample[] {
+    return this.history.recent(now, PLAN_SCORE_DAYS + 1);
   }
 
   /** Fetches now unless a fetch is in flight or one finished within the minimum interval. */

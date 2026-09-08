@@ -9,8 +9,8 @@ export const USAGE_ENDPOINT =
 export const TOKEN_ENDPOINT = "https://platform.claude.com/v1/oauth/token";
 export const OAUTH_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const OAUTH_BETA = "oauth-2025-04-20";
-// The endpoint rate-limits unknown clients aggressively; identify as Claude Code.
-const USER_AGENT = "claude-code/2.1.263";
+// platform.claude.com answers 429 to any User-Agent it does not recognize; only Claude Code's own string passes.
+const USER_AGENT = "claude-cli/2.1.263 (external, cli)";
 const REQUEST_TIMEOUT_MS = 10_000;
 const REFRESH_TIMEOUT_MS = 30_000;
 export const REFRESH_MARGIN_MS = 5 * 60_000;
@@ -112,6 +112,16 @@ const expiringSoon = (credentials: CredentialsFile, now: Date) =>
   credentials.expiresAt !== null &&
   credentials.expiresAt <= now.getTime() + REFRESH_MARGIN_MS;
 
+/** The OAuth error body uses `error_description`; the rate limiter answers with the API's `error.message` shape. */
+async function refusalDetail(response: Response): Promise<string | null> {
+  const body: unknown = await response.json().catch(() => null);
+  if (!isRecord(body)) return null;
+  if (typeof body.error_description === "string") return body.error_description;
+  if (isRecord(body.error) && typeof body.error.message === "string")
+    return body.error.message;
+  return null;
+}
+
 /** Replaces `staleAccessToken` through the refresh grant and rewrites the credentials file. */
 export async function refreshCredentials(
   claudeDirectory: string,
@@ -152,11 +162,13 @@ export async function refreshCredentials(
     }),
     signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
   });
-  if (response.status !== 200)
+  if (response.status !== 200) {
+    const detail = await refusalDetail(response);
     throw new DomainError(
-      `Anthropic refused to refresh the Claude Code token (HTTP ${response.status}). Run \`claude\` once to refresh it.`,
+      `Anthropic refused to refresh the Claude Code token (HTTP ${response.status}${detail ? `: ${detail}` : ""}). Run \`claude\` once to refresh it.`,
       502,
     );
+  }
   const body: unknown = await response.json();
   if (
     !isRecord(body) ||

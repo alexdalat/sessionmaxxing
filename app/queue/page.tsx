@@ -1,5 +1,5 @@
 "use client";
-import { TaskQueue } from "../TaskQueue";
+import { TaskQueue } from "@/app/components/queue/TaskQueue";
 
 export default function QueuePage() {
   return (

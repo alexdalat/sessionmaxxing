@@ -2,6 +2,8 @@ import { basename } from "node:path";
 import type { ActivityEvent, ParseResult } from "../shared/types.js";
 
 const UUID = /[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}/gi;
+const SESSION_ID = /^[a-f\d]{8}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{4}-[a-f\d]{12}$/i;
+const INTERACTIVE_ENTRYPOINT = "cli";
 export function safeProject(cwd: unknown): string {
   if (typeof cwd !== "string" || !cwd.startsWith("/")) return "Unknown project";
   const CREDENTIAL_SHAPED =
@@ -47,12 +49,22 @@ export function parseTranscript(input: string): ParseResult {
         )
           ? message.model
           : "Unknown model",
+      source:
+        record.entrypoint === INTERACTIVE_ENTRYPOINT ? "local" : "unknown",
       inputTokens: counter(usage?.input_tokens),
       outputTokens: counter(usage?.output_tokens),
       cacheReadTokens: counter(usage?.cache_read_input_tokens),
       cacheCreationTokens: counter(usage?.cache_creation_input_tokens),
     };
-    result.events.push(event);
+    result.events.push({
+      event,
+      messageId: typeof message?.id === "string" ? message.id : null,
+      sessionId:
+        typeof record.sessionId === "string" &&
+        SESSION_ID.test(record.sessionId)
+          ? record.sessionId
+          : null,
+    });
   }
   return result;
 }

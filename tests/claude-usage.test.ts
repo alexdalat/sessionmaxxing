@@ -71,7 +71,9 @@ it("sends the Claude Code OAuth token with the required beta and user-agent head
     expect(init.headers).toMatchObject({
       Authorization: "Bearer sk-ant-oat01-SECRET-TOKEN",
       "anthropic-beta": "oauth-2025-04-20",
-      "User-Agent": expect.stringMatching(/^claude-code\//),
+      "User-Agent": expect.stringMatching(
+        /^claude-cli\/\S+ \(external, cli\)$/,
+      ),
     });
   } finally {
     await temp.cleanup();
@@ -185,7 +187,9 @@ it("refreshes an expired access token, rewrites the credentials, and fetches wit
     expect(refresh.init.method).toBe("POST");
     expect(refresh.init.headers).toMatchObject({
       "Content-Type": "application/json",
-      "User-Agent": expect.stringMatching(/^claude-code\//),
+      "User-Agent": expect.stringMatching(
+        /^claude-cli\/\S+ \(external, cli\)$/,
+      ),
     });
     expect(JSON.parse(String(refresh.init.body))).toEqual({
       grant_type: "refresh_token",
@@ -298,7 +302,10 @@ it("explains an expired refresh token, a refused refresh, and a missing refresh 
   const temp = await temporary();
   try {
     const refused = oauthFetch(
-      async () => ({ status: 400, body: {} }),
+      async () => ({
+        status: 400,
+        body: { error_description: "Refresh token not found or invalid" },
+      }),
       usageFor("sk-ant-oat01-FRESH"),
     );
     await writeFile(
@@ -320,7 +327,9 @@ it("explains an expired refresh token, a refused refresh, and a missing refresh 
       temp.path,
       refused.fetchImpl,
     )(now).catch((error: Error) => error.message);
-    expect(error).toMatch(/refused to refresh.*HTTP 400/);
+    expect(error).toMatch(
+      /refused to refresh.*HTTP 400: Refresh token not found or invalid/,
+    );
     expect(error).not.toMatch(/SECRET/);
     const { refreshToken: _none, ...withoutRefresh } = JSON.parse(
       credentials({ expiresAt: now.getTime() - 1 }),

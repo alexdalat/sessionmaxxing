@@ -16,6 +16,7 @@ import {
   settingsSchema,
 } from "./dispatch-settings.js";
 import { createHistoryReader } from "./history.js";
+import { planScore } from "./plan-score.js";
 import type { QueueStore } from "./queue.js";
 import { QuietHoursCache } from "./quiet-hours.js";
 import { registerQueueRoutes } from "./routes.js";
@@ -44,7 +45,11 @@ export async function createApp(options: AppOptions = {}) {
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false } },
   });
   const loadHistory =
-    options.loadHistory ?? createHistoryReader(join(homedir(), ".claude"));
+    options.loadHistory ??
+    createHistoryReader(
+      join(homedir(), ".claude"),
+      () => options.runner?.dispatchedSessions() ?? new Set<string>(),
+    );
   const now = () => options.now?.() ?? new Date();
   app.addHook("onRequest", async (request, reply) => {
     const host = request.headers.host ?? "";
@@ -130,6 +135,11 @@ export async function createApp(options: AppOptions = {}) {
       "/api/usage",
       { schema: { querystring: emptyQuerySchema } },
       usageReport,
+    );
+    app.get(
+      "/api/plan-score",
+      { schema: { querystring: emptyQuerySchema } },
+      async () => planScore(usage.samples(now()), now()),
     );
     app.post(
       "/api/usage/refresh",

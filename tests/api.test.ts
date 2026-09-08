@@ -1,3 +1,5 @@
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createApp } from "../server/app.js";
 import { DispatchSettingsStore } from "../server/dispatch-settings.js";
@@ -409,6 +411,7 @@ it("fills session windows from local transcripts for stretches no official sampl
         timestamp,
         project: "demo",
         model: "claude-opus-4-6",
+        source: "local" as const,
         inputTokens: 1,
         outputTokens: 1,
         cacheReadTokens: 0,
@@ -500,8 +503,8 @@ it("serves official usage with sample history, refreshes on demand, and validate
       url: "/api/dispatch-settings",
       payload: {
         sessionReservePercent: 90,
+        busyHoursReservePercent: 90,
         weeklyMarginPercent: 0,
-        quietHoursOnly: false,
         quietStartHours: 8,
       },
     });
@@ -513,22 +516,23 @@ it("serves official usage with sample history, refreshes on demand, and validate
     });
     expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual({
       sessionReservePercent: 90,
+      busyHoursReservePercent: 90,
       weeklyMarginPercent: 0,
-      quietHoursOnly: false,
       quietStartHours: 8,
     });
     const valid = {
       sessionReservePercent: 10,
+      busyHoursReservePercent: 100,
       weeklyMarginPercent: 0,
-      quietHoursOnly: true,
       quietStartHours: 8,
     };
     for (const payload of [
       { ...valid, sessionReservePercent: 91 },
       { ...valid, sessionReservePercent: "10" },
+      { ...valid, busyHoursReservePercent: 101 },
+      { ...valid, busyHoursReservePercent: "50" },
       { ...valid, quietStartHours: 0 },
       { ...valid, quietStartHours: 2.5 },
-      { ...valid, quietHoursOnly: "yes" },
       { sessionReservePercent: 10, weeklyMarginPercent: 0 },
       { ...valid, extra: 1 },
     ])
@@ -541,7 +545,60 @@ it("serves official usage with sample history, refreshes on demand, and validate
           })
         ).statusCode,
       ).toBe(400);
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/api/dispatch-settings",
+          payload: valid,
+        })
+      ).statusCode,
+    ).toBe(200);
     expect((await app.inject("/api/usage?days=7")).statusCode).toBe(400);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("scores the plan from recorded samples over the last twenty-eight Eastern days", async () => {
+  const temp = await temporary();
+  const now = new Date("2026-09-06T12:00:00Z");
+  const usage = new UsageMonitor(
+    async (at) => usageSnapshot({ fetchedAt: at.toISOString() }),
+    await UsageHistoryStore.open(temp.path, now),
+    () => now,
+  );
+  const app = await createApp({
+    usage,
+    now: () => now,
+    loadHistory: async () => ({
+      events: [],
+      health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
+    }),
+  });
+  try {
+    await app.inject({ method: "POST", url: "/api/usage/refresh" });
+    const score = (await app.inject("/api/plan-score")).json();
+    // The only window runs 11:09Z to 16:09Z at 16%, so 51 of today's 8
+    // elapsed Eastern hours are covered: 16 x 0.85 / 8 = 1.7.
+    expect(score.days).toHaveLength(28);
+    expect(score.days.at(-1)).toEqual({ date: "2026-09-06", coverage: 1.7 });
+    expect(score.days.at(-2)).toEqual({ date: "2026-09-05", coverage: null });
+    expect(score.weeks).toEqual([
+      {
+        start: "2026-09-06T07:53:00.000Z",
+        end: "2026-09-13T07:53:00.000Z",
+        percent: 2,
+        score: 82,
+        complete: false,
+      },
+    ]);
+    expect(score.sessionCoverage).toBe(2);
+    expect(score.weeklyScore).toBe(82);
+    expect(score.score).toBe(42);
+    expect(score.generatedAt).toBe("2026-09-06T12:00:00.000Z");
+    expect((await app.inject("/api/plan-score?days=7")).statusCode).toBe(400);
   } finally {
     await app.close();
     await temp.cleanup();
@@ -606,6 +663,7 @@ it("computes quiet start hours from local history for the planning snapshot and 
           ).toISOString(),
           project: "demo",
           model: "claude-opus-5",
+          source: "local" as const,
           inputTokens: 0,
           outputTokens: 0,
           cacheReadTokens: 0,
@@ -629,6 +687,111 @@ it("computes quiet start hours from local history for the planning snapshot and 
     expect(loads).toBe(1);
   } finally {
     await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("never exposes the session id of a dispatched run through the runs route", async () => {
+  const { taskInput, fakeChild } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const child = fakeChild();
+  const runner = await Runner.open(queue, temp.path, { launch: () => child });
+  const app = await createApp({ queue, runner });
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: taskInput(temp.path),
+    });
+    const started = await app.inject({
+      method: "POST",
+      url: `/api/tasks/${created.json().id}/run`,
+    });
+    expect(started.statusCode).toBe(200);
+    expect(Object.keys(started.json())).not.toContain("sessionId");
+    const [sessionId] = [...runner.dispatchedSessions()];
+    expect(sessionId).toBeDefined();
+    const runs = (await app.inject("/api/runs")).json().runs;
+    expect(runs).toHaveLength(1);
+    expect(Object.keys(runs[0])).not.toContain("sessionId");
+    expect(JSON.stringify(runs)).not.toContain(sessionId);
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("reports activity per source in the analytics route", async () => {
+  const app = await createApp({
+    now: () => new Date("2026-09-06T12:00:00Z"),
+    loadHistory: async () => ({
+      events: [
+        {
+          timestamp: "2026-09-06T10:00:00.000Z",
+          project: "demo",
+          model: "claude-opus-4-6",
+          source: "dispatched" as const,
+          inputTokens: 1,
+          outputTokens: 5,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+        {
+          timestamp: "2026-09-06T11:00:00.000Z",
+          project: "demo",
+          model: "claude-opus-4-6",
+          source: "local" as const,
+          inputTokens: 1,
+          outputTokens: 2,
+          cacheReadTokens: 0,
+          cacheCreationTokens: 0,
+        },
+      ],
+      health: { files: 1, lines: 2, warnings: 0, historyEntries: 0 },
+    }),
+  });
+  try {
+    expect((await app.inject("/api/analytics")).json().sources).toEqual([
+      { source: "local", activeMinutes: 1, responses: 1, outputTokens: 2 },
+      { source: "dispatched", activeMinutes: 1, responses: 1, outputTokens: 5 },
+      { source: "unknown", activeMinutes: 0, responses: 0, outputTokens: 0 },
+    ]);
+  } finally {
+    await app.close();
+  }
+});
+
+it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
+  const temp = await temporary();
+  const path = join(temp.path, "dispatch-settings.json");
+  const legacy = {
+    sessionReservePercent: 40,
+    weeklyMarginPercent: 5,
+    quietStartHours: 6,
+  };
+  try {
+    await writeFile(path, JSON.stringify({ ...legacy, quietHoursOnly: true }));
+    expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual({
+      sessionReservePercent: 40,
+      busyHoursReservePercent: 100,
+      weeklyMarginPercent: 5,
+      quietStartHours: 6,
+    });
+    expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
+    await writeFile(path, JSON.stringify({ ...legacy, quietHoursOnly: false }));
+    expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual({
+      sessionReservePercent: 40,
+      busyHoursReservePercent: 40,
+      weeklyMarginPercent: 5,
+      quietStartHours: 6,
+    });
+    expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
+  } finally {
     await temp.cleanup();
   }
 });

@@ -12,7 +12,7 @@ pnpm build
 pnpm start
 ```
 
-Open http://127.0.0.1:4317. `PORT` changes the port; `HOST` is `127.0.0.1` or `0.0.0.0` (container only). For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with three routes: `/` (Overview), `/queue/` (Task queue), and `/runs/` (Runs); Fastify serves the build from `dist/client`.
+Open http://127.0.0.1:4317. `PORT` changes the port; `HOST` is `127.0.0.1` or `0.0.0.0` (container only). For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs); Fastify serves the build from `dist/client`.
 
 ## Official usage
 
@@ -27,7 +27,7 @@ Every snapshot is appended to `data/usage-samples.jsonl` (14 days kept). From th
 
 ## Auto-dispatch
 
-Queue tasks under **Task queue**. With the queue on, the server runs one **Ready** task at a time. The on/off state is stored in `data/queue.json` and survives restarts; a task interrupted by a restart is marked failed. A Claude task is Ready when the official snapshot is fresh (under 15 min), session usage is at or below `100 − session reserve` (default 25%), weekly usage is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. Codex tasks are not gated. **Run now** overrides everything. Settings live in `data/dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ sessionReservePercent, weeklyMarginPercent, quietHoursOnly, quietStartHours }`.
+Queue tasks under **Task queue**. With the queue on, the server runs one **Ready** task at a time. The on/off state is stored in `data/queue.json` and survives restarts; a task interrupted by a restart is marked failed. A Claude task is Ready when the official snapshot is fresh (under 15 min), session usage is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. Codex tasks are not gated. **Run now** overrides everything. Settings live in `data/dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours }`.
 
 Dispatched Claude tasks run with `--dangerously-skip-permissions`, so a queued run has the same tools an interactive session has: shell, web search, and any MCP servers or skills configured under `~/.claude`, which the container mounts along with your global `CLAUDE.md`.
 
@@ -68,6 +68,19 @@ Open http://192.0.2.10:4317 from the tailnet or http://127.0.0.1:4317 on the hos
 ## Privacy
 
 Transcript content is discarded at the parser boundary. Prompts and work directories stay on disk in `data/queue.json` and are never returned by the API. Run previews keep only allowlisted event labels and counters. Runtime state: `data/queue.json`, `data/dispatch-settings.json`, `data/usage-samples.jsonl`, `data/runs/`, `data/server.lock`.
+
+## Layout
+
+| Path | Purpose |
+| --- | --- |
+| `app/` | Next.js App Router: `layout.tsx`, `styles.css`, one `page.tsx` per route |
+| `app/components/` | Feature components by route (`overview/`, `analytics/`, `queue/`, `runs/`); shared ones at the root; `ui/` is shadcn |
+| `app/hooks/` | React hooks (`usePolling`, `useAnalytics`) |
+| `app/lib/` | Pure client logic: API client, time helpers, chart series, queue ordering, analytics cache |
+| `server/` | Fastify server, usage monitor, dispatcher, providers, transcript parser |
+| `shared/` | Types and constants shared by server and client |
+| `scripts/` | `queue-task.mjs` CLI |
+| `tests/` | Vitest suites, `helpers.ts`, `fixtures/` |
 
 ## Verification
 

@@ -2,17 +2,38 @@ export const TIME_ZONE = "America/New_York";
 export const BLOCK_MINUTES = 300;
 export const RANGE_DAYS = [7, 14, 30, 90] as const;
 export type RangeDays = (typeof RANGE_DAYS)[number];
+/**
+ * Where a Claude response came from. "dispatched" is proven by the session id
+ * this dashboard assigned to a queued run; "local" is an interactive Claude Code
+ * session on this machine; "unknown" is a headless or pre-provenance record.
+ */
+export const ACTIVITY_SOURCES = ["local", "dispatched", "unknown"] as const;
+export type ActivitySource = (typeof ACTIVITY_SOURCES)[number];
+export const ACTIVITY_SOURCE_LABELS: Record<ActivitySource, string> = {
+  local: "Local Claude Code",
+  dispatched: "Dispatched tasks",
+  unknown: "Unattributed",
+};
+/** Quota consumption the official API reports but no local transcript explains (claude.ai, laptop). */
+export const EXTERNAL_SOURCE_LABEL = "Other";
 export interface ActivityEvent {
   timestamp: string;
   project: string;
   model: string;
+  source: ActivitySource;
   inputTokens: number;
   outputTokens: number;
   cacheReadTokens: number;
   cacheCreationTokens: number;
 }
+/** One assistant record plus the server-only provenance keys used to deduplicate and attribute it. */
+export interface ParsedEvent {
+  event: ActivityEvent;
+  messageId: string | null;
+  sessionId: string | null;
+}
 export interface ParseResult {
-  events: ActivityEvent[];
+  events: ParsedEvent[];
   warnings: number;
   lines: number;
 }
@@ -41,6 +62,10 @@ export interface Mix {
   name: string;
   responses: number;
 }
+export interface SourceActivity extends ActivityCount {
+  source: ActivitySource;
+  outputTokens: number;
+}
 export interface Analytics {
   claudeBudgets: ClaudeBudgets;
   currentBlock: CurrentBlock | null;
@@ -57,6 +82,8 @@ export interface Analytics {
     >;
   models: Mix[];
   projects: Mix[];
+  /** Always one entry per ActivitySource, in ACTIVITY_SOURCES order, for the selected range. */
+  sources: SourceActivity[];
   health: ParseHealth;
 }
 
@@ -210,6 +237,8 @@ export interface Task extends TaskInput {
 export interface TaskGate {
   status: "ready" | "waiting" | "running" | "finished";
   reason: string;
+  /** Earliest instant the time-based gates open, ignoring usage; null when unknowable. */
+  eligibleAt: string | null;
 }
 export type PublicTask = Task & {
   gate?: TaskGate;
@@ -255,19 +284,23 @@ export const shortHourLabel = (hour: number) =>
 
 export interface DispatchSettings {
   sessionReservePercent: number;
+  busyHoursReservePercent: number;
   weeklyMarginPercent: number;
-  quietHoursOnly: boolean;
   quietStartHours: number;
 }
 export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   sessionReservePercent: 25,
+  busyHoursReservePercent: 100,
   weeklyMarginPercent: 10,
-  quietHoursOnly: true,
   quietStartHours: 8,
 };
 export const MAX_SESSION_RESERVE_PERCENT = 90;
+export const MAX_BUSY_HOURS_RESERVE_PERCENT = 100;
 export const MAX_WEEKLY_MARGIN_PERCENT = 50;
 export const MAX_QUIET_START_HOURS = 24;
+/** A full busy-hours reserve leaves the queue no session budget outside quiet hours. */
+export const quietHoursOnly = (settings: DispatchSettings) =>
+  settings.busyHoursReservePercent >= MAX_BUSY_HOURS_RESERVE_PERCENT;
 /** Local start hours whose five-hour window has historically been quiet enough for auto-dispatch. */
 export interface QuietHours {
   startHours: number[] | null;
@@ -296,4 +329,28 @@ export interface PlanningSnapshot {
   fable: BucketGate | null;
   quiet: QuietHours;
   providers: Record<Provider, DispatchGate>;
+}
+
+export const PLAN_SCORE_DAYS = 28;
+export const PLAN_SCORE_COVERAGE_DAYS = 7;
+/** Share of a Eastern day's session capacity that official samples show as used; null before sampling began. */
+export interface CoverageDay {
+  date: string;
+  coverage: number | null;
+}
+/** One official weekly window: final percent for finished weeks, on-pace score for the open one. */
+export interface WeekScore {
+  start: string;
+  end: string;
+  percent: number;
+  score: number;
+  complete: boolean;
+}
+export interface PlanScore {
+  score: number | null;
+  sessionCoverage: number | null;
+  weeklyScore: number | null;
+  days: CoverageDay[];
+  weeks: WeekScore[];
+  generatedAt: string;
 }

@@ -9,6 +9,7 @@ const event = (
   timestamp,
   project: "demo",
   model: "claude-opus-4-6",
+  source: "local",
   inputTokens: 2,
   outputTokens: 3,
   cacheReadTokens: 5,
@@ -250,4 +251,49 @@ it("keeps an event one minute before the block end inside the same block", () =>
   expect(new Date(blocks[0].end).toISOString()).toBe(
     "2026-09-06T05:00:00.000Z",
   );
+});
+
+it("sums each activity source over the selected range and always reports every source", () => {
+  const result = aggregate(
+    history([
+      event("2026-09-06T10:00:00Z", { source: "dispatched", outputTokens: 3 }),
+      event("2026-09-06T10:00:30Z", { source: "dispatched", outputTokens: 5 }),
+      event("2026-09-06T11:00:00Z", { source: "local", outputTokens: 7 }),
+      event("2026-07-01T10:00:00Z", {
+        source: "dispatched",
+        outputTokens: 100,
+      }),
+      event("2026-09-06T13:00:00Z", { source: "local", outputTokens: 50 }),
+    ]),
+    7,
+    new Date("2026-09-06T12:00:00Z"),
+  );
+  expect(result.sources).toEqual([
+    { source: "local", activeMinutes: 1, responses: 1, outputTokens: 7 },
+    { source: "dispatched", activeMinutes: 1, responses: 2, outputTokens: 8 },
+    { source: "unknown", activeMinutes: 0, responses: 0, outputTokens: 0 },
+  ]);
+});
+
+it("ranks quiet hours from interactive activity only, so dispatched and unattributed runs cannot make a window look busy", () => {
+  const now = new Date("2026-09-06T12:00:00Z");
+  const busy = [
+    event("2026-09-05T05:00:00Z", { source: "dispatched" }),
+    event("2026-09-05T05:01:00Z", { source: "dispatched" }),
+    event("2026-09-05T05:02:00Z", { source: "unknown" }),
+  ];
+  const withoutInteractive = aggregate(history(busy), 30, now);
+  expect(
+    withoutInteractive.opportunities.every((w) => w.averageActiveMinutes === 0),
+  ).toBe(true);
+  const withInteractive = aggregate(
+    history([...busy, event("2026-09-05T05:03:00Z", { source: "local" })]),
+    30,
+    now,
+  );
+  const covering = withInteractive.opportunities.filter(
+    (w) => w.averageActiveMinutes > 0,
+  );
+  expect(covering.length).toBeGreaterThan(0);
+  expect(covering.every((w) => w.averageActiveMinutes === 1 / 30)).toBe(true);
 });

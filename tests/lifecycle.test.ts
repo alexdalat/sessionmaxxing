@@ -42,7 +42,7 @@ it("uses the persistent runtime data directory for dispatch settings and usage s
       payload: {
         sessionReservePercent: 30,
         weeklyMarginPercent: 5,
-        quietHoursOnly: true,
+        busyHoursReservePercent: 100,
         quietStartHours: 6,
       },
     });

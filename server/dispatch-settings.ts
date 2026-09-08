@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchSettings,
+  MAX_BUSY_HOURS_RESERVE_PERCENT,
   MAX_QUIET_START_HOURS,
   MAX_SESSION_RESERVE_PERCENT,
   MAX_WEEKLY_MARGIN_PERCENT,
@@ -11,8 +12,8 @@ import { atomicJson, DomainError, exactKeys } from "./storage.js";
 
 const KEYS = [
   "sessionReservePercent",
+  "busyHoursReservePercent",
   "weeklyMarginPercent",
-  "quietHoursOnly",
   "quietStartHours",
 ] as const;
 function numeric(value: unknown, max: number) {
@@ -29,14 +30,14 @@ export function validateSettings(
   if (
     !exactKeys(value, KEYS) ||
     !numeric(value.sessionReservePercent, MAX_SESSION_RESERVE_PERCENT) ||
+    !numeric(value.busyHoursReservePercent, MAX_BUSY_HOURS_RESERVE_PERCENT) ||
     !numeric(value.weeklyMarginPercent, MAX_WEEKLY_MARGIN_PERCENT) ||
-    typeof value.quietHoursOnly !== "boolean" ||
     !Number.isInteger(value.quietStartHours) ||
     !numeric(value.quietStartHours, MAX_QUIET_START_HOURS) ||
     (value.quietStartHours as number) < 1
   )
     throw new DomainError(
-      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, a quiet-hours flag, and 1 to ${MAX_QUIET_START_HOURS} quiet start hours.`,
+      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, and 1 to ${MAX_QUIET_START_HOURS} quiet start hours.`,
       400,
     );
 }
@@ -50,12 +51,16 @@ export const settingsSchema = {
       minimum: 0,
       maximum: MAX_SESSION_RESERVE_PERCENT,
     },
+    busyHoursReservePercent: {
+      type: "number",
+      minimum: 0,
+      maximum: MAX_BUSY_HOURS_RESERVE_PERCENT,
+    },
     weeklyMarginPercent: {
       type: "number",
       minimum: 0,
       maximum: MAX_WEEKLY_MARGIN_PERCENT,
     },
-    quietHoursOnly: { type: "boolean" },
     quietStartHours: {
       type: "integer",
       minimum: 1,
@@ -84,6 +89,20 @@ export class DispatchSettingsStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
       state = { ...DEFAULT_DISPATCH_SETTINGS };
+      await atomicJson(path, state);
+    }
+    // The quiet-hours flag became a budget: "on" reserves the whole session outside
+    // quiet hours, "off" spends the same reserve at every hour.
+    const legacy: Partial<DispatchSettings> & { quietHoursOnly?: unknown } =
+      state;
+    if (typeof legacy.quietHoursOnly === "boolean") {
+      const { quietHoursOnly: quietOnly, ...rest } = legacy;
+      state = {
+        ...rest,
+        busyHoursReservePercent: quietOnly
+          ? MAX_BUSY_HOURS_RESERVE_PERCENT
+          : rest.sessionReservePercent,
+      } as DispatchSettings;
       await atomicJson(path, state);
     }
     // Settings saved before quiet hours existed gain the defaults for the new keys.
