@@ -17,6 +17,8 @@ const DAYS = 7;
 const HOURS = 24;
 const WEEK_HOURS = DAYS * HOURS;
 const BLOCK_HOURS = BLOCK_MINUTES / 60;
+const TOOLTIP_CLASS =
+  "flex-col items-start gap-0.5 bg-popover text-popover-foreground ring-1 ring-foreground/10 [&_svg]:bg-popover [&_svg]:fill-popover";
 const pct = (fraction: number) => `${Math.round(fraction * 10000) / 100}%`;
 
 const activeLabel = (window: SessionWindow) =>
@@ -119,7 +121,7 @@ export function SessionWindows({
                           blockLabel(segment.window)}
                       </div>
                     </TooltipTrigger>
-                    <TooltipContent className="flex-col items-start gap-0.5">
+                    <TooltipContent className={TOOLTIP_CLASS}>
                       <strong className="font-medium">
                         {weekdayOf(easternDay(segment.window.start).date)}{" "}
                         {localClock(segment.window.start)} –{" "}

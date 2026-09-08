@@ -41,11 +41,15 @@ export function WeeklyPace({
     <figure className="panel" aria-label="Weekly usage against pace">
       <div className="section-heading">
         <h2>Weekly usage vs pace</h2>
-        <span className="muted">
-          {snapshot?.weekly.resetsAt
-            ? `Queue cutoff pace + ${marginPercent}%, max ${WEEKLY_HARD_CEILING_PERCENT}% · resets ${localTimestamp(snapshot.weekly.resetsAt)}`
-            : "No weekly window reported"}
-        </span>
+        {samples === undefined ? (
+          <Skeleton className="h-3 w-64" />
+        ) : (
+          <span className="muted">
+            {snapshot?.weekly.resetsAt
+              ? `Queue cutoff pace + ${marginPercent}%, max ${WEEKLY_HARD_CEILING_PERCENT}% · resets ${localTimestamp(snapshot.weekly.resetsAt)}`
+              : "No weekly window reported"}
+          </span>
+        )}
       </div>
       {series && snapshot ? (
         <div className="chart">

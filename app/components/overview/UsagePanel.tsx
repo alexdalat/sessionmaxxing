@@ -1,5 +1,6 @@
 import { ClockIcon } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
+import { Skeleton } from "@/app/components/ui/skeleton";
 import { formatRemaining } from "@/app/lib/duration";
 import {
   CLAUDE_BUCKET_LABELS,
@@ -139,11 +140,15 @@ export function UsagePanel({
       <div className="section-heading">
         <h2>{heading}</h2>
         <span className="usage-meta">
-          <span className="muted">
-            {snapshot
-              ? `Fetched ${formatRemaining(now - Date.parse(snapshot.fetchedAt))} ago`
-              : "Not fetched yet"}
-          </span>
+          {usage === undefined ? (
+            <Skeleton className="h-3 w-24" />
+          ) : (
+            <span className="muted">
+              {snapshot
+                ? `Fetched ${formatRemaining(now - Date.parse(snapshot.fetchedAt))} ago`
+                : "Not fetched yet"}
+            </span>
+          )}
           <Button
             type="button"
             variant="outline"

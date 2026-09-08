@@ -318,11 +318,13 @@ export function TaskQueue() {
             );
           })
         ) : (
-          <p>
-            {data?.tasks.length
-              ? "No tasks match this filter."
-              : "No tasks yet."}
-          </p>
+          <div className="empty">
+            <h2>
+              {data?.tasks.length
+                ? "No tasks match this filter"
+                : "No tasks yet"}
+            </h2>
+          </div>
         )}
       </section>
       <TaskFormDialog

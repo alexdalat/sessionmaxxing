@@ -22,12 +22,14 @@ export function RangeControls({
   return (
     <div className="header-controls">
       <div className="grid gap-1.5">
-        <Label htmlFor="range-days">Range</Label>
+        <Label htmlFor="range-days" className="sr-only">
+          Range
+        </Label>
         <Select
           value={String(days)}
           onValueChange={(value) => onChange(Number(value) as RangeDays)}
         >
-          <SelectTrigger id="range-days" aria-label="Range">
+          <SelectTrigger id="range-days">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

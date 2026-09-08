@@ -121,6 +121,23 @@
   body {
     margin: 0;
   }
+  * {
+    scrollbar-width: thin;
+  }
+  :root {
+    scrollbar-color: #ffffff24 transparent;
+  }
+  input[type="number"] {
+    appearance: textfield;
+  }
+  input[type="number"]::-webkit-inner-spin-button,
+  input[type="number"]::-webkit-outer-spin-button {
+    appearance: none;
+    margin: 0;
+  }
+  [data-slot="dialog-description"] {
+    margin: 0;
+  }
   .sr-only {
     position: absolute;
     width: 1px;
@@ -210,13 +227,20 @@
     padding: 10px 12px;
     text-align: left;
     border: 0;
+    border-radius: 8px;
     background: transparent;
     color: #8a8f98;
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+  .sidebar nav a:hover {
+    color: #d0d6e0;
+    background: #ffffff08;
   }
   .sidebar nav [aria-current="page"] {
     background: #191a1b;
     color: #f7f8f8;
-    border-radius: 8px;
   }
   .local-note {
     margin-top: auto;
@@ -243,7 +267,7 @@
   }
   .header-controls {
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 10px;
   }
   .panel {
@@ -320,6 +344,7 @@
     margin: 0;
     max-height: 300px;
     overflow: auto;
+    scrollbar-gutter: stable;
   }
   .mix-list li {
     margin-top: 14px;
@@ -409,6 +434,29 @@
     cursor: pointer;
     color: #d0d6e0;
     font-size: 12px;
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+  }
+  summary::-webkit-details-marker {
+    display: none;
+  }
+  summary::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    margin-left: 2px;
+    border-right: 1.5px solid #8a8f98;
+    border-bottom: 1.5px solid #8a8f98;
+    transform: rotate(-45deg);
+    transition: transform 120ms ease;
+  }
+  details[open] > summary::before {
+    transform: rotate(45deg);
+  }
+  summary:hover {
+    color: #f7f8f8;
   }
   .empty {
     border: 1px dashed #ffffff20;
@@ -419,8 +467,12 @@
   .empty h2 {
     margin-bottom: 6px;
   }
+  .empty h2:last-child,
   .empty p {
     margin: 0;
+  }
+  .panel .empty {
+    margin-bottom: 0;
   }
   .error,
   .warning {
@@ -438,11 +490,26 @@
     top: -100px;
     left: 20px;
     background: #7170ff;
-    padding: 10px;
+    color: #fff;
+    font-weight: 500;
+    padding: 8px 12px;
+    border-radius: 8px;
     z-index: 100;
   }
   .skip-link:focus {
     top: 10px;
+  }
+  @media (max-width: 1200px) {
+    .stats-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 1100px) {
+    .two-column,
+    .three-column {
+      grid-template-columns: 1fr;
+      gap: 0;
+    }
   }
   @media (max-width: 1000px) {
     .app-shell {
@@ -450,9 +517,6 @@
     }
     main {
       padding: 26px 22px;
-    }
-    .stats-grid {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
     .facts {
       grid-template-columns: repeat(2, 1fr);
@@ -496,11 +560,6 @@
     .header-controls {
       margin-top: 18px;
     }
-    .two-column,
-    .three-column {
-      grid-template-columns: 1fr;
-      gap: 0;
-    }
     .panel {
       padding: 16px;
     }
@@ -535,8 +594,9 @@
   .field-label {
     display: block;
     margin-bottom: 6px;
-    color: #d0d6e0;
-    font-size: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1;
   }
   .quiet-strip {
     display: grid;
@@ -628,8 +688,9 @@
   }
   .task-title {
     display: flex;
-    gap: 10px;
-    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: flex-start;
   }
   .guardrail-fields {
     border: 0;
@@ -640,6 +701,7 @@
   .task-card h3 {
     font-weight: 500;
     font-size: 14px;
+    line-height: 20px;
     margin: 0;
     overflow-wrap: anywhere;
   }
@@ -688,15 +750,17 @@
     font-size: 11px;
     color: #d0d6e0;
   }
-  @media (max-width: 700px) {
-    .form-grid {
-      grid-template-columns: 1fr;
-    }
+  @media (max-width: 900px) {
     .task-card {
       grid-template-columns: minmax(0, 1fr);
     }
     .task-actions {
       width: 100%;
+    }
+  }
+  @media (max-width: 700px) {
+    .form-grid {
+      grid-template-columns: 1fr;
     }
     .form-grid .full {
       grid-column: auto;
@@ -823,6 +887,10 @@
     display: flex;
     gap: 6px;
   }
+  .dispatch-panel .actions {
+    margin-top: auto;
+    padding-top: 20px;
+  }
   .windows {
     display: grid;
     grid-template-rows: repeat(7, minmax(22px, 1fr)) auto;
@@ -887,9 +955,10 @@
   }
   .windows-axis .windows-track .windows-hover-label {
     transform: translateX(-50%);
+    z-index: 1;
     color: #f7f8f8;
-    background: #08090a;
-    padding: 0 4px;
+    background: #0f1011;
+    padding: 0 6px;
     font-family: "JetBrains Mono", monospace;
   }
   .windows-axis .windows-track {
@@ -901,6 +970,11 @@
     position: absolute;
     font-size: 10px;
     color: #8a8f98;
+  }
+  .windows-axis
+    .windows-track:has(.windows-hover-label)
+    span:not(.windows-hover-label) {
+    visibility: hidden;
   }
   .usage-local {
     margin: 0;

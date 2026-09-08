@@ -15,7 +15,11 @@ export function PanelSkeleton() {
 }
 
 const USAGE_ROW_KEYS = ["session", "weekly", "fable"];
-const TABLE_ROW_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6"];
+const TABLE_ROW_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6", "r7"];
+const MIX_PANEL_KEYS = ["models", "projects", "sources"];
+const MIX_ROW_KEYS = ["m1", "m2", "m3", "m4", "m5"];
+const RUN_KEYS = ["run1", "run2", "run3"];
+const FACT_KEYS = ["model", "started", "duration", "exit"];
 const WINDOW_ROW_KEYS = ["w1", "w2", "w3", "w4", "w5", "w6", "w7"];
 
 function HeadingSkeleton() {
@@ -32,9 +36,25 @@ function TableSkeleton() {
       <HeadingSkeleton />
       <div className="table-scroll">
         {TABLE_ROW_KEYS.map((key) => (
-          <Skeleton className="mb-2 h-8 w-full" key={key} />
+          <Skeleton className="mb-1 h-[25px] w-full rounded-[3px]" key={key} />
         ))}
       </div>
+    </section>
+  );
+}
+function MixListSkeleton() {
+  return (
+    <section className="panel">
+      <Skeleton className="mb-4 h-4 w-40" />
+      {MIX_ROW_KEYS.map((key) => (
+        <div className="mt-3.5" key={key}>
+          <div className="flex justify-between gap-3">
+            <Skeleton className="h-3 w-32" />
+            <Skeleton className="h-3 w-10" />
+          </div>
+          <Skeleton className="mt-2 h-1 w-full rounded-none" />
+        </div>
+      ))}
     </section>
   );
 }
@@ -98,19 +118,38 @@ export function AnalyticsSkeleton() {
           </section>
         ))}
       </div>
-      <PanelSkeleton />
       <TableSkeleton />
+      <PanelSkeleton />
+      <div className="three-column">
+        {MIX_PANEL_KEYS.map((key) => (
+          <MixListSkeleton key={key} />
+        ))}
+      </div>
     </div>
   );
 }
 
 export function ListSkeleton() {
   return (
-    <section className="panel" role="status" aria-label="Loading">
-      {LIST_ROW_KEYS.map((key) => (
-        <Skeleton className="mb-3 h-10 w-full" key={key} />
+    <div role="status" aria-label="Loading">
+      {RUN_KEYS.map((key) => (
+        <section className="panel" key={key}>
+          <div className="section-heading">
+            <Skeleton className="h-4 w-64" />
+            <Skeleton className="h-5 w-20 rounded-4xl" />
+          </div>
+          <dl className="facts">
+            {FACT_KEYS.map((fact) => (
+              <div key={fact}>
+                <Skeleton className="h-3 w-16" />
+                <Skeleton className="mt-2 h-4 w-28" />
+              </div>
+            ))}
+          </dl>
+          <Skeleton className="mt-4 h-3 w-16" />
+        </section>
       ))}
-    </section>
+    </div>
   );
 }
 
