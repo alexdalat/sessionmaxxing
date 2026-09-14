@@ -3,12 +3,25 @@ import { expect, it, vi } from "vitest";
 import { planDispatch } from "../server/dispatch.js";
 import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
-import { DEFAULT_DISPATCH_SETTINGS, type Task } from "../shared/types.js";
+import {
+  DEFAULT_DISPATCH_SETTINGS,
+  type DispatchLoad,
+  type Task,
+} from "../shared/types.js";
 import { fakeChild, taskInput, temporary } from "./helpers";
+
+const serial = (load: DispatchLoad) =>
+  planDispatch(
+    { ...DEFAULT_DISPATCH_SETTINGS, maxConcurrentRuns: 1 },
+    { snapshot: null, error: null },
+    new Date(),
+    undefined,
+    load,
+  );
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
-it("runs one task at a time and persists safe run metadata and redacted logs on completion", async () => {
+it("runs one task at a time with a single slot and persists safe run metadata and redacted logs on completion", async () => {
   const temp = await temporary();
   try {
     const store = await QueueStore.open(temp.path);
@@ -17,8 +30,9 @@ it("runs one task at a time and persists safe run metadata and redacted logs on 
     const child = fakeChild();
     const launch = vi.fn(() => child);
     const runner = await Runner.open(store, temp.path, { launch });
+    runner.setPlanner(serial);
     const run = await runner.start(a.id);
-    await expect(runner.start(b.id)).rejects.toThrow(/running/);
+    await expect(runner.start(b.id)).rejects.toThrow(/run slots/);
     expect(launch).toHaveBeenCalledTimes(1);
     child.stdout.write(
       '{"type":"assistant","message":{"content":"PRIVATE GENERATED","usage":{"output_tokens":7}}}\n',
@@ -85,7 +99,7 @@ it("cancels the process group, holds the execution slot until close, and records
     await runner.cancel(task.id);
     expect(signal).toHaveBeenCalledWith(-12345, "SIGTERM");
     expect(store.snapshot().tasks[0].status).toBe("running");
-    await expect(runner.start(task.id)).rejects.toThrow(/running/);
+    await expect(runner.start(task.id)).rejects.toThrow(/pending/);
     child.emit("close", null, "SIGTERM");
     await runner.waitForIdle();
     expect(store.snapshot().tasks[0].status).toBe("cancelled");

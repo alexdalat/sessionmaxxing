@@ -1,12 +1,22 @@
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { PlanningSnapshot, Run, Task } from "../shared/types.js";
-import { localParts, localStart, shiftDate } from "./analytics.js";
-import { taskGate, USAGE_PREDATES_RUN_REASON } from "./dispatch.js";
+import {
+  DEFAULT_DISPATCH_SETTINGS,
+  type DispatchLoad,
+  type DispatchSettings,
+  EMPTY_LOAD,
+  type PlanningSnapshot,
+  type PublicTask,
+  type Run,
+  type Task,
+  type TaskGate,
+} from "../shared/types.js";
+import { taskGate, USAGE_PREDATES_RUN_REASON, withRun } from "./dispatch.js";
 import { OutputPreview } from "./output.js";
 import { launchProvider, type ProviderProcess } from "./providers.js";
 import type { QueueStore } from "./queue.js";
+import { resolveResources, resourcesCollide } from "./resources.js";
 import { atomicJson, DomainError, id } from "./storage.js";
 import { validateWorkdir } from "./validation.js";
 
@@ -15,12 +25,17 @@ interface RunnerOptions {
   launch?: (task: Task, sessionId: string | null) => ProviderProcess;
   now?: () => Date;
 }
+export type Planner = (load: DispatchLoad) => PlanningSnapshot;
 /** A run plus the session id dispatched to Claude, which never leaves the server. */
 interface StoredRun extends Run {
   sessionId: string | null;
 }
 const publicRun = ({ sessionId: _sessionId, ...run }: StoredRun): Run => run;
-interface Active {
+interface Holding {
+  task: Pick<Task, "id" | "title">;
+  resources: readonly string[];
+}
+interface Active extends Holding {
   task: Task;
   run: StoredRun;
   output: OutputPreview;
@@ -33,20 +48,24 @@ interface Active {
   flushTimer?: ReturnType<typeof setTimeout>;
   writeChain: Promise<void>;
 }
+const KILL_GRACE_MS = 2000;
+const PREVIEW_FLUSH_MS = 250;
+const TICK_MS = 5000;
+export const SLOTS_BUSY_ERROR = "All run slots are busy.";
+export const blockedReason = (title: string) =>
+  `Waits for “${title}” · same project`;
+
 export class Runner {
   private runs: StoredRun[] = [];
-  private active?: Active;
-  private starting = false;
-  private startDone: Promise<void> = Promise.resolve();
+  /** Runs holding a slot and their resource locks, keyed by run id, including runs still being claimed. */
+  private active = new Map<string, Active>();
+  private starts = new Set<Promise<unknown>>();
   private stopped = false;
   private timer?: ReturnType<typeof setInterval>;
   private ticking = false;
-  private getPlanning?: () => PlanningSnapshot;
+  private getPlanning?: Planner;
   private refreshUsage?: () => Promise<unknown>;
-  setPlanner(
-    planning: () => PlanningSnapshot,
-    refreshUsage?: () => Promise<unknown>,
-  ) {
+  setPlanner(planning: Planner, refreshUsage?: () => Promise<unknown>) {
     this.getPlanning = planning;
     this.refreshUsage = refreshUsage;
   }
@@ -57,6 +76,23 @@ export class Runner {
       if (run.endedAt !== null && (latest === null || run.endedAt > latest))
         latest = run.endedAt;
     return latest;
+  }
+  private settings(): DispatchSettings {
+    return this.getPlanning?.(EMPTY_LOAD).settings ?? DEFAULT_DISPATCH_SETTINGS;
+  }
+  /** Slots held and quota reserved by every active run. */
+  load(settings = this.settings()): DispatchLoad {
+    let load: DispatchLoad = {
+      ...EMPTY_LOAD,
+      lastRunEndedAt: this.lastRunEndedAt(),
+    };
+    for (const { task } of this.active.values())
+      load = withRun(load, task, settings);
+    return load;
+  }
+  private planning(load = this.load()): PlanningSnapshot {
+    if (!this.getPlanning) throw new DomainError("No planner configured.", 500);
+    return this.getPlanning(load);
   }
   error: string | null = null;
   private constructor(
@@ -119,10 +155,7 @@ export class Runner {
       .map(publicRun)
       .map((run) => ({
         ...run,
-        preview:
-          this.active?.run.id === run.id
-            ? this.active.output.lines()
-            : [...run.preview],
+        preview: this.active.get(run.id)?.output.lines() ?? [...run.preview],
         durationMs:
           run.status === "running"
             ? Math.max(0, this.now().getTime() - Date.parse(run.startedAt))
@@ -142,87 +175,149 @@ export class Runner {
     await atomicJson(join(this.directory, `${run.id}.log`), preview);
     await atomicJson(join(this.directory, `${run.id}.json`), metadata);
   }
-  async start(taskId: string): Promise<Run> {
-    if (this.stopped) throw new DomainError("The runner is shutting down.");
-    if (this.starting || this.active)
-      throw new DomainError("A task is already running.");
-    this.starting = true;
-    let releaseStart: (() => void) | undefined;
-    this.startDone = new Promise<void>((resolve) => {
-      releaseStart = resolve;
-    });
+  /** The active or already selected task whose resources `resources` may not share. */
+  private holder(
+    resources: readonly string[],
+    selected: readonly Holding[] = [],
+  ): Holding["task"] | undefined {
+    for (const holding of [...this.active.values(), ...selected])
+      if (resourcesCollide(holding.resources, resources)) return holding.task;
+    return undefined;
+  }
+  /** The task's gate, plus the lock it would wait for when it is otherwise ready. */
+  async gate(
+    task: PublicTask,
+    planning: PlanningSnapshot,
+    now: Date,
+  ): Promise<TaskGate> {
+    const gate = taskGate(task, planning, now);
+    if (gate.status !== "ready") return gate;
+    let resources: string[];
     try {
-      const task = await this.store.claim(taskId);
-      const sessionId = task.provider === "claude" ? randomUUID() : null;
-      const run: StoredRun = {
-        id: id(),
-        taskId: task.id,
-        title: task.title,
-        provider: task.provider,
-        model: task.model,
-        status: "running",
-        startedAt: this.now().toISOString(),
-        endedAt: null,
-        durationMs: 0,
-        exitCode: null,
-        error: null,
-        sessionId,
-        preview: [],
-      };
-      let resolve: () => void = () => {
-        throw new Error("Completion resolver was not initialized.");
-      };
-      const done = new Promise<void>((r) => {
-        resolve = r;
-      });
-      const active: Active = {
-        task,
-        run,
-        output: new OutputPreview(),
-        done,
-        resolve,
-        finishing: false,
-        writeChain: Promise.resolve(),
-      };
-      this.active = active;
-      this.runs.push(run);
-      try {
-        task.workdir = await validateWorkdir(task.workdir);
-        await this.persist(run);
-        if (this.stopped || active.cancelled) {
-          active.cancelled = true;
-          await this.finish(active, null);
-          return this.list().find((r) => r.id === run.id) as Run;
-        }
-        const child = (this.options.launch ?? launchProvider)(task, sessionId);
-        active.child = child;
-        for (const channel of ["stdout", "stderr"] as const) {
-          child[channel]?.on("data", (chunk) => {
-            active.output.push(channel, chunk.toString());
-            this.schedulePreview(active);
-          });
-        }
-        child.once("error", () => {
-          void this.finish(
-            active,
-            null,
-            "Provider could not start. Check CLI installation and authentication.",
-          );
+      resources = await resolveResources(task.workdir);
+    } catch (error) {
+      if (!(error instanceof DomainError)) throw error;
+      return { ...gate, status: "waiting", reason: error.message };
+    }
+    const holder = this.holder(resources);
+    if (!holder) return gate;
+    return {
+      ...gate,
+      status: "waiting",
+      reason: blockedReason(holder.title),
+      blockedBy: holder.title,
+    };
+  }
+  /**
+   * Start a pending task. Run now (`gated` false) skips the usage and schedule
+   * gates but never the slot bound or the resource locks.
+   */
+  async start(taskId: string, gated = false): Promise<Run> {
+    if (this.stopped) throw new DomainError("The runner is shutting down.");
+    const starting = this.admit(taskId, gated);
+    this.starts.add(starting);
+    try {
+      return await starting;
+    } finally {
+      this.starts.delete(starting);
+    }
+  }
+  private async admit(taskId: string, gated: boolean): Promise<Run> {
+    const task = this.store
+      .snapshot()
+      .tasks.find((candidate) => candidate.id === taskId);
+    if (!task) throw new DomainError("Task not found.", 404);
+    if (task.status !== "pending")
+      throw new DomainError("Only pending tasks can run.");
+    const resources = await resolveResources(task.workdir);
+    if (this.active.size >= this.settings().maxConcurrentRuns)
+      throw new DomainError(SLOTS_BUSY_ERROR);
+    const holder = this.holder(resources);
+    if (holder) throw new DomainError(blockedReason(holder.title));
+    if (gated) {
+      const gate = taskGate(task, this.planning(), this.now());
+      if (gate.status !== "ready") throw new DomainError(gate.reason);
+    }
+    const sessionId = task.provider === "claude" ? randomUUID() : null;
+    const run: StoredRun = {
+      id: id(),
+      taskId: task.id,
+      title: task.title,
+      provider: task.provider,
+      model: task.model,
+      status: "running",
+      startedAt: this.now().toISOString(),
+      endedAt: null,
+      durationMs: 0,
+      exitCode: null,
+      error: null,
+      sessionId,
+      preview: [],
+    };
+    let resolve: () => void = () => {
+      throw new Error("Completion resolver was not initialized.");
+    };
+    const done = new Promise<void>((r) => {
+      resolve = r;
+    });
+    const active: Active = {
+      task,
+      resources,
+      run,
+      output: new OutputPreview(),
+      done,
+      resolve,
+      finishing: false,
+      writeChain: Promise.resolve(),
+    };
+    this.active.set(run.id, active);
+    this.runs.push(run);
+    await this.launch(active, sessionId);
+    return this.list().find((r) => r.id === run.id) as Run;
+  }
+  private async launch(active: Active, sessionId: string | null) {
+    const { run } = active;
+    try {
+      active.task = await this.store.claim(active.task.id);
+    } catch (error) {
+      this.active.delete(run.id);
+      this.runs = this.runs.filter((r) => r.id !== run.id);
+      active.resolve();
+      throw error;
+    }
+    const { task } = active;
+    try {
+      task.workdir = await validateWorkdir(task.workdir);
+      await this.persist(run);
+      if (this.stopped || active.cancelled) {
+        active.cancelled = true;
+        await this.finish(active, null);
+        return;
+      }
+      const child = (this.options.launch ?? launchProvider)(task, sessionId);
+      active.child = child;
+      for (const channel of ["stdout", "stderr"] as const) {
+        child[channel]?.on("data", (chunk) => {
+          active.output.push(channel, chunk.toString());
+          this.schedulePreview(active);
         });
-        child.once("close", (code: number | null) => {
-          void this.finish(active, code);
-        });
-      } catch {
-        await this.finish(
+      }
+      child.once("error", () => {
+        void this.finish(
           active,
           null,
-          "Run could not start. Check the work directory, CLI, and runtime file access.",
+          "Provider could not start. Check CLI installation and authentication.",
         );
-      }
-      return this.list().find((r) => r.id === run.id) as Run;
-    } finally {
-      this.starting = false;
-      releaseStart?.();
+      });
+      child.once("close", (code: number | null) => {
+        void this.finish(active, code);
+      });
+    } catch {
+      await this.finish(
+        active,
+        null,
+        "Run could not start. Check the work directory, CLI, and runtime file access.",
+      );
     }
   }
   private schedulePreview(active: Active) {
@@ -237,7 +332,7 @@ export class Runner {
           this.error =
             "Could not save live output. Auto-dispatch is paused; check runtime file access.";
         });
-    }, 250);
+    }, PREVIEW_FLUSH_MS);
     active.flushTimer.unref();
   }
   private async finish(active: Active, code: number | null, error?: string) {
@@ -276,13 +371,15 @@ export class Runner {
       this.error =
         "Could not finalize the queue task. Auto-dispatch is paused; check runtime file access and restart.";
     } finally {
-      this.active = undefined;
+      this.active.delete(active.run.id);
       active.resolve();
     }
   }
   async waitForIdle() {
-    await this.startDone;
-    if (this.active) await this.active.done;
+    while (this.starts.size > 0 || this.active.size > 0) {
+      await Promise.allSettled([...this.starts]);
+      await Promise.all([...this.active.values()].map((a) => a.done));
+    }
   }
   private signal(active: Active, signal: NodeJS.Signals) {
     if (!active.child) return;
@@ -296,9 +393,10 @@ export class Runner {
     }
   }
   async cancel(taskId: string) {
-    const active = this.active;
-    if (!active || active.task.id !== taskId || active.finishing)
-      throw new DomainError("Task is not running.");
+    const active = [...this.active.values()].find(
+      (candidate) => candidate.task.id === taskId && !candidate.finishing,
+    );
+    if (!active) throw new DomainError("Task is not running.");
     active.cancelled = true;
     this.signal(active, "SIGTERM");
     if (!active.killTimer) {
@@ -309,47 +407,62 @@ export class Runner {
           this.error =
             "Could not terminate the provider process. Stop it before restarting the dashboard.";
         }
-      }, 2000);
+      }, KILL_GRACE_MS);
       active.killTimer.unref();
     }
+  }
+  /**
+   * Pending tasks, in queue order, that fit the free slots, the aggregate quota
+   * after every earlier pick, and the locks held by running and picked tasks.
+   */
+  private async select(at: Date): Promise<PublicTask[]> {
+    const settings = this.settings();
+    let load = this.load(settings);
+    const picked: Holding[] = [];
+    for (const task of this.store.snapshot().tasks) {
+      if (load.running >= settings.maxConcurrentRuns) break;
+      if (
+        task.status !== "pending" ||
+        taskGate(task, this.planning(load), at).status !== "ready"
+      )
+        continue;
+      let resources: string[];
+      try {
+        resources = await resolveResources(task.workdir);
+      } catch (error) {
+        if (!(error instanceof DomainError)) throw error;
+        continue;
+      }
+      if (this.holder(resources, picked)) continue;
+      picked.push({ task, resources });
+      load = withRun(load, task, settings);
+    }
+    return picked.map((holding) => holding.task as PublicTask);
   }
   async tick() {
     if (
       this.ticking ||
       !this.getPlanning ||
       this.stopped ||
-      this.starting ||
-      this.active ||
       this.error ||
       !this.store.snapshot().autoDispatch
     )
       return;
     this.ticking = true;
     try {
-      let planning = this.getPlanning();
       if (
-        planning.providers.claude.reason === USAGE_PREDATES_RUN_REASON &&
+        this.planning().providers.claude.reason === USAGE_PREDATES_RUN_REASON &&
         this.refreshUsage
-      ) {
+      )
         await this.refreshUsage();
-        planning = this.getPlanning();
+      for (const task of await this.select(this.now())) {
+        try {
+          await this.start(task.id, true);
+        } catch (error) {
+          // A Run now or a finished run changed the load mid-tick; the next tick re-plans.
+          if (!(error instanceof DomainError)) throw error;
+        }
       }
-      const at = this.now();
-      const now = at.getTime();
-      const today = localParts(now).date;
-      const eligible = this.store.snapshot().tasks.find((task) => {
-        if (
-          task.status !== "pending" ||
-          taskGate(task, planning, at).status !== "ready"
-        )
-          return false;
-        if (task.preferredWindowStart === null) return true;
-        return [today, shiftDate(today, -1)].some((date) => {
-          const start = localStart(date, task.preferredWindowStart as number);
-          return now >= start && now < start + 5 * 60 * 60 * 1000;
-        });
-      });
-      if (eligible) await this.start(eligible.id);
     } finally {
       this.ticking = false;
     }
@@ -361,15 +474,15 @@ export class Runner {
         this.error =
           "Auto-dispatch failed and is paused. Check runtime state and restart.";
       });
-    }, 5000);
+    }, TICK_MS);
     this.timer.unref();
   }
   async close() {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
-    await this.startDone;
-    if (this.active && !this.active.finishing)
-      await this.cancel(this.active.task.id);
+    await Promise.allSettled([...this.starts]);
+    for (const active of this.active.values())
+      if (!active.finishing) await this.cancel(active.task.id);
     await this.waitForIdle();
   }
 }

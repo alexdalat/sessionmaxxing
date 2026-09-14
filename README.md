@@ -27,7 +27,15 @@ Every snapshot is appended to `data/usage-samples.jsonl` (14 days kept). From th
 
 ## Auto-dispatch
 
-Queue tasks under **Task queue**. With the queue on, the server runs one **Ready** task at a time. The on/off state is stored in `data/queue.json` and survives restarts; a task interrupted by a restart is marked failed. A Claude task is Ready when the official snapshot is fresh (under 15 min), session usage is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. Codex tasks are not gated. **Run now** overrides everything. Settings live in `data/dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours }`.
+Queue tasks under **Task queue**. With the queue on, the server runs up to *Tasks running at once* **Ready** tasks together (default 2, at most 4; 1 keeps the old one-at-a-time behaviour). The on/off state is stored in `data/queue.json` and survives restarts; every task still running at a restart is marked failed. A Claude task is Ready when a run slot is free, the official snapshot is fresh (under 15 min) and newer than the last finished run, session usage plus the points held for running Claude tasks is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage plus its held points is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. Codex tasks are not gated by usage but take a slot. **Run now** overrides the usage gate and the schedule, never the slot limit or a busy repository. Settings live in `data/dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours, maxConcurrentRuns, runSessionCostPercent, runWeeklyCostPercent }`.
+
+### Parallel runs
+
+Two tasks run together only when they cannot touch the same files. The server resolves each work directory (symlinks included) and the git repository it belongs to, following linked worktrees back to their main checkout. Tasks whose directories are equal or nested, or that belong to the same repository, wait for each other; the waiting card names the task it waits for. Independent repositories and unrelated directories run side by side. A directory whose repository cannot be read waits instead of running unlocked.
+
+Every running Claude task holds *Session held per running Claude task* points of the session window (default 20%) and *Weekly held per running Claude task* points of the weekly window (default 3%, Fable models also hold it in the Fable window) until it finishes. The next task starts only if usage plus everything held still fits under the queue cutoff, so two tasks never start just because each would fit alone. The Overview panel shows running slots as `1/2` and the held points next to each bucket. Settings files saved before these options existed load with the defaults.
+
+Limits: the hold is a fixed estimate, not measured consumption; worktrees of one repository always serialize; locks live in the server process, so a task started outside the dashboard is invisible to them; and a restart fails every running task.
 
 Dispatched Claude tasks run with `--dangerously-skip-permissions`, so a queued run has the same tools an interactive session has: shell, web search, and any MCP servers or skills configured under `~/.claude`, which the container mounts along with your global `CLAUDE.md`.
 
@@ -91,4 +99,4 @@ pnpm test
 pnpm build
 ```
 
-Tests use synthetic transcripts, fake provider processes, and a stubbed usage fetcher. They never call Anthropic or launch coding agents.
+Tests use synthetic transcripts, fake provider processes, and a stubbed usage fetcher. They never call Anthropic or launch coding agents. `tests/parallel.test.ts` and `tests/resources.test.ts` cover the slot bound, aggregate budget, collision rules, and multi-run recovery; the design note is `reports/parallel-dispatch-design.md`.

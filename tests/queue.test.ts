@@ -63,7 +63,7 @@ it("rejects missing, relative, outside-home and symlink-escaped workdirs and mal
     await temp.cleanup();
   }
 });
-it("edits pending tasks, preserves omitted prompts, serializes claims, retries failure and reorders priorities", async () => {
+it("edits pending tasks, preserves omitted prompts, claims independently, retries failure and reorders priorities", async () => {
   const temp = await temporary();
   try {
     const store = await QueueStore.open(temp.path);
@@ -79,9 +79,10 @@ it("edits pending tasks, preserves omitted prompts, serializes claims, retries f
       store.claim(a.id),
       store.claim(b.id),
     ]);
-    expect(results.map((r) => r.status).sort()).toEqual([
-      "fulfilled",
-      "rejected",
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "fulfilled"]);
+    expect(store.snapshot().tasks.map((t) => t.status)).toEqual([
+      "running",
+      "running",
     ]);
     expect((results[0] as PromiseFulfilledResult<unknown>).value).toMatchObject(
       { prompt: taskInput(temp.path).prompt },
@@ -98,6 +99,7 @@ it("edits pending tasks, preserves omitted prompts, serializes claims, retries f
     await store.claim(a.id);
     await store.finish(a.id, "completed");
     await expect(store.retry(a.id)).rejects.toThrow(/failed or cancelled/);
+    await store.finish(b.id, "completed");
     await store.delete(a.id);
     await store.delete(b.id);
     expect(store.snapshot().tasks).toHaveLength(0);

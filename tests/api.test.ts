@@ -506,6 +506,9 @@ it("serves official usage with sample history, refreshes on demand, and validate
         busyHoursReservePercent: 90,
         weeklyMarginPercent: 0,
         quietStartHours: 8,
+        maxConcurrentRuns: 1,
+        runSessionCostPercent: 20,
+        runWeeklyCostPercent: 3,
       },
     });
     expect(saved.json().providers.claude.status).toBe("waiting");
@@ -519,12 +522,18 @@ it("serves official usage with sample history, refreshes on demand, and validate
       busyHoursReservePercent: 90,
       weeklyMarginPercent: 0,
       quietStartHours: 8,
+      maxConcurrentRuns: 1,
+      runSessionCostPercent: 20,
+      runWeeklyCostPercent: 3,
     });
     const valid = {
       sessionReservePercent: 10,
       busyHoursReservePercent: 100,
       weeklyMarginPercent: 0,
       quietStartHours: 8,
+      maxConcurrentRuns: 2,
+      runSessionCostPercent: 20,
+      runWeeklyCostPercent: 3,
     };
     for (const payload of [
       { ...valid, sessionReservePercent: 91 },
@@ -533,6 +542,11 @@ it("serves official usage with sample history, refreshes on demand, and validate
       { ...valid, busyHoursReservePercent: "50" },
       { ...valid, quietStartHours: 0 },
       { ...valid, quietStartHours: 2.5 },
+      { ...valid, maxConcurrentRuns: 0 },
+      { ...valid, maxConcurrentRuns: 5 },
+      { ...valid, maxConcurrentRuns: 1.5 },
+      { ...valid, runSessionCostPercent: 101 },
+      { ...valid, runWeeklyCostPercent: -1 },
       { sessionReservePercent: 10, weeklyMarginPercent: 0 },
       { ...valid, extra: 1 },
     ])
@@ -781,6 +795,9 @@ it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
       busyHoursReservePercent: 100,
       weeklyMarginPercent: 5,
       quietStartHours: 6,
+      maxConcurrentRuns: 2,
+      runSessionCostPercent: 20,
+      runWeeklyCostPercent: 3,
     });
     expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
     await writeFile(path, JSON.stringify({ ...legacy, quietHoursOnly: false }));
@@ -789,6 +806,9 @@ it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
       busyHoursReservePercent: 40,
       weeklyMarginPercent: 5,
       quietStartHours: 6,
+      maxConcurrentRuns: 2,
+      runSessionCostPercent: 20,
+      runWeeklyCostPercent: 3,
     });
     expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
   } finally {

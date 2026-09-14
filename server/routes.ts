@@ -4,7 +4,6 @@ import type {
   PublicTask,
   TaskInput,
 } from "../shared/types.js";
-import { taskGate } from "./dispatch.js";
 import { emptyQuerySchema } from "./dispatch-settings.js";
 import type { QueueStore } from "./queue.js";
 import type { Runner } from "./runner.js";
@@ -38,9 +37,9 @@ export function registerQueueRoutes(
   now: () => Date,
   getPlanning?: () => PlanningSnapshot,
 ) {
-  const plannedTask = (task: PublicTask) =>
+  const plannedTask = async (task: PublicTask) =>
     getPlanning
-      ? { ...task, gate: taskGate(task, getPlanning(), now()) }
+      ? { ...task, gate: await runner.gate(task, getPlanning(), now()) }
       : task;
   app.get(
     "/api/queue",
@@ -54,10 +53,12 @@ export function registerQueueRoutes(
         ...(planning
           ? {
               planning,
-              tasks: snapshot.tasks.map((task) => ({
-                ...task,
-                gate: taskGate(task, planning, at),
-              })),
+              tasks: await Promise.all(
+                snapshot.tasks.map(async (task) => ({
+                  ...task,
+                  gate: await runner.gate(task, planning, at),
+                })),
+              ),
             }
           : {}),
         runnerError: runner.error,

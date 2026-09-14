@@ -239,6 +239,8 @@ export interface TaskGate {
   reason: string;
   /** Earliest instant the time-based gates open, ignoring usage; null when unknowable. */
   eligibleAt: string | null;
+  /** Title of the running task holding a resource this task needs. */
+  blockedBy?: string;
 }
 export type PublicTask = Task & {
   gate?: TaskGate;
@@ -287,17 +289,27 @@ export interface DispatchSettings {
   busyHoursReservePercent: number;
   weeklyMarginPercent: number;
   quietStartHours: number;
+  maxConcurrentRuns: number;
+  /** Session points one Claude run is expected to consume, reserved while it runs. */
+  runSessionCostPercent: number;
+  /** Weekly (and Fable weekly) points one Claude run is expected to consume. */
+  runWeeklyCostPercent: number;
 }
 export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   sessionReservePercent: 25,
   busyHoursReservePercent: 100,
   weeklyMarginPercent: 10,
   quietStartHours: 8,
+  maxConcurrentRuns: 2,
+  runSessionCostPercent: 20,
+  runWeeklyCostPercent: 3,
 };
 export const MAX_SESSION_RESERVE_PERCENT = 90;
 export const MAX_BUSY_HOURS_RESERVE_PERCENT = 100;
 export const MAX_WEEKLY_MARGIN_PERCENT = 50;
 export const MAX_QUIET_START_HOURS = 24;
+export const MAX_CONCURRENT_RUNS = 4;
+export const MAX_RUN_COST_PERCENT = 100;
 /** A full busy-hours reserve leaves the queue no session budget outside quiet hours. */
 export const quietHoursOnly = (settings: DispatchSettings) =>
   settings.busyHoursReservePercent >= MAX_BUSY_HOURS_RESERVE_PERCENT;
@@ -314,8 +326,24 @@ export interface BucketGate {
   percent: number | null;
   ceiling: number;
   pace: number | null;
+  /** Points held for runs in progress; the bucket passes when percent + reserved ≤ ceiling. */
+  reserved: number;
   ok: boolean;
 }
+/** What the runner is doing right now, as the planner needs to see it. */
+export interface DispatchLoad {
+  /** End time of the most recently finished run, so usage fetched before it is not trusted. */
+  lastRunEndedAt: string | null;
+  running: number;
+  claudeRuns: number;
+  reserved: Record<ClaudeBucket, number>;
+}
+export const EMPTY_LOAD: DispatchLoad = {
+  lastRunEndedAt: null,
+  running: 0,
+  claudeRuns: 0,
+  reserved: { session: 0, weekly: 0, fable: 0 },
+};
 export interface DispatchGate {
   status: "ready" | "waiting";
   reason: string;
@@ -328,6 +356,7 @@ export interface PlanningSnapshot {
   weekly: BucketGate;
   fable: BucketGate | null;
   quiet: QuietHours;
+  load: DispatchLoad;
   providers: Record<Provider, DispatchGate>;
 }
 

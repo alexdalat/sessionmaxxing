@@ -120,7 +120,9 @@ export function TaskQueue() {
     setEditing(undefined);
   }
   const pending = data?.tasks.filter((t) => t.status === "pending") ?? [];
-  const running = data?.tasks.some((t) => t.status === "running");
+  const slotsFull =
+    data?.planning !== undefined &&
+    data.planning.load.running >= data.planning.settings.maxConcurrentRuns;
   const ordered = displayOrder(data?.tasks ?? []);
   const nextId = ordered.find((task) => task.status === "pending")?.id;
   const visibleTasks = ordered.filter(
@@ -218,7 +220,12 @@ export function TaskQueue() {
                         type="button"
                         variant="outline"
                         size="sm"
-                        disabled={busy || running || isLeaving}
+                        disabled={
+                          busy ||
+                          slotsFull ||
+                          isLeaving ||
+                          task.gate?.blockedBy !== undefined
+                        }
                         aria-label={`Run ${task.title} now`}
                         onClick={() => setConfirm({ kind: "run", task })}
                       >

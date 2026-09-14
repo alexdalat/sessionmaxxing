@@ -17,7 +17,13 @@ function Bucket({ name, gate }: { name: string; gate: BucketGate }) {
         style={{ color: `hsl(${usageHue(percent, gate.ceiling)} 45% 66%)` }}
       >
         {percent}%
-      </strong>{" "}
+      </strong>
+      {gate.reserved > 0 && (
+        <>
+          {" "}
+          + <span className="metric">{gate.reserved}%</span> held
+        </>
+      )}{" "}
       of {gate.ceiling}%
     </>
   );
@@ -36,11 +42,18 @@ export function DispatchPanel({
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pending = tasks?.filter((task) => task.status === "pending") ?? [];
+  const running = tasks?.filter((task) => task.status === "running") ?? [];
   const counts = [
-    ["pending", pending.length],
-    ["ready", pending.filter((t) => t.gate?.status === "ready").length],
-    ["waiting", pending.filter((t) => t.gate?.status === "waiting").length],
-    ["running", tasks?.filter((t) => t.status === "running").length ?? 0],
+    ["pending", String(pending.length)],
+    ["ready", String(pending.filter((t) => t.gate?.status === "ready").length)],
+    [
+      "waiting",
+      String(pending.filter((t) => t.gate?.status === "waiting").length),
+    ],
+    [
+      "running",
+      `${planning.load.running}/${planning.settings.maxConcurrentRuns}`,
+    ],
   ] as const;
   const claude = planning.providers.claude;
   const queueLabel =
@@ -48,13 +61,21 @@ export function DispatchPanel({
   const next = tasks
     ? displayOrder(tasks).find((task) => task.status === "pending")
     : undefined;
+  const slotsFull =
+    planning.load.running >= planning.settings.maxConcurrentRuns;
   const nextLine = !tasks
     ? ""
-    : tasks.some((task) => task.status === "running")
-      ? `Running ${tasks.find((task) => task.status === "running")?.title}`
-      : next
-        ? `Next ${next.title}`
-        : "Queue empty";
+    : [
+        running.length === 1
+          ? `Running ${running[0].title}`
+          : running.length > 1
+            ? `Running ${running.length} tasks`
+            : "",
+        next && !slotsFull ? `Next ${next.title}` : "",
+        running.length === 0 && !next ? "Queue empty" : "",
+      ]
+        .filter(Boolean)
+        .join(" · ");
   return (
     <section className="panel dispatch-panel" aria-label="Queue">
       <div className="section-heading">

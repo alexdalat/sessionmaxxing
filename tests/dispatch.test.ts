@@ -6,7 +6,7 @@ import {
   weeklyPace,
 } from "../server/dispatch.js";
 import type { QuietRanking } from "../server/quiet-hours.js";
-import { DEFAULT_DISPATCH_SETTINGS } from "../shared/types.js";
+import { DEFAULT_DISPATCH_SETTINGS, EMPTY_LOAD } from "../shared/types.js";
 import { usageSnapshot } from "./helpers";
 
 const now = new Date("2026-09-06T12:00:00Z");
@@ -55,6 +55,7 @@ it("holds Claude tasks when the session exceeds its ceiling and treats an expire
     percent: 80,
     ceiling: 75,
     pace: null,
+    reserved: 0,
     ok: false,
   });
   expect(busy.providers.claude).toEqual({
@@ -85,6 +86,7 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
     percent: 61,
     ceiling: 60,
     pace: 50,
+    reserved: 0,
     ok: false,
   });
   expect(ahead.providers.claude.reason).toBe(
@@ -106,7 +108,7 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
   expect(lateWeek.providers.claude.status).toBe("waiting");
   expect(
     plan(usageSnapshot({ weekly: { percent: 0, resetsAt: null } })).weekly,
-  ).toEqual({ percent: 0, ceiling: 95, pace: null, ok: true });
+  ).toEqual({ percent: 0, ceiling: 95, pace: null, reserved: 0, ok: true });
 });
 
 it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirrors task status", () => {
@@ -117,6 +119,7 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
     percent: 70,
     ceiling: 60,
     pace: 50,
+    reserved: 0,
     ok: false,
   });
   const base = {
@@ -241,7 +244,7 @@ it("distrusts official usage fetched before the last run ended", () => {
     { snapshot, error: null },
     now,
     undefined,
-    "2026-09-06T11:56:00Z",
+    { ...EMPTY_LOAD, lastRunEndedAt: "2026-09-06T11:56:00Z" },
   );
   expect(predates.providers.claude).toEqual({
     status: "waiting",
@@ -253,7 +256,7 @@ it("distrusts official usage fetched before the last run ended", () => {
     { snapshot, error: null },
     now,
     undefined,
-    "2026-09-06T11:55:00Z",
+    { ...EMPTY_LOAD, lastRunEndedAt: "2026-09-06T11:55:00Z" },
   );
   expect(fresh.providers.claude.status).toBe("ready");
 });
@@ -371,6 +374,7 @@ it("holds the session to the busy-hours reserve outside quiet hours", () => {
     percent: 40,
     ceiling: 30,
     pace: null,
+    reserved: 0,
     ok: false,
   });
   expect(planning.providers.claude).toEqual({
@@ -394,6 +398,7 @@ it("holds the session to the quiet-hours reserve inside quiet hours", () => {
     percent: 40,
     ceiling: 90,
     pace: null,
+    reserved: 0,
     ok: true,
   });
   expect(taskGate(pending, planning, now)).toEqual({

@@ -4,7 +4,9 @@ import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchSettings,
   MAX_BUSY_HOURS_RESERVE_PERCENT,
+  MAX_CONCURRENT_RUNS,
   MAX_QUIET_START_HOURS,
+  MAX_RUN_COST_PERCENT,
   MAX_SESSION_RESERVE_PERCENT,
   MAX_WEEKLY_MARGIN_PERCENT,
 } from "../shared/types.js";
@@ -15,6 +17,9 @@ const KEYS = [
   "busyHoursReservePercent",
   "weeklyMarginPercent",
   "quietStartHours",
+  "maxConcurrentRuns",
+  "runSessionCostPercent",
+  "runWeeklyCostPercent",
 ] as const;
 function numeric(value: unknown, max: number) {
   return (
@@ -34,10 +39,15 @@ export function validateSettings(
     !numeric(value.weeklyMarginPercent, MAX_WEEKLY_MARGIN_PERCENT) ||
     !Number.isInteger(value.quietStartHours) ||
     !numeric(value.quietStartHours, MAX_QUIET_START_HOURS) ||
-    (value.quietStartHours as number) < 1
+    (value.quietStartHours as number) < 1 ||
+    !Number.isInteger(value.maxConcurrentRuns) ||
+    !numeric(value.maxConcurrentRuns, MAX_CONCURRENT_RUNS) ||
+    (value.maxConcurrentRuns as number) < 1 ||
+    !numeric(value.runSessionCostPercent, MAX_RUN_COST_PERCENT) ||
+    !numeric(value.runWeeklyCostPercent, MAX_RUN_COST_PERCENT)
   )
     throw new DomainError(
-      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, and 1 to ${MAX_QUIET_START_HOURS} quiet start hours.`,
+      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, 1 to ${MAX_QUIET_START_HOURS} quiet start hours, 1 to ${MAX_CONCURRENT_RUNS} concurrent runs, and run costs from 0 to ${MAX_RUN_COST_PERCENT}%.`,
       400,
     );
 }
@@ -65,6 +75,21 @@ export const settingsSchema = {
       type: "integer",
       minimum: 1,
       maximum: MAX_QUIET_START_HOURS,
+    },
+    maxConcurrentRuns: {
+      type: "integer",
+      minimum: 1,
+      maximum: MAX_CONCURRENT_RUNS,
+    },
+    runSessionCostPercent: {
+      type: "number",
+      minimum: 0,
+      maximum: MAX_RUN_COST_PERCENT,
+    },
+    runWeeklyCostPercent: {
+      type: "number",
+      minimum: 0,
+      maximum: MAX_RUN_COST_PERCENT,
     },
   },
 };
@@ -105,7 +130,7 @@ export class DispatchSettingsStore {
       } as DispatchSettings;
       await atomicJson(path, state);
     }
-    // Settings saved before quiet hours existed gain the defaults for the new keys.
+    // Settings saved before a newer key existed gain the defaults for the missing keys.
     if (
       state !== null &&
       typeof state === "object" &&

@@ -18,7 +18,9 @@ import {
   type Analytics,
   type DispatchSettings,
   MAX_BUSY_HOURS_RESERVE_PERCENT,
+  MAX_CONCURRENT_RUNS,
   MAX_QUIET_START_HOURS,
+  MAX_RUN_COST_PERCENT,
   MAX_SESSION_RESERVE_PERCENT,
   MAX_WEEKLY_MARGIN_PERCENT,
   type Opportunity,
@@ -60,6 +62,9 @@ const draftFrom = (settings: DispatchSettings) => ({
   busyHoursReservePercent: String(settings.busyHoursReservePercent),
   weeklyMarginPercent: String(settings.weeklyMarginPercent),
   quietStartHours: String(settings.quietStartHours),
+  maxConcurrentRuns: String(settings.maxConcurrentRuns),
+  runSessionCostPercent: String(settings.runSessionCostPercent),
+  runWeeklyCostPercent: String(settings.runWeeklyCostPercent),
 });
 
 export function DispatchSettingsDialog({
@@ -107,6 +112,9 @@ export function DispatchSettingsDialog({
                   ),
                   weeklyMarginPercent: Number(draft.weeklyMarginPercent),
                   quietStartHours: Number(draft.quietStartHours),
+                  maxConcurrentRuns: Number(draft.maxConcurrentRuns),
+                  runSessionCostPercent: Number(draft.runSessionCostPercent),
+                  runWeeklyCostPercent: Number(draft.runWeeklyCostPercent),
                 }),
               });
               onSaved();
@@ -199,6 +207,66 @@ export function DispatchSettingsDialog({
                   value={draft.quietStartHours}
                   onChange={(event) =>
                     setDraft({ ...draft, quietStartHours: event.target.value })
+                  }
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`${fieldId}-concurrent-runs`}>
+                  Tasks running at once
+                </Label>
+                <Input
+                  id={`${fieldId}-concurrent-runs`}
+                  type="number"
+                  min={1}
+                  max={MAX_CONCURRENT_RUNS}
+                  step={1}
+                  required
+                  value={draft.maxConcurrentRuns}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      maxConcurrentRuns: event.target.value,
+                    })
+                  }
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`${fieldId}-session-cost`}>
+                  Session held per running Claude task (%)
+                </Label>
+                <Input
+                  id={`${fieldId}-session-cost`}
+                  type="number"
+                  min={0}
+                  max={MAX_RUN_COST_PERCENT}
+                  step="any"
+                  required
+                  value={draft.runSessionCostPercent}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      runSessionCostPercent: event.target.value,
+                    })
+                  }
+                />
+              </div>
+              <div className="grid gap-1.5">
+                <Label htmlFor={`${fieldId}-weekly-cost`}>
+                  Weekly held per running Claude task (%)
+                </Label>
+                <Input
+                  id={`${fieldId}-weekly-cost`}
+                  type="number"
+                  min={0}
+                  max={MAX_RUN_COST_PERCENT}
+                  step="any"
+                  required
+                  value={draft.runWeeklyCostPercent}
+                  onChange={(event) =>
+                    setDraft({
+                      ...draft,
+                      runWeeklyCostPercent: event.target.value,
+                    })
                   }
                 />
               </div>

@@ -27,15 +27,24 @@ Four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), 
 
 ## Dispatch policy
 
-With the queue switch on (persisted in `data/queue.json` across restarts), the server runs one queued task at a time; a task interrupted by a restart is marked failed. A Claude task is **ready** only when all hold:
+With the queue switch on (persisted in `data/queue.json` across restarts), the server runs up to `maxConcurrentRuns` queued tasks at once (default 2, range 1 to 4; 1 is the old serial behaviour); every task still running at a restart is marked failed. A Claude task is **ready** only when all hold:
 
-1. An official snapshot exists and is under fifteen minutes old.
-2. Session utilization is at or below `100 − reserve`, where the reserve is `sessionReservePercent` (default 25%) inside quiet hours and `busyHoursReservePercent` outside them. An expired session window counts as 0%; a failed gate names which reserve applied when the two differ.
-3. Weekly utilization is at or below `min(95, pace + weeklyMarginPercent)` where pace is the elapsed share of the seven-day window (default margin 10%).
-4. For models matching `fable`, the same weekly rule applies to the Fable window when Anthropic reports one.
-5. With `busyHoursReservePercent` at 100 (the default) the queue keeps the whole session outside quiet hours, so a task without a preferred window starts only when the current Eastern hour is among the `quietStartHours` (default 8) quietest five-hour starts, ranked from the last 30 days of interactive local activity (dispatched and unattributed records excluded) and cached for 10 minutes. Tasks with an explicit preferred window skip this rule. Until the ranking is computed, such tasks wait and say so. Below 100, quiet hours instead choose which session reserve applies and tasks run at any hour that has budget.
+1. A run slot is free.
+2. An official snapshot exists and is under fifteen minutes old, and was fetched after the last run ended.
+3. Session utilization plus the session points held for running Claude tasks is at or below `100 − reserve`, where the reserve is `sessionReservePercent` (default 25%) inside quiet hours and `busyHoursReservePercent` outside them. An expired session window counts as 0%; a failed gate names which reserve applied when the two differ.
+4. Weekly utilization plus the weekly points held for running Claude tasks is at or below `min(95, pace + weeklyMarginPercent)` where pace is the elapsed share of the seven-day window (default margin 10%).
+5. For models matching `fable`, the same weekly rule applies to the Fable window when Anthropic reports one, counting only running Fable tasks.
+6. With `busyHoursReservePercent` at 100 (the default) the queue keeps the whole session outside quiet hours, so a task without a preferred window starts only when the current Eastern hour is among the `quietStartHours` (default 8) quietest five-hour starts, ranked from the last 30 days of interactive local activity (dispatched and unattributed records excluded) and cached for 10 minutes. Tasks with an explicit preferred window skip this rule. Until the ranking is computed, such tasks wait and say so. Below 100, quiet hours instead choose which session reserve applies and tasks run at any hour that has budget.
 
-Codex tasks are never gated by Claude usage. **Run now** always overrides the gate and the schedule. Settings persist in `data/dispatch-settings.json`.
+Codex tasks are never gated by Claude usage but take a slot and hold locks like any other run. **Run now** overrides the usage gate and the schedule, never the slot bound or the locks. Settings persist in `data/dispatch-settings.json`.
+
+## Concurrency and collisions
+
+- Each running Claude task holds `runSessionCostPercent` session points (default 20) and `runWeeklyCostPercent` weekly points (default 3, also charged to the Fable window for Fable models) until it finishes. The task being admitted is not charged against itself, so the first run follows the same rule as before and each further run must fit behind the expected cost of everything already running. Polling folds real consumption into the snapshot while the hold stays, which double counts in the conservative direction.
+- Before a task starts, `server/resources.ts` resolves its work directory to lock keys: the realpath of the directory and, when it sits inside a git checkout, the repository's common git dir (linked worktrees and submodules are followed through their `.git` file). Two tasks collide when their paths are equal or nested, or when they belong to the same repository. Worktrees of one repository therefore never run together; separate repositories do. A directory whose repository cannot be resolved waits with a reason rather than running unlocked.
+- The runner (`server/runner.ts`) owns the locks in memory. Each tick walks pending tasks in queue order (priority, then creation time), admits each one that passes its gate against the load of running plus already admitted tasks and does not collide with them, and stops when the slots are full. A collided task keeps its place and is reconsidered every tick; later independent tasks may start ahead of it, which is the only way a lower-priority task overtakes a higher one.
+- Lock acquisition happens in one synchronous step inside `start()` after resource resolution, before the queue claim, so Run now and the scheduler cannot both take the same slot or resource.
+- `PlanningSnapshot.load` reports running counts and held points; each `BucketGate` carries `reserved`; a task gate that waits on a lock carries `blockedBy` with the holder's title. Session ids and resource keys never reach the browser.
 
 ## Rules
 

@@ -13,8 +13,12 @@ JSON body — with the prompt spelled out in full inside it, since nothing else 
 supply it later.
 
 The dashboard at `/home/user/workspace/claude-capacity-dashboard` keeps a queue and
-auto-dispatches one task at a time into the quietest five-hour windows, gated by
-official Claude Max usage. Queue work here instead of burning the current session.
+auto-dispatches tasks into the quietest five-hour windows, gated by official Claude Max
+usage. Up to `settings.maxConcurrentRuns` tasks (default 2) run together when their
+work directories belong to different repositories; tasks in the same repository, a
+nested directory, or another worktree of the same repository wait for each other, and
+each running Claude task holds `settings.runSessionCostPercent` of the session budget
+until it finishes. Queue work here instead of burning the current session.
 
 ## 1. Check capacity
 
@@ -32,6 +36,8 @@ and stop.
 
 - **title** — short, 1-120 chars.
 - **workdir** — absolute path, defaults to the current repo root, must be under `/home/user`.
+  Pick the narrowest directory that is its own repository; two tasks only run in parallel
+  when their repositories differ, and a workdir of `/home/user` blocks every other task.
 - **prompt** — self-contained; the queued run starts with no conversation history. It must state:
   the files to touch, the decisions already made, the checks to run (`pnpm typecheck`,
   `pnpm test`, …), and **do not commit**.

@@ -179,8 +179,6 @@ export class QueueStore {
   }
   async claim(taskId: string): Promise<Task> {
     return this.transact((state) => {
-      if (state.tasks.some((t) => t.status === "running"))
-        throw new DomainError("A task is already running.");
       const task = this.find(state, taskId);
       if (task.status !== "pending")
         throw new DomainError("Only pending tasks can run.");

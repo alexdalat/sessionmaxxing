@@ -2,11 +2,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyError } from "fastify";
-import type {
-  DispatchSettings,
-  HistoryData,
-  PlanningSnapshot,
-  RangeDays,
+import {
+  type DispatchSettings,
+  EMPTY_LOAD,
+  type HistoryData,
+  type PlanningSnapshot,
+  type RangeDays,
 } from "../shared/types.js";
 import { aggregate } from "./analytics.js";
 import { planDispatch } from "./dispatch.js";
@@ -20,7 +21,7 @@ import { planScore } from "./plan-score.js";
 import type { QueueStore } from "./queue.js";
 import { QuietHoursCache } from "./quiet-hours.js";
 import { registerQueueRoutes } from "./routes.js";
-import type { Runner } from "./runner.js";
+import type { Planner, Runner } from "./runner.js";
 import { DomainError } from "./storage.js";
 import { mergeSessionWindows } from "./usage-history.js";
 import type { UsageMonitor } from "./usage-monitor.js";
@@ -161,16 +162,18 @@ export async function createApp(options: AppOptions = {}) {
       now,
       options.quietHoursTtlMs,
     );
-    const getPlanning = () =>
+    const planner: Planner = (load) =>
       planDispatch(
         settings.snapshot(),
         usage.current(),
         now(),
         quiet.current(),
-        options.runner?.lastRunEndedAt() ?? null,
+        load,
       );
+    const getPlanning = () =>
+      planner(options.runner?.load(settings.snapshot()) ?? EMPTY_LOAD);
     planning = getPlanning;
-    options.runner?.setPlanner(getPlanning, () => usage.refresh());
+    options.runner?.setPlanner(planner, () => usage.refresh());
     app.get(
       "/api/dispatch-settings",
       { schema: { querystring: emptyQuerySchema } },

@@ -1,8 +1,11 @@
 import {
   BLOCK_MINUTES,
   type BucketGate,
+  type ClaudeBucket,
   type DispatchGate,
+  type DispatchLoad,
   type DispatchSettings,
+  EMPTY_LOAD,
   FABLE_MODEL,
   hourLabel,
   localTimestamp,
@@ -32,14 +35,22 @@ const round = (value: number) => Math.round(value * 10) / 10;
 function sessionGate(
   usage: OfficialUsage | undefined,
   reservePercent: number,
+  reserved: number,
   now: Date,
 ): BucketGate {
   const ceiling = FULL - reservePercent;
-  if (!usage) return { percent: null, ceiling, pace: null, ok: false };
+  if (!usage)
+    return { percent: null, ceiling, pace: null, reserved, ok: false };
   const expired =
     usage.resetsAt !== null && Date.parse(usage.resetsAt) <= now.getTime();
   const percent = expired ? 0 : usage.percent;
-  return { percent, ceiling, pace: null, ok: percent <= ceiling };
+  return {
+    percent,
+    ceiling,
+    pace: null,
+    reserved,
+    ok: percent + reserved <= ceiling,
+  };
 }
 
 /** Linear pace through the seven-day window: the share of the week already elapsed. */
@@ -54,6 +65,7 @@ export function weeklyPace(resetsAt: string | null, now: Date): number | null {
 function weeklyGate(
   usage: OfficialUsage | undefined | null,
   marginPercent: number,
+  reserved: number,
   now: Date,
 ): BucketGate {
   if (!usage)
@@ -61,6 +73,7 @@ function weeklyGate(
       percent: null,
       ceiling: WEEKLY_HARD_CEILING_PERCENT,
       pace: null,
+      reserved,
       ok: false,
     };
   const pace = weeklyPace(usage.resetsAt, now);
@@ -69,11 +82,52 @@ function weeklyGate(
       ? WEEKLY_HARD_CEILING_PERCENT
       : Math.min(WEEKLY_HARD_CEILING_PERCENT, round(pace + marginPercent));
   const percent = pace === null && usage.resetsAt !== null ? 0 : usage.percent;
-  return { percent, ceiling, pace, ok: percent <= ceiling };
+  return {
+    percent,
+    ceiling,
+    pace,
+    reserved,
+    ok: percent + reserved <= ceiling,
+  };
 }
 
+const held = (gate: BucketGate) =>
+  gate.reserved > 0 ? ` + ${round(gate.reserved)}% held for running tasks` : "";
 const describe = (name: string, gate: BucketGate) =>
-  `${name} ${gate.percent}% of ${gate.ceiling}%`;
+  `${name} ${gate.percent}%${held(gate)} of ${gate.ceiling}%`;
+const plural = (count: number, noun: string) =>
+  `${count} ${noun}${count === 1 ? "" : "s"}`;
+
+/** Points one run of `task` holds in each Claude bucket while it is active. */
+export function runReservation(
+  task: Pick<PublicTask, "provider" | "model">,
+  settings: DispatchSettings,
+): Record<ClaudeBucket, number> {
+  if (task.provider !== "claude") return { session: 0, weekly: 0, fable: 0 };
+  return {
+    session: settings.runSessionCostPercent,
+    weekly: settings.runWeeklyCostPercent,
+    fable: FABLE_MODEL.test(task.model) ? settings.runWeeklyCostPercent : 0,
+  };
+}
+/** The load after one more run of `task` has started. */
+export function withRun(
+  load: DispatchLoad,
+  task: Pick<PublicTask, "provider" | "model">,
+  settings: DispatchSettings,
+): DispatchLoad {
+  const cost = runReservation(task, settings);
+  return {
+    ...load,
+    running: load.running + 1,
+    claudeRuns: load.claudeRuns + (task.provider === "claude" ? 1 : 0),
+    reserved: {
+      session: load.reserved.session + cost.session,
+      weekly: load.reserved.weekly + cost.weekly,
+      fable: load.reserved.fable + cost.fable,
+    },
+  };
+}
 
 /** Naming the reserve only helps when quiet and busy hours get different budgets. */
 function reserveLabel(settings: DispatchSettings, busyHours: boolean) {
@@ -118,9 +172,10 @@ export function planDispatch(
   usage: UsageState,
   now: Date,
   ranking: QuietRanking = { ranking: null, error: null },
-  lastRunEndedAt: string | null = null,
+  load: DispatchLoad = EMPTY_LOAD,
 ): PlanningSnapshot {
   const snapshot = usage.snapshot;
+  const { lastRunEndedAt } = load;
   const quiet = quietHours(ranking, settings.quietStartHours, now);
   const busyHours = !quiet.active && !quietHoursOnly(settings);
   const session = sessionGate(
@@ -128,21 +183,34 @@ export function planDispatch(
     busyHours
       ? settings.busyHoursReservePercent
       : settings.sessionReservePercent,
+    load.reserved.session,
     now,
   );
   const weekly = weeklyGate(
     snapshot?.weekly,
     settings.weeklyMarginPercent,
+    load.reserved.weekly,
     now,
   );
   const fable = snapshot?.fable
-    ? weeklyGate(snapshot.fable, settings.weeklyMarginPercent, now)
+    ? weeklyGate(
+        snapshot.fable,
+        settings.weeklyMarginPercent,
+        load.reserved.fable,
+        now,
+      )
     : null;
   const ageMs = snapshot
     ? now.getTime() - Date.parse(snapshot.fetchedAt)
     : Number.POSITIVE_INFINITY;
+  const slotsFull = load.running >= settings.maxConcurrentRuns;
+  const slots: DispatchGate = {
+    status: "waiting",
+    reason: `All ${plural(settings.maxConcurrentRuns, "run slot")} busy`,
+  };
   let claude: DispatchGate;
-  if (!snapshot)
+  if (slotsFull) claude = slots;
+  else if (!snapshot)
     claude = {
       status: "waiting",
       reason: `Official usage unavailable: ${usage.error ?? "not fetched yet"}`,
@@ -163,12 +231,12 @@ export function planDispatch(
   else if (!session.ok)
     claude = {
       status: "waiting",
-      reason: `Session ${session.percent}%, over the ${session.ceiling}% queue cutoff${reserveLabel(settings, busyHours)}`,
+      reason: `Session ${session.percent}%${held(session)}, over the ${session.ceiling}% queue cutoff${reserveLabel(settings, busyHours)}`,
     };
   else if (!weekly.ok)
     claude = {
       status: "waiting",
-      reason: `Weekly ${weekly.percent}%, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`,
+      reason: `Weekly ${weekly.percent}%${held(weekly)}, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`,
     };
   else
     claude = {
@@ -183,12 +251,15 @@ export function planDispatch(
     weekly,
     fable,
     quiet,
+    load,
     providers: {
       claude,
-      codex: {
-        status: "ready",
-        reason: "Codex tasks never wait on Claude usage",
-      },
+      codex: slotsFull
+        ? slots
+        : {
+            status: "ready",
+            reason: "Codex tasks never wait on Claude usage",
+          },
     },
   };
 }
@@ -303,7 +374,7 @@ export function taskGate(
   )
     return {
       status: "waiting",
-      reason: `Fable weekly ${fable.percent}%, over the ${fable.ceiling}% queue cutoff`,
+      reason: `Fable weekly ${fable.percent}%${held(fable)}, over the ${fable.ceiling}% queue cutoff`,
       eligibleAt: eligible,
     };
   return { ...provider, eligibleAt: eligible };
