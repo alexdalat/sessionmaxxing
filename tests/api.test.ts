@@ -1,11 +1,12 @@
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createApp } from "../server/app.js";
 import { DispatchSettingsStore } from "../server/dispatch-settings.js";
+import type { EstimateRun } from "../server/estimate.js";
 import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
-import { temporary, usageSnapshot } from "./helpers";
+import { sessionRates, temporary, usageSnapshot } from "./helpers";
 
 it("returns task prompts and working directories to the browser while edits preserve their stored execution directory", async () => {
   const { temporary, taskInput } = await import("./helpers");
@@ -241,7 +242,8 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
     await runner.waitForIdle();
     const runs = await app.inject("/api/runs");
     expect(runs.json().runs[0].status).toBe("cancelled");
-    expect(runs.body).not.toMatch(/PRIVATE|prompt|workdir|env/);
+    expect(runs.json().runs[0].prompt).toBe(submitted.prompt);
+    expect(runs.body).not.toMatch(/workdir|env/);
     expect(
       (await app.inject({ method: "DELETE", url: `/api/tasks/${task.id}` }))
         .statusCode,
@@ -461,6 +463,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
     usage,
     settings,
     now: () => now,
+    sessionRates,
     loadHistory: async () => ({
       events: [],
       health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
@@ -495,19 +498,25 @@ it("serves official usage with sample history, refreshes on demand, and validate
     expect(calls).toBe(1);
     const planning = await app.inject("/api/dispatch-settings");
     expect(planning.json()).toMatchObject({
-      settings: { sessionReservePercent: 25, weeklyMarginPercent: 10 },
+      settings: {
+        autoApply: false,
+        keepSessionActive: false,
+        sessionReservePercent: 25,
+        weeklyMarginPercent: 10,
+      },
       providers: { claude: { status: "ready" } },
     });
     const saved = await app.inject({
       method: "PUT",
       url: "/api/dispatch-settings",
       payload: {
+        autoApply: true,
+        keepSessionActive: false,
         sessionReservePercent: 90,
         busyHoursReservePercent: 90,
         weeklyMarginPercent: 0,
         quietStartHours: 8,
         maxConcurrentRuns: 1,
-        runSessionCostPercent: 20,
         runWeeklyCostPercent: 3,
       },
     });
@@ -518,21 +527,23 @@ it("serves official usage with sample history, refreshes on demand, and validate
       active: false,
     });
     expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual({
+      autoApply: true,
+      keepSessionActive: false,
       sessionReservePercent: 90,
       busyHoursReservePercent: 90,
       weeklyMarginPercent: 0,
       quietStartHours: 8,
       maxConcurrentRuns: 1,
-      runSessionCostPercent: 20,
       runWeeklyCostPercent: 3,
     });
     const valid = {
+      autoApply: false,
+      keepSessionActive: false,
       sessionReservePercent: 10,
       busyHoursReservePercent: 100,
       weeklyMarginPercent: 0,
       quietStartHours: 8,
       maxConcurrentRuns: 2,
-      runSessionCostPercent: 20,
       runWeeklyCostPercent: 3,
     };
     for (const payload of [
@@ -545,8 +556,8 @@ it("serves official usage with sample history, refreshes on demand, and validate
       { ...valid, maxConcurrentRuns: 0 },
       { ...valid, maxConcurrentRuns: 5 },
       { ...valid, maxConcurrentRuns: 1.5 },
-      { ...valid, runSessionCostPercent: 101 },
       { ...valid, runWeeklyCostPercent: -1 },
+      { ...valid, autoApply: "yes" },
       { sessionReservePercent: 10, weeklyMarginPercent: 0 },
       { ...valid, extra: 1 },
     ])
@@ -597,8 +608,20 @@ it("scores the plan from recorded samples over the last twenty-eight Eastern day
     // The only window runs 11:09Z to 16:09Z at 16%, so 51 of today's 8
     // elapsed Eastern hours are covered: 16 x 0.85 / 8 = 1.7.
     expect(score.days).toHaveLength(28);
-    expect(score.days.at(-1)).toEqual({ date: "2026-09-06", coverage: 1.7 });
-    expect(score.days.at(-2)).toEqual({ date: "2026-09-05", coverage: null });
+    const noMinutes = {
+      sources: { local: 0, dispatched: 0, unknown: 0 },
+      models: {},
+    };
+    expect(score.days.at(-1)).toEqual({
+      date: "2026-09-06",
+      coverage: 1.7,
+      ...noMinutes,
+    });
+    expect(score.days.at(-2)).toEqual({
+      date: "2026-09-05",
+      coverage: null,
+      ...noMinutes,
+    });
     expect(score.weeks).toEqual([
       {
         start: "2026-09-06T07:53:00.000Z",
@@ -668,6 +691,7 @@ it("computes quiet start hours from local history for the planning snapshot and 
     usage,
     settings: await DispatchSettingsStore.open(temp.path),
     now: () => now,
+    sessionRates,
     loadHistory: async () => {
       loads++;
       return {
@@ -791,27 +815,377 @@ it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
   try {
     await writeFile(path, JSON.stringify({ ...legacy, quietHoursOnly: true }));
     expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual({
+      autoApply: false,
+      keepSessionActive: false,
       sessionReservePercent: 40,
       busyHoursReservePercent: 100,
       weeklyMarginPercent: 5,
       quietStartHours: 6,
       maxConcurrentRuns: 2,
-      runSessionCostPercent: 20,
       runWeeklyCostPercent: 3,
     });
     expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
     await writeFile(path, JSON.stringify({ ...legacy, quietHoursOnly: false }));
     expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual({
+      autoApply: false,
+      keepSessionActive: false,
       sessionReservePercent: 40,
       busyHoursReservePercent: 40,
       weeklyMarginPercent: 5,
       quietStartHours: 6,
       maxConcurrentRuns: 2,
-      runSessionCostPercent: 20,
       runWeeklyCostPercent: 3,
     });
     expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
   } finally {
+    await temp.cleanup();
+  }
+});
+
+it("rejects output tokens outside the allowed range and requires them on create", async () => {
+  const { taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({ queue, runner });
+  const post = (payload: object) =>
+    app.inject({ method: "POST", url: "/api/tasks", payload });
+  try {
+    const { outputTokens: _tokens, ...withoutTokens } = taskInput(temp.path);
+    expect((await post(withoutTokens)).statusCode).toBe(400);
+    for (const outputTokens of [0, 999, 2_000_001, 25.5, "25000", null])
+      expect((await post({ ...withoutTokens, outputTokens })).statusCode).toBe(
+        400,
+      );
+    const created = await post({ ...withoutTokens, outputTokens: 2_000_000 });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().outputTokens).toBe(2_000_000);
+    // Without a planner no rates are known, so the derived percent stays null.
+    expect(created.json().sessionCostPercent).toBeNull();
+    expect(
+      (
+        await app.inject({
+          method: "PATCH",
+          url: `/api/tasks/${created.json().id}`,
+          payload: { outputTokens: 999 },
+        })
+      ).statusCode,
+    ).toBe(400);
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${created.json().id}`,
+      payload: { outputTokens: 7_000 },
+    });
+    expect(patched.json().outputTokens).toBe(7_000);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("stamps a run as reviewed and clears the needs-review flag on its task", async () => {
+  const { temporary, taskInput, fakeChild } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const { gitIn } = await import("../server/git.js");
+  const temp = await temporary();
+  const workdir = join(temp.path, "repo");
+  await mkdir(workdir);
+  const git = gitIn(workdir);
+  await git(["init", "-b", "main"]);
+  await writeFile(`${workdir}/notes.md`, "one\n");
+  await git(["add", "notes.md"]);
+  await git([
+    "-c",
+    "user.name=Test",
+    "-c",
+    "user.email=test@example.com",
+    "commit",
+    "-m",
+    "first",
+  ]);
+  const queue = await QueueStore.open(temp.path);
+  const child = fakeChild();
+  const runner = await Runner.open(queue, temp.path, { launch: () => child });
+  const app = await createApp({ queue, runner });
+  try {
+    const task = (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: taskInput(workdir),
+      })
+    ).json();
+    await app.inject({ method: "POST", url: `/api/tasks/${task.id}/run` });
+    await writeFile(`${workdir}/notes.md`, "one\ntwo\n");
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    const run = (await app.inject("/api/runs")).json().runs[0];
+    expect(run.changes.files).toEqual([
+      { path: "notes.md", added: 1, removed: 0 },
+    ]);
+    expect(run.reviewedAt).toBeNull();
+    expect((await app.inject("/api/queue")).json().tasks[0].review).toBe(
+      "needed",
+    );
+    expect((await app.inject("/api/runs/pending-review")).json()).toEqual({
+      pending: 1,
+    });
+    const stamped = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/reviewed`,
+    });
+    expect(stamped.statusCode).toBe(200);
+    expect(Date.parse(stamped.json().reviewedAt)).toBeGreaterThan(0);
+    expect((await app.inject("/api/runs")).json().runs[0].reviewedAt).toBe(
+      stamped.json().reviewedAt,
+    );
+    expect((await app.inject("/api/queue")).json().tasks[0].review).toBeNull();
+    expect((await app.inject("/api/runs/pending-review")).json()).toEqual({
+      pending: 0,
+    });
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: `/api/runs/${"f".repeat(24)}/reviewed`,
+        })
+      ).statusCode,
+    ).toBe(404);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("stores the estimated output tokens when a task is created or edited with auto", async () => {
+  const { taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const runner = await Runner.open(queue, temp.path);
+  const estimated: string[] = [];
+  const app = await createApp({
+    queue,
+    runner,
+    estimate: async (task) => {
+      estimated.push(task.title);
+      return task.title === "Edited" ? 62_000 : 31_000;
+    },
+  });
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { ...taskInput(temp.path), outputTokens: "auto" },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json().outputTokens).toBe(31_000);
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${created.json().id}`,
+      payload: { title: "Edited", outputTokens: "auto" },
+    });
+    expect(patched.json().outputTokens).toBe(62_000);
+    expect(estimated).toEqual(["Fix a test", "Edited"]);
+    expect(queue.snapshot().tasks[0].outputTokens).toBe(62_000);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("hands the estimator what earlier runs were estimated to produce", async () => {
+  const { taskInput, fakeChild } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const child = fakeChild();
+  const runner = await Runner.open(queue, temp.path, { launch: () => child });
+  const histories: EstimateRun[][] = [];
+  const app = await createApp({
+    queue,
+    runner,
+    estimate: async (_task, history) => {
+      histories.push(history);
+      return 31_000;
+    },
+  });
+  const submitted = { ...taskInput(temp.path), outputTokens: 210_000 };
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: submitted,
+    });
+    await app.inject({
+      method: "POST",
+      url: `/api/tasks/${created.json().id}/run`,
+    });
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { ...taskInput(temp.path), outputTokens: "auto" },
+    });
+    expect(histories.at(-1)).toEqual([
+      {
+        title: submitted.title,
+        promptLength: submitted.prompt.length,
+        model: created.json().model,
+        durationMs: expect.any(Number),
+        outputTokens: null,
+        estimatedOutputTokens: 210_000,
+      },
+    ]);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("refuses to queue an auto-token task when the estimate fails", async () => {
+  const { taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({
+    queue,
+    runner,
+    estimate: async () => {
+      throw new Error("Claude session is exhausted");
+    },
+  });
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { ...taskInput(temp.path), outputTokens: "auto" },
+    });
+    expect(created.statusCode).toBe(500);
+    expect(created.json().error).toBe("Claude session is exhausted");
+    expect(queue.snapshot().tasks).toEqual([]);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("suggests recent and prefix-matched work directories", async () => {
+  const { taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({ queue, runner });
+  try {
+    await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: taskInput(temp.path),
+    });
+    const suggestions = await app.inject("/api/workdirs");
+    expect(suggestions.statusCode).toBe(200);
+    const { recent, matches } = suggestions.json();
+    expect(recent.length).toBeGreaterThan(0);
+    expect(recent.every((path: string) => path.startsWith("/home/user"))).toBe(
+      true,
+    );
+    expect(matches).toEqual([]);
+    const typed = await app.inject(
+      `/api/workdirs?q=${encodeURIComponent(`${temp.path}/`)}`,
+    );
+    expect(typed.json().matches).toEqual([
+      `${temp.path}/deploy`,
+      `${temp.path}/runs`,
+    ]);
+    expect((await app.inject("/api/workdirs?days=7")).statusCode).toBe(400);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("fits the session rates from official samples and local transcripts, and prices each task with them", async () => {
+  const { taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const now = new Date("2026-09-06T12:00:00Z");
+  const sample = (at: string, session: number, resetsAt: string) =>
+    JSON.stringify({
+      at,
+      session,
+      sessionResetsAt: resetsAt,
+      weekly: 10,
+      weeklyResetsAt: "2026-09-13T00:00:00.000Z",
+      fable: null,
+    });
+  await writeFile(
+    join(temp.path, "usage-samples.jsonl"),
+    `${[
+      sample("2026-09-06T02:00:00.000Z", 40, "2026-09-06T05:00:00.000Z"),
+      sample("2026-09-06T07:00:00.000Z", 20, "2026-09-06T10:00:00.000Z"),
+    ].join("\n")}\n`,
+  );
+  const event = (timestamp: string, outputTokens: number) => ({
+    timestamp,
+    project: "demo",
+    model: "claude-opus-5",
+    source: "local" as const,
+    inputTokens: 0,
+    outputTokens,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+  });
+  const usage = new UsageMonitor(
+    async (at) => usageSnapshot({ fetchedAt: at.toISOString() }),
+    await UsageHistoryStore.open(temp.path, now),
+    () => now,
+  );
+  const queue = await QueueStore.open(temp.path);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({
+    queue,
+    runner,
+    usage,
+    settings: await DispatchSettingsStore.open(temp.path),
+    now: () => now,
+    loadHistory: async () => ({
+      events: [
+        event("2026-09-06T01:00:00.000Z", 300_000),
+        event("2026-09-06T06:00:00.000Z", 150_000),
+      ],
+      health: { files: 2, lines: 2, warnings: 0, historyEntries: 0 },
+    }),
+  });
+  try {
+    await usage.refresh();
+    const planning = (await app.inject("/api/dispatch-settings")).json();
+    // Both windows spent 40% per 300k Opus output tokens; the families the
+    // sample never covered are priced off Opus at their list-price ratio.
+    expect(planning.rates).toEqual({
+      fable: 266.7,
+      opus: 133.3,
+      sonnet: 53.3,
+      haiku: 26.7,
+    });
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { ...taskInput(temp.path), outputTokens: 150_000 },
+    });
+    expect(created.json().sessionCostPercent).toBe(20);
+  } finally {
+    await app.close();
     await temp.cleanup();
   }
 });

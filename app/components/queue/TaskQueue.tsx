@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/app/components/ConfirmDialog";
 import { DispatchSettingsDialog } from "@/app/components/DispatchSettingsDialog";
+import { QueueBadges } from "@/app/components/QueueBadges";
 import { TaskListSkeleton } from "@/app/components/Skeletons";
 import { Button } from "@/app/components/ui/button";
 import {
@@ -11,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/app/components/ui/select";
+import { useClock } from "@/app/hooks/useClock";
 import { usePolling } from "@/app/hooks/usePolling";
 import { api } from "@/app/lib/api";
 import { displayOrder, movedPast, moveTarget } from "@/app/lib/queueOrder";
@@ -35,6 +37,7 @@ export function TaskQueue() {
   const [formOpen, setFormOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation>();
+  const now = useClock();
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     if (!notice) return;
@@ -128,9 +131,7 @@ export function TaskQueue() {
   const visibleTasks = ordered.filter(
     (task) =>
       filter === "all" ||
-      (filter === "finished"
-        ? !["pending", "running"].includes(task.status)
-        : task.status === "pending" && task.gate?.status === filter),
+      (task.status === "pending" && task.gate?.status === filter),
   );
   function move(task: PublicTask, offset: -1 | 1) {
     const neighbor = moveTarget(ordered, task, offset);
@@ -143,6 +144,104 @@ export function TaskQueue() {
     );
     void mutate("/api/queue/order", "PUT", "Order updated.", { ids });
   }
+  const taskCard = (task: PublicTask) => {
+    const isLeaving = leaving.has(task.id);
+    return (
+      <TaskCard
+        key={task.id}
+        task={task}
+        isNext={task.id === nextId}
+        isLeaving={isLeaving}
+        now={now}
+      >
+        <div className="task-actions">
+          {task.status === "pending" && (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={
+                  busy ||
+                  slotsFull ||
+                  isLeaving ||
+                  task.gate?.blockedBy !== undefined
+                }
+                aria-label={`Run ${task.title} now`}
+                onClick={() => setConfirm({ kind: "run", task })}
+              >
+                Run now
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={busy || isLeaving}
+                aria-label={`Edit ${task.title}`}
+                onClick={() => {
+                  setEditing(task);
+                  setNotice("");
+                  setFormOpen(true);
+                }}
+              >
+                Edit
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={busy || isLeaving || !moveTarget(ordered, task, -1)}
+                aria-label={`Move ${task.title} up`}
+                onClick={() => move(task, -1)}
+              >
+                ↑
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={busy || isLeaving || !moveTarget(ordered, task, 1)}
+                aria-label={`Move ${task.title} down`}
+                onClick={() => move(task, 1)}
+              >
+                ↓
+              </Button>
+            </>
+          )}
+          {task.status === "running" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy || isLeaving}
+              aria-label={`Cancel ${task.title}`}
+              onClick={() =>
+                void mutate(
+                  `/api/tasks/${task.id}/cancel`,
+                  "POST",
+                  "Cancelling task.",
+                )
+              }
+            >
+              Cancel
+            </Button>
+          )}
+          {task.status !== "running" && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={busy || isLeaving}
+              aria-label={`Delete ${task.title}`}
+              onClick={() => setConfirm({ kind: "delete", task })}
+            >
+              Delete
+            </Button>
+          )}
+        </div>
+      </TaskCard>
+    );
+  };
   return (
     <>
       {(error || loadError || data?.runnerError) && (
@@ -176,6 +275,7 @@ export function TaskQueue() {
           >
             {data?.autoDispatch ? "Queue on" : "Queue off"}
           </Button>
+          <QueueBadges planning={data?.planning} />
           <span className="queue-tools">
             <Select value={filter} onValueChange={setFilter}>
               <SelectTrigger aria-label="Task filter">
@@ -185,7 +285,6 @@ export function TaskQueue() {
                 <SelectItem value="all">All</SelectItem>
                 <SelectItem value="ready">Ready</SelectItem>
                 <SelectItem value="waiting">Waiting</SelectItem>
-                <SelectItem value="finished">Finished</SelectItem>
               </SelectContent>
             </Select>
             <Button
@@ -204,132 +303,11 @@ export function TaskQueue() {
         {!data && !loadError ? (
           <TaskListSkeleton />
         ) : visibleTasks.length ? (
-          visibleTasks.map((task) => {
-            const isLeaving = leaving.has(task.id);
-            return (
-              <TaskCard
-                key={task.id}
-                task={task}
-                isNext={task.id === nextId}
-                isLeaving={isLeaving}
-              >
-                <div className="task-actions">
-                  {task.status === "pending" && (
-                    <>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={
-                          busy ||
-                          slotsFull ||
-                          isLeaving ||
-                          task.gate?.blockedBy !== undefined
-                        }
-                        aria-label={`Run ${task.title} now`}
-                        onClick={() => setConfirm({ kind: "run", task })}
-                      >
-                        Run now
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={busy || isLeaving}
-                        aria-label={`Edit ${task.title}`}
-                        onClick={() => {
-                          setEditing(task);
-                          setNotice("");
-                          setFormOpen(true);
-                        }}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={
-                          busy || isLeaving || !moveTarget(ordered, task, -1)
-                        }
-                        aria-label={`Move ${task.title} up`}
-                        onClick={() => move(task, -1)}
-                      >
-                        ↑
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        disabled={
-                          busy || isLeaving || !moveTarget(ordered, task, 1)
-                        }
-                        aria-label={`Move ${task.title} down`}
-                        onClick={() => move(task, 1)}
-                      >
-                        ↓
-                      </Button>
-                    </>
-                  )}
-                  {task.status === "running" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy || isLeaving}
-                      aria-label={`Cancel ${task.title}`}
-                      onClick={() =>
-                        void mutate(
-                          `/api/tasks/${task.id}/cancel`,
-                          "POST",
-                          "Cancelling task.",
-                        )
-                      }
-                    >
-                      Cancel
-                    </Button>
-                  )}
-                  {(task.status === "failed" ||
-                    task.status === "cancelled") && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy || isLeaving}
-                      aria-label={`Retry ${task.title}`}
-                      onClick={() =>
-                        void mutate(
-                          `/api/tasks/${task.id}/retry`,
-                          "POST",
-                          "Task queued again.",
-                        )
-                      }
-                    >
-                      Retry
-                    </Button>
-                  )}
-                  {task.status !== "running" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      disabled={busy || isLeaving}
-                      aria-label={`Delete ${task.title}`}
-                      onClick={() => setConfirm({ kind: "delete", task })}
-                    >
-                      Delete
-                    </Button>
-                  )}
-                </div>
-              </TaskCard>
-            );
-          })
+          visibleTasks.map(taskCard)
         ) : (
           <div className="empty">
             <h2>
-              {data?.tasks.length
-                ? "No tasks match this filter"
-                : "No tasks yet"}
+              {ordered.length ? "No tasks match this filter" : "No tasks yet"}
             </h2>
           </div>
         )}

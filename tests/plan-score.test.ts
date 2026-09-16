@@ -1,6 +1,10 @@
 import { expect, it } from "vitest";
 import { planScore } from "../server/plan-score.js";
-import { PLAN_SCORE_DAYS, type UsageSample } from "../shared/types.js";
+import {
+  type ActivityEvent,
+  PLAN_SCORE_DAYS,
+  type UsageSample,
+} from "../shared/types.js";
 
 const NOW = new Date("2026-09-06T12:00:00Z");
 const WEEKLY_RESETS_AT = "2026-09-13T07:53:00.000Z";
@@ -20,8 +24,28 @@ const sample = (
   ...patch,
 });
 
+const NO_MINUTES = {
+  sources: { local: 0, dispatched: 0, unknown: 0 },
+  models: {},
+};
+
+const event = (
+  timestamp: string,
+  extra: Partial<ActivityEvent> = {},
+): ActivityEvent => ({
+  timestamp,
+  project: "demo",
+  model: "claude-opus-4-6",
+  source: "local",
+  inputTokens: 2,
+  outputTokens: 3,
+  cacheReadTokens: 5,
+  cacheCreationTokens: 1,
+  ...extra,
+});
+
 const coverageOf = (samples: UsageSample[], date: string) =>
-  planScore(samples, NOW).days.find((day) => day.date === date)?.coverage;
+  planScore(samples, NOW, []).days.find((day) => day.date === date)?.coverage;
 
 it("scores a date by the share of its hours a window's peak covers", () => {
   expect(
@@ -53,10 +77,19 @@ it("leaves dates before the first sample null and scores later empty dates zero"
   const { days } = planScore(
     [sample("2026-09-05T10:00:00Z", 80, "2026-09-05T14:00:00.000Z")],
     NOW,
+    [],
   );
   expect(days).toHaveLength(PLAN_SCORE_DAYS);
-  expect(days[0]).toEqual({ date: "2026-08-10", coverage: null });
-  expect(days.at(-1)).toEqual({ date: "2026-09-06", coverage: 0 });
+  expect(days[0]).toEqual({
+    date: "2026-08-10",
+    coverage: null,
+    ...NO_MINUTES,
+  });
+  expect(days.at(-1)).toEqual({
+    date: "2026-09-06",
+    coverage: 0,
+    ...NO_MINUTES,
+  });
   expect(days.find((day) => day.date === "2026-09-04")?.coverage).toBeNull();
 });
 
@@ -74,6 +107,7 @@ it("scores a finished week at its final weekly percent", () => {
       }),
     ],
     NOW,
+    [],
   );
   expect(weeks).toEqual([
     {
@@ -97,6 +131,7 @@ const openWeekScore = (weekly: number) =>
       }),
     ],
     NOW,
+    [],
   ).weeklyScore;
 
 it("scores the open week by used percent over elapsed pace, capped at 100", () => {
@@ -113,6 +148,7 @@ it("averages session coverage and the current week's score", () => {
       }),
     ],
     NOW,
+    [],
   );
   expect(score.sessionCoverage).toBe(8);
   expect(score.weeklyScore).toBe(50);
@@ -120,11 +156,48 @@ it("averages session coverage and the current week's score", () => {
 });
 
 it("reports no score at all before any sample exists", () => {
-  const score = planScore([], NOW);
+  const score = planScore([], NOW, []);
   expect(score.score).toBeNull();
   expect(score.sessionCoverage).toBeNull();
   expect(score.weeklyScore).toBeNull();
   expect(score.weeks).toEqual([]);
   expect(score.days.every((day) => day.coverage === null)).toBe(true);
   expect(score.generatedAt).toBe("2026-09-06T12:00:00.000Z");
+});
+
+it("plan score days carry the minutes of local events on that Eastern date", () => {
+  const { days } = planScore(
+    [sample("2026-09-04T10:00:00Z", 40, "2026-09-04T14:00:00.000Z")],
+    NOW,
+    [
+      event("2026-09-04T14:00:00Z"),
+      event("2026-09-04T14:01:00Z", {
+        source: "dispatched",
+        model: "claude-fable-5-1",
+      }),
+      event("2026-09-05T14:00:00Z", {
+        source: "unknown",
+        model: "claude-fable-5-1",
+      }),
+      event("2026-09-05T14:00:30Z", {
+        source: "unknown",
+        model: "claude-fable-5-1",
+      }),
+    ],
+  );
+  const on = (date: string) => days.find((day) => day.date === date);
+  expect(on("2026-09-04")).toMatchObject({
+    sources: { local: 1, dispatched: 1, unknown: 0 },
+    models: { "claude-opus-4-6": 1, "claude-fable-5-1": 1 },
+  });
+  expect(on("2026-09-05")).toMatchObject({
+    sources: { local: 0, dispatched: 0, unknown: 1 },
+    models: { "claude-fable-5-1": 1 },
+  });
+  expect(on("2026-09-06")).toMatchObject(NO_MINUTES);
+});
+
+it("leaves events after now out of the day they fall on", () => {
+  const { days } = planScore([], NOW, [event("2026-09-06T13:00:00Z")]);
+  expect(days.at(-1)).toMatchObject(NO_MINUTES);
 });

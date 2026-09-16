@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
-import { createHistoryReader } from "../server/history.js";
+import { createHistoryReader, readSessionTokens } from "../server/history.js";
 import { temporary } from "./helpers";
 
 const DISPATCHED_SESSION = "11111111-2222-4333-8444-555555555555";
@@ -13,6 +13,7 @@ const assistantLine = (record: {
   sessionId?: string;
   entrypoint?: string;
   outputTokens?: number;
+  model?: string;
 }) =>
   `${JSON.stringify({
     type: "assistant",
@@ -24,7 +25,7 @@ const assistantLine = (record: {
       : { entrypoint: record.entrypoint }),
     message: {
       id: record.messageId,
-      model: "claude-opus-4-6",
+      model: record.model ?? "claude-opus-4-6",
       content: "PRIVATE TEXT",
       usage: { output_tokens: record.outputTokens ?? 1 },
     },
@@ -191,5 +192,84 @@ it("never attributes a record that carries no session id to a dispatched run", a
       "unknown",
       "local",
     ]);
+  });
+});
+
+it("sums the output tokens of a session, its subagents, and the last record of each message", async () => {
+  await withRoot(async (root) => {
+    await transcript(root, `demo/${DISPATCHED_SESSION}.jsonl`, [
+      assistantLine({
+        messageId: "m1",
+        timestamp: "2026-09-06T15:00:00Z",
+        sessionId: DISPATCHED_SESSION,
+        outputTokens: 100,
+      }),
+      assistantLine({
+        messageId: "m2",
+        timestamp: "2026-09-06T15:01:00Z",
+        sessionId: DISPATCHED_SESSION,
+        model: "claude-fable-5-1",
+        outputTokens: 200,
+      }),
+      assistantLine({
+        messageId: "m1",
+        timestamp: "2026-09-06T15:02:00Z",
+        sessionId: DISPATCHED_SESSION,
+        outputTokens: 150,
+      }),
+      assistantLine({
+        messageId: "m3",
+        timestamp: "2026-09-06T15:03:00Z",
+        sessionId: DISPATCHED_SESSION,
+        model: "gpt-6-astra",
+        outputTokens: 400,
+      }),
+    ]);
+    await transcript(
+      root,
+      `demo/${DISPATCHED_SESSION}/subagents/worker.jsonl`,
+      [
+        assistantLine({
+          messageId: "s1",
+          timestamp: "2026-09-06T15:04:00Z",
+          sessionId: DISPATCHED_SESSION,
+          model: "claude-haiku-4-5-20251001",
+          outputTokens: 50,
+        }),
+      ],
+    );
+    await transcript(root, `demo/${OTHER_SESSION}.jsonl`, [
+      assistantLine({
+        messageId: "o1",
+        timestamp: "2026-09-06T15:05:00Z",
+        sessionId: OTHER_SESSION,
+        outputTokens: 900,
+      }),
+    ]);
+    expect(await readSessionTokens(root, DISPATCHED_SESSION)).toEqual({
+      fable: 200,
+      opus: 150,
+      sonnet: 0,
+      haiku: 50,
+    });
+  });
+});
+
+it("reports no tokens for a session with no transcript", async () => {
+  await withRoot(async (root) => {
+    await transcript(root, `demo/${OTHER_SESSION}.jsonl`, [
+      assistantLine({
+        messageId: "o1",
+        timestamp: "2026-09-06T15:05:00Z",
+        sessionId: OTHER_SESSION,
+        outputTokens: 900,
+      }),
+    ]);
+    expect(await readSessionTokens(root, DISPATCHED_SESSION)).toEqual({
+      fable: 0,
+      opus: 0,
+      sonnet: 0,
+      haiku: 0,
+    });
   });
 });

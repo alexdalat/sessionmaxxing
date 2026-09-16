@@ -1,9 +1,18 @@
 import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative } from "node:path";
-import type { TaskInput } from "../shared/types.js";
+import {
+  AUTO_OUTPUT_TOKENS,
+  MAX_OUTPUT_TOKENS,
+  MIN_OUTPUT_TOKENS,
+  type TaskInput,
+} from "../shared/types.js";
 import { DomainError } from "./storage.js";
 
-const ALLOWED_HOME = "/home/user";
+export const ALLOWED_HOME = "/home/user";
+export function underHome(path: string, home = ALLOWED_HOME) {
+  const rel = relative(home, path);
+  return !rel.startsWith("..") && !isAbsolute(rel);
+}
 export async function validateWorkdir(path: string) {
   if (typeof path !== "string" || !isAbsolute(path))
     throw new DomainError(
@@ -13,12 +22,7 @@ export async function validateWorkdir(path: string) {
   let canonical: string;
   try {
     canonical = await realpath(path);
-    const rel = relative(ALLOWED_HOME, canonical);
-    if (
-      rel.startsWith("..") ||
-      isAbsolute(rel) ||
-      !(await stat(canonical)).isDirectory()
-    )
+    if (!underHome(canonical) || !(await stat(canonical)).isDirectory())
       throw new Error("Invalid directory");
   } catch {
     throw new DomainError(
@@ -68,6 +72,16 @@ export function validateFields(input: TaskInput) {
   )
     throw new DomainError(
       "Maximum turns must be an integer from 1 to 1000.",
+      400,
+    );
+  if (
+    input.outputTokens !== AUTO_OUTPUT_TOKENS &&
+    (!Number.isInteger(input.outputTokens) ||
+      input.outputTokens < MIN_OUTPUT_TOKENS ||
+      input.outputTokens > MAX_OUTPUT_TOKENS)
+  )
+    throw new DomainError(
+      `Output tokens must be an integer from ${MIN_OUTPUT_TOKENS} to ${MAX_OUTPUT_TOKENS}, or "auto".`,
       400,
     );
   if (

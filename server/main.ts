@@ -7,8 +7,10 @@ import type { HistoryData } from "../shared/types.js";
 import { createApp } from "./app.js";
 import { type FetchUsage, officialUsageFetcher } from "./claude-usage.js";
 import { DispatchSettingsStore } from "./dispatch-settings.js";
+import { readSessionTokens } from "./history.js";
 import { QueueStore } from "./queue.js";
 import { Runner } from "./runner.js";
+import { SessionKeeper } from "./session-keeper.js";
 import { DomainError } from "./storage.js";
 import { UsageHistoryStore } from "./usage-history.js";
 import { UsageMonitor } from "./usage-monitor.js";
@@ -60,20 +62,33 @@ export async function startDashboard(
       await UsageHistoryStore.open(directory),
     );
     const queue = await QueueStore.open(directory);
-    const runner = await Runner.open(queue, directory);
+    const runner = await Runner.open(queue, directory, {
+      autoApply: () => settings.snapshot().autoApply,
+      sessionTokens: (sessionId) =>
+        readSessionTokens(join(homedir(), ".claude"), sessionId),
+    });
+    const keeper = await SessionKeeper.open(directory, {
+      enabled: () => settings.snapshot().keepSessionActive,
+      usage: () => usage.current(),
+      refreshUsage: () => usage.refresh(),
+      claudeRuns: () => runner.load().claudeRuns,
+    });
     app = await createApp({
       queue,
       runner,
       settings,
       usage,
+      keeper,
       loadHistory: options.loadHistory,
       staticRoot: options.development ? undefined : resolve("dist/client"),
     });
     app.addHook("onClose", async () => usage.stop());
+    app.addHook("onClose", async () => keeper.close());
     app.addHook("onClose", release);
     await app.listen({ host, port });
     usage.start();
     runner.startScheduler();
+    keeper.startScheduler();
     return app;
   } catch (error) {
     if (app) await app.close();

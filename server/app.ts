@@ -8,22 +8,34 @@ import {
   type HistoryData,
   type PlanningSnapshot,
   type RangeDays,
+  type SessionRates,
 } from "../shared/types.js";
 import { aggregate } from "./analytics.js";
+import {
+  CALIBRATION_DAYS,
+  fitSessionRates,
+  SessionRatesCache,
+  windowTokens,
+} from "./calibration.js";
 import { planDispatch } from "./dispatch.js";
 import {
   type DispatchSettingsStore,
   emptyQuerySchema,
   settingsSchema,
 } from "./dispatch-settings.js";
+import {
+  estimateOutputTokens,
+  type OutputTokensEstimator,
+} from "./estimate.js";
 import { createHistoryReader } from "./history.js";
 import { planScore } from "./plan-score.js";
 import type { QueueStore } from "./queue.js";
 import { QuietHoursCache } from "./quiet-hours.js";
 import { registerQueueRoutes } from "./routes.js";
 import type { Planner, Runner } from "./runner.js";
+import type { SessionKeeper } from "./session-keeper.js";
 import { DomainError } from "./storage.js";
-import { mergeSessionWindows } from "./usage-history.js";
+import { mergeSessionWindows, sessionWindows } from "./usage-history.js";
 import type { UsageMonitor } from "./usage-monitor.js";
 
 const DASHBOARD_HOST =
@@ -36,8 +48,12 @@ export interface AppOptions {
   loadHistory?: () => Promise<HistoryData>;
   settings?: DispatchSettingsStore;
   usage?: UsageMonitor;
+  keeper?: SessionKeeper;
   now?: () => Date;
   quietHoursTtlMs?: number;
+  estimate?: OutputTokensEstimator;
+  /** Overrides the fitted session rates; by default they are fitted from samples and transcripts. */
+  sessionRates?: () => Promise<SessionRates | null>;
 }
 export async function createApp(options: AppOptions = {}) {
   const app = Fastify({
@@ -49,7 +65,11 @@ export async function createApp(options: AppOptions = {}) {
     options.loadHistory ??
     createHistoryReader(
       join(homedir(), ".claude"),
-      () => options.runner?.dispatchedSessions() ?? new Set<string>(),
+      () =>
+        new Set<string>([
+          ...(options.runner?.dispatchedSessions() ?? []),
+          ...(options.keeper?.sessions() ?? []),
+        ]),
     );
   const now = () => options.now?.() ?? new Date();
   app.addHook("onRequest", async (request, reply) => {
@@ -140,7 +160,8 @@ export async function createApp(options: AppOptions = {}) {
     app.get(
       "/api/plan-score",
       { schema: { querystring: emptyQuerySchema } },
-      async () => planScore(usage.samples(now()), now()),
+      async () =>
+        planScore(usage.samples(now()), now(), (await loadHistory()).events),
     );
     app.post(
       "/api/usage/refresh",
@@ -162,6 +183,19 @@ export async function createApp(options: AppOptions = {}) {
       now,
       options.quietHoursTtlMs,
     );
+    const rates = new SessionRatesCache(
+      options.sessionRates ??
+        (async () =>
+          fitSessionRates(
+            windowTokens(
+              sessionWindows(usage.samples(now()), now(), CALIBRATION_DAYS),
+              (await loadHistory()).events,
+            ),
+          )),
+      now,
+      options.quietHoursTtlMs,
+    );
+    await rates.refresh();
     const planner: Planner = (load) =>
       planDispatch(
         settings.snapshot(),
@@ -169,6 +203,7 @@ export async function createApp(options: AppOptions = {}) {
         now(),
         quiet.current(),
         load,
+        rates.current(),
       );
     const getPlanning = () =>
       planner(options.runner?.load(settings.snapshot()) ?? EMPTY_LOAD);
@@ -189,7 +224,15 @@ export async function createApp(options: AppOptions = {}) {
     );
   }
   if (options.queue && options.runner)
-    registerQueueRoutes(app, options.queue, options.runner, now, planning);
+    registerQueueRoutes(
+      app,
+      options.queue,
+      options.runner,
+      now,
+      options.estimate ?? estimateOutputTokens,
+      planning,
+      options.keeper,
+    );
   if (options.staticRoot)
     await app.register(fastifyStatic, {
       root: options.staticRoot,

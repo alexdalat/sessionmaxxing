@@ -1,11 +1,18 @@
 "use client";
 import { useState } from "react";
 import { DispatchSettingsDialog } from "@/app/components/DispatchSettingsDialog";
+import { QueueBadges } from "@/app/components/QueueBadges";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { quietSummary, usageHue } from "@/app/lib/dispatchSummary";
-import { displayOrder } from "@/app/lib/queueOrder";
-import type { BucketGate, PlanningSnapshot, PublicTask } from "@/shared/types";
+import { queuePreview } from "@/app/lib/queuePreview";
+import { localClock } from "@/app/lib/time";
+import type {
+  BucketGate,
+  PlanningSnapshot,
+  PublicTask,
+  SessionKeeperState,
+} from "@/shared/types";
 
 function Bucket({ name, gate }: { name: string; gate: BucketGate }) {
   const percent = gate.percent ?? 0;
@@ -31,18 +38,21 @@ function Bucket({ name, gate }: { name: string; gate: BucketGate }) {
 
 export function DispatchPanel({
   planning,
+  keeper,
   tasks,
   queueOn,
+  now,
   onSaved,
 }: {
   planning: PlanningSnapshot;
+  keeper: SessionKeeperState | undefined;
   tasks: PublicTask[] | undefined;
   queueOn: boolean | undefined;
+  now: number;
   onSaved: () => void;
 }) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pending = tasks?.filter((task) => task.status === "pending") ?? [];
-  const running = tasks?.filter((task) => task.status === "running") ?? [];
   const counts = [
     ["pending", String(pending.length)],
     ["ready", String(pending.filter((t) => t.gate?.status === "ready").length)],
@@ -58,33 +68,22 @@ export function DispatchPanel({
   const claude = planning.providers.claude;
   const queueLabel =
     queueOn === undefined ? "…" : queueOn ? "Queue on" : "Queue off";
-  const next = tasks
-    ? displayOrder(tasks).find((task) => task.status === "pending")
-    : undefined;
-  const slotsFull =
-    planning.load.running >= planning.settings.maxConcurrentRuns;
-  const nextLine = !tasks
-    ? ""
-    : [
-        running.length === 1
-          ? `Running ${running[0].title}`
-          : running.length > 1
-            ? `Running ${running.length} tasks`
-            : "",
-        next && !slotsFull ? `Next ${next.title}` : "",
-        running.length === 0 && !next ? "Queue empty" : "",
-      ]
-        .filter(Boolean)
-        .join(" · ");
+  const rows = tasks ? queuePreview(tasks, now) : null;
   return (
     <section className="panel dispatch-panel" aria-label="Queue">
       <div className="section-heading">
         <h2>Queue</h2>
         <div className="gate-row">
-          <Badge variant={claude.status === "ready" ? "success" : "warning"}>
-            {claude.status === "ready" ? "Claude ready" : "Claude waiting"}
-          </Badge>
           <Badge variant={queueOn ? "success" : "warning"}>{queueLabel}</Badge>
+          <QueueBadges planning={planning} />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setSettingsOpen(true)}
+          >
+            Settings
+          </Button>
         </div>
       </div>
       <p className="dispatch-reason">
@@ -107,8 +106,33 @@ export function DispatchPanel({
       <p className="dispatch-quiet">
         {quietSummary(planning.quiet, planning.settings)}
       </p>
+      {planning.settings.keepSessionActive && keeper?.lastStartedAt && (
+        <p className="dispatch-quiet">
+          Session keeper · last start {localClock(keeper.lastStartedAt)}
+        </p>
+      )}
+      {keeper?.error && (
+        <p role="alert" className="error">
+          {keeper.error}
+        </p>
+      )}
+      <ol className="dispatch-list">
+        {rows?.map((row) => (
+          <li
+            className="dispatch-task"
+            data-state={row.state}
+            key={row.id}
+            title={row.reason}
+          >
+            <span className="dispatch-title">{row.title}</span>
+            <span className="dispatch-note">{row.note}</span>
+          </li>
+        ))}
+        {rows?.length === 0 && (
+          <li className="dispatch-task muted">Queue empty</li>
+        )}
+      </ol>
       <p className="dispatch-counts">
-        {nextLine && <span>{nextLine} · </span>}
         {counts.map(([label, value], index) => (
           <span key={label}>
             {index > 0 && " · "}
@@ -116,15 +140,6 @@ export function DispatchPanel({
           </span>
         ))}
       </p>
-      <div className="actions">
-        <Button
-          type="button"
-          variant="outline"
-          onClick={() => setSettingsOpen(true)}
-        >
-          Settings
-        </Button>
-      </div>
       <DispatchSettingsDialog
         key={settingsOpen ? "open" : "closed"}
         open={settingsOpen}

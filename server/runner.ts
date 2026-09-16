@@ -6,15 +6,36 @@ import {
   type DispatchLoad,
   type DispatchSettings,
   EMPTY_LOAD,
+  MODEL_FAMILIES,
+  type OutputTokens,
   type PlanningSnapshot,
   type PublicTask,
   type Run,
+  type SessionRates,
   type Task,
   type TaskGate,
 } from "../shared/types.js";
-import { taskGate, USAGE_PREDATES_RUN_REASON, withRun } from "./dispatch.js";
+import { sessionPercent } from "./calibration.js";
+import { DeployQueue, hasComposeFile, leftChanges } from "./deploy.js";
+import {
+  expectedSessionCost,
+  taskGate,
+  USAGE_PREDATES_RUN_REASON,
+  withRun,
+} from "./dispatch.js";
+import {
+  diffSnapshots,
+  ensureRepository,
+  type GitSnapshot,
+  gitIn,
+  snapshotWorkdir,
+} from "./git.js";
 import { OutputPreview } from "./output.js";
-import { launchProvider, type ProviderProcess } from "./providers.js";
+import {
+  launchProvider,
+  type ProviderProcess,
+  withAutoApply,
+} from "./providers.js";
 import type { QueueStore } from "./queue.js";
 import { resolveResources, resourcesCollide } from "./resources.js";
 import { atomicJson, DomainError, id } from "./storage.js";
@@ -23,14 +44,29 @@ import { validateWorkdir } from "./validation.js";
 interface RunnerOptions {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   launch?: (task: Task, sessionId: string | null) => ProviderProcess;
+  autoApply?: () => boolean;
+  sessionTokens?: (sessionId: string) => Promise<OutputTokens>;
   now?: () => Date;
 }
 export type Planner = (load: DispatchLoad) => PlanningSnapshot;
-/** A run plus the session id dispatched to Claude, which never leaves the server. */
-interface StoredRun extends Run {
+/** A run plus the session id dispatched to Claude, which never leaves the server. Deploy state lives in the deploy queue. */
+type StoredRun = Omit<Run, "deploy" | "sessionCostPercent"> & {
   sessionId: string | null;
-}
-const publicRun = ({ sessionId: _sessionId, ...run }: StoredRun): Run => run;
+};
+const publicRun = ({
+  sessionId: _sessionId,
+  ...run
+}: StoredRun): Omit<Run, "deploy" | "sessionCostPercent"> => run;
+const measured = (tokens: OutputTokens) =>
+  MODEL_FAMILIES.some((family) => tokens[family] > 0);
+const savedTokens = (value: unknown): OutputTokens | null =>
+  value !== null &&
+  typeof value === "object" &&
+  MODEL_FAMILIES.every(
+    (family) => typeof (value as OutputTokens)[family] === "number",
+  )
+    ? (value as OutputTokens)
+    : null;
 interface Holding {
   task: Pick<Task, "id" | "title">;
   resources: readonly string[];
@@ -38,6 +74,10 @@ interface Holding {
 interface Active extends Holding {
   task: Task;
   run: StoredRun;
+  /** Work directory git state when the run started; undefined when it could not be read, null outside a repository. */
+  gitStart?: GitSnapshot | null;
+  /** Whether the run was launched with the apply override, so the host may redeploy what it changed. */
+  applied: boolean;
   output: OutputPreview;
   child?: ProviderProcess;
   done: Promise<void>;
@@ -54,6 +94,7 @@ const TICK_MS = 5000;
 export const SLOTS_BUSY_ERROR = "All run slots are busy.";
 export const blockedReason = (title: string) =>
   `Waits for “${title}” · same project`;
+export const deployReason = (title: string) => `Waits for deploy of “${title}”`;
 
 export class Runner {
   private runs: StoredRun[] = [];
@@ -69,6 +110,13 @@ export class Runner {
     this.getPlanning = planning;
     this.refreshUsage = refreshUsage;
   }
+  /** The output tokens a finished Claude run produced; null when its transcript recorded none. */
+  private async readTokens(sessionId: string | null) {
+    if (sessionId === null || !this.options.sessionTokens) return null;
+    const tokens = await this.options.sessionTokens(sessionId);
+    // No recorded token means the transcript was not found, not that the run was free.
+    return measured(tokens) ? tokens : null;
+  }
   /** End time of the most recently finished run, so usage fetched before it is not trusted. */
   lastRunEndedAt(): string | null {
     let latest: string | null = null;
@@ -80,14 +128,25 @@ export class Runner {
   private settings(): DispatchSettings {
     return this.getPlanning?.(EMPTY_LOAD).settings ?? DEFAULT_DISPATCH_SETTINGS;
   }
+  private rates(): SessionRates | null {
+    return this.getPlanning?.(EMPTY_LOAD).rates ?? null;
+  }
   /** Slots held and quota reserved by every active run. */
   load(settings = this.settings()): DispatchLoad {
+    const rates = this.rates();
+    const runs = this.list();
     let load: DispatchLoad = {
       ...EMPTY_LOAD,
       lastRunEndedAt: this.lastRunEndedAt(),
     };
+    // Without rates a run holds nothing, and the Claude gate admits nothing either.
     for (const { task } of this.active.values())
-      load = withRun(load, task, settings);
+      load = withRun(
+        load,
+        task,
+        expectedSessionCost(task, runs, rates) ?? 0,
+        settings,
+      );
     return load;
   }
   private planning(load = this.load()): PlanningSnapshot {
@@ -98,6 +157,7 @@ export class Runner {
   private constructor(
     private store: QueueStore,
     private directory: string,
+    private deploys: DeployQueue,
     private options: RunnerOptions,
   ) {}
   static async open(
@@ -105,7 +165,12 @@ export class Runner {
     directory: string,
     options: RunnerOptions = {},
   ) {
-    const runner = new Runner(store, join(directory, "runs"), options);
+    const runner = new Runner(
+      store,
+      join(directory, "runs"),
+      await DeployQueue.open(directory),
+      options,
+    );
     await mkdir(runner.directory, { recursive: true, mode: 0o700 });
     for (const name of await readdir(runner.directory)) {
       if (!/^[a-f0-9]{24}\.json$/.test(name)) continue;
@@ -124,6 +189,8 @@ export class Runner {
         id: saved.id,
         taskId: saved.taskId,
         title: saved.title,
+        prompt: saved.prompt ?? null,
+        estimatedOutputTokens: saved.estimatedOutputTokens ?? null,
         provider: saved.provider,
         model: saved.model,
         status: saved.status,
@@ -134,7 +201,11 @@ export class Runner {
         error: saved.error
           ? "Previous run failed. See status or retry the task."
           : null,
+        outputTokens: savedTokens(saved.outputTokens),
         sessionId: typeof saved.sessionId === "string" ? saved.sessionId : null,
+        summary: saved.summary ?? null,
+        changes: saved.changes ?? null,
+        reviewedAt: saved.reviewedAt ?? null,
         preview: new OutputPreview(preview).lines(),
       };
       if (run.status === "running") {
@@ -145,16 +216,29 @@ export class Runner {
       }
       runner.runs.push(run);
     }
+    for (const run of runner.runs) {
+      if (run.outputTokens !== null) continue;
+      const tokens = await runner.readTokens(run.sessionId);
+      if (tokens === null) continue;
+      run.outputTokens = tokens;
+      await runner.persist(run);
+    }
     return runner;
   }
   private now() {
     return this.options.now?.() ?? new Date();
   }
   list(): Run[] {
+    const rates = this.rates();
     return this.runs
       .map(publicRun)
       .map((run) => ({
         ...run,
+        sessionCostPercent:
+          run.outputTokens === null || rates === null
+            ? null
+            : sessionPercent(run.outputTokens, rates),
+        deploy: this.deploys.status(run.id),
         preview: this.active.get(run.id)?.output.lines() ?? [...run.preview],
         durationMs:
           run.status === "running"
@@ -169,6 +253,13 @@ export class Runner {
     for (const run of this.runs)
       if (run.sessionId !== null) sessions.add(run.sessionId);
     return sessions;
+  }
+  async markReviewed(runId: string): Promise<Run> {
+    const run = this.runs.find((candidate) => candidate.id === runId);
+    if (!run) throw new DomainError("Run not found.", 404);
+    run.reviewedAt = this.now().toISOString();
+    await this.persist(run);
+    return this.list().find((listed) => listed.id === run.id) as Run;
   }
   private async persist(run: StoredRun) {
     const { preview, ...metadata } = run;
@@ -190,8 +281,15 @@ export class Runner {
     planning: PlanningSnapshot,
     now: Date,
   ): Promise<TaskGate> {
-    const gate = taskGate(task, planning, now);
+    const gate = taskGate(task, planning, now, this.list());
     if (gate.status !== "ready") return gate;
+    const deploying = this.deploys.pending();
+    if (deploying)
+      return {
+        ...gate,
+        status: "waiting",
+        reason: deployReason(deploying.title),
+      };
     let resources: string[];
     try {
       resources = await resolveResources(task.workdir);
@@ -223,6 +321,9 @@ export class Runner {
     }
   }
   private async admit(taskId: string, gated: boolean): Promise<Run> {
+    await this.deploys.refresh();
+    const deploying = this.deploys.pending();
+    if (deploying) throw new DomainError(deployReason(deploying.title));
     const task = this.store
       .snapshot()
       .tasks.find((candidate) => candidate.id === taskId);
@@ -235,7 +336,7 @@ export class Runner {
     const holder = this.holder(resources);
     if (holder) throw new DomainError(blockedReason(holder.title));
     if (gated) {
-      const gate = taskGate(task, this.planning(), this.now());
+      const gate = taskGate(task, this.planning(), this.now(), this.list());
       if (gate.status !== "ready") throw new DomainError(gate.reason);
     }
     const sessionId = task.provider === "claude" ? randomUUID() : null;
@@ -243,6 +344,8 @@ export class Runner {
       id: id(),
       taskId: task.id,
       title: task.title,
+      prompt: task.prompt,
+      estimatedOutputTokens: task.outputTokens,
       provider: task.provider,
       model: task.model,
       status: "running",
@@ -251,6 +354,10 @@ export class Runner {
       durationMs: 0,
       exitCode: null,
       error: null,
+      outputTokens: null,
+      summary: null,
+      changes: null,
+      reviewedAt: null,
       sessionId,
       preview: [],
     };
@@ -264,6 +371,7 @@ export class Runner {
       task,
       resources,
       run,
+      applied: false,
       output: new OutputPreview(),
       done,
       resolve,
@@ -288,13 +396,19 @@ export class Runner {
     const { task } = active;
     try {
       task.workdir = await validateWorkdir(task.workdir);
+      await ensureRepository(task.workdir);
+      active.gitStart = await snapshotWorkdir(task.workdir);
       await this.persist(run);
       if (this.stopped || active.cancelled) {
         active.cancelled = true;
         await this.finish(active, null);
         return;
       }
-      const child = (this.options.launch ?? launchProvider)(task, sessionId);
+      active.applied = this.options.autoApply?.() ?? false;
+      const child = (this.options.launch ?? launchProvider)(
+        active.applied ? withAutoApply(task) : task,
+        sessionId,
+      );
       active.child = child;
       for (const channel of ["stdout", "stderr"] as const) {
         child[channel]?.on("data", (chunk) => {
@@ -359,6 +473,24 @@ export class Runner {
       this.now().getTime() - Date.parse(active.run.startedAt),
     );
     active.run.preview = active.output.lines();
+    active.run.summary = active.output.summary();
+    try {
+      const before = active.gitStart;
+      const after = before ? await snapshotWorkdir(active.task.workdir) : null;
+      active.run.changes =
+        before && after
+          ? await diffSnapshots(before, after, gitIn(active.task.workdir))
+          : null;
+    } catch {
+      active.run.error ??=
+        "Could not read what the run changed in its work directory.";
+    }
+    try {
+      active.run.outputTokens = await this.readTokens(active.run.sessionId);
+    } catch {
+      this.error =
+        "Could not read the output tokens of the run. Auto-dispatch is paused; check transcript file access.";
+    }
     try {
       await this.persist(active.run);
     } catch {
@@ -370,6 +502,23 @@ export class Runner {
     } catch {
       this.error =
         "Could not finalize the queue task. Auto-dispatch is paused; check runtime file access and restart.";
+    }
+    try {
+      if (
+        active.applied &&
+        active.run.status === "completed" &&
+        leftChanges(active.run.changes) &&
+        (await hasComposeFile(active.task.workdir))
+      )
+        await this.deploys.request({
+          runId: active.run.id,
+          title: active.run.title,
+          workdir: active.task.workdir,
+          requestedAt: this.now().toISOString(),
+        });
+    } catch {
+      this.error =
+        "Could not request the deploy of the run. Auto-dispatch is paused; check runtime file access.";
     } finally {
       this.active.delete(active.run.id);
       active.resolve();
@@ -416,14 +565,17 @@ export class Runner {
    * after every earlier pick, and the locks held by running and picked tasks.
    */
   private async select(at: Date): Promise<PublicTask[]> {
+    if (this.deploys.pending()) return [];
     const settings = this.settings();
+    const rates = this.rates();
+    const runs = this.list();
     let load = this.load(settings);
     const picked: Holding[] = [];
     for (const task of this.store.snapshot().tasks) {
       if (load.running >= settings.maxConcurrentRuns) break;
       if (
         task.status !== "pending" ||
-        taskGate(task, this.planning(load), at).status !== "ready"
+        taskGate(task, this.planning(load), at, runs).status !== "ready"
       )
         continue;
       let resources: string[];
@@ -435,21 +587,26 @@ export class Runner {
       }
       if (this.holder(resources, picked)) continue;
       picked.push({ task, resources });
-      load = withRun(load, task, settings);
+      load = withRun(
+        load,
+        task,
+        expectedSessionCost(task, runs, rates) ?? 0,
+        settings,
+      );
     }
     return picked.map((holding) => holding.task as PublicTask);
   }
   async tick() {
-    if (
-      this.ticking ||
-      !this.getPlanning ||
-      this.stopped ||
-      this.error ||
-      !this.store.snapshot().autoDispatch
-    )
-      return;
+    if (this.ticking || this.stopped) return;
     this.ticking = true;
     try {
+      await this.deploys.refresh();
+      if (
+        !this.getPlanning ||
+        this.error ||
+        !this.store.snapshot().autoDispatch
+      )
+        return;
       if (
         this.planning().providers.claude.reason === USAGE_PREDATES_RUN_REASON &&
         this.refreshUsage
@@ -470,9 +627,11 @@ export class Runner {
   startScheduler() {
     if (this.timer || this.stopped) return;
     this.timer = setInterval(() => {
-      void this.tick().catch(() => {
+      void this.tick().catch((error) => {
         this.error =
-          "Auto-dispatch failed and is paused. Check runtime state and restart.";
+          error instanceof DomainError
+            ? error.message
+            : "Auto-dispatch failed and is paused. Check runtime state and restart.";
       });
     }, TICK_MS);
     this.timer.unref();

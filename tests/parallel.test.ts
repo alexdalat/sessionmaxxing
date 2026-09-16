@@ -18,10 +18,18 @@ import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchLoad,
   type DispatchSettings,
+  type PublicTask,
   type Task,
   type UsageSnapshot,
 } from "../shared/types.js";
-import { fakeChild, taskInput, temporary, usageSnapshot } from "./helpers";
+import {
+  fakeChild,
+  SESSION_RATES,
+  sessionRates,
+  taskInput,
+  temporary,
+  usageSnapshot,
+} from "./helpers";
 
 const at = new Date("2026-09-06T12:00:00Z");
 const now = () => at;
@@ -40,6 +48,7 @@ const planner =
       at,
       undefined,
       load,
+      { rates: SESSION_RATES, error: null },
     );
 
 async function repos(root: string, names: string[]) {
@@ -160,7 +169,9 @@ it("holds a task whose repository is busy while a later independent task starts,
       other.id,
     ]);
     const gate = await runner.gate(
-      store.snapshot().tasks.find((task) => task.id === blocked.id) as Task,
+      store
+        .snapshot()
+        .tasks.find((task) => task.id === blocked.id) as PublicTask,
       plan(runner.load()),
       at,
     );
@@ -172,7 +183,9 @@ it("holds a task whose repository is busy while a later independent task starts,
     await vi.waitFor(() => expect(statusOf(store, other.id)).toBe("completed"));
     expect(
       await runner.gate(
-        store.snapshot().tasks.find((task) => task.id === blocked.id) as Task,
+        store
+          .snapshot()
+          .tasks.find((task) => task.id === blocked.id) as PublicTask,
         plan(runner.load()),
         at,
       ),
@@ -238,9 +251,21 @@ it("admits Claude tasks only while the session budget covers every running task'
   try {
     const { a, b, c, d, e } = await repos(temp.path, ["a", "b", "c", "d", "e"]);
     const store = await QueueStore.open(temp.path);
-    const first = await store.create({ ...taskInput(a), priority: 0 });
-    const second = await store.create({ ...taskInput(b), priority: 1 });
-    const third = await store.create({ ...taskInput(c), priority: 2 });
+    const first = await store.create({
+      ...taskInput(a),
+      outputTokens: 150_000,
+      priority: 0,
+    });
+    const second = await store.create({
+      ...taskInput(b),
+      outputTokens: 150_000,
+      priority: 1,
+    });
+    const third = await store.create({
+      ...taskInput(c),
+      outputTokens: 150_000,
+      priority: 2,
+    });
     const codex = await store.create({
       ...taskInput(d),
       provider: "codex",
@@ -259,7 +284,7 @@ it("admits Claude tasks only while the session budget covers every running task'
       now,
     });
     const plan = planner(
-      { maxConcurrentRuns: 3, runSessionCostPercent: 30 },
+      { maxConcurrentRuns: 3 },
       usageSnapshot({
         session: { percent: 30, resetsAt: "2026-09-06T16:09:00.000Z" },
       }),
@@ -276,26 +301,33 @@ it("admits Claude tasks only while the session budget covers every running task'
     expect(load).toMatchObject({
       running: 3,
       claudeRuns: 2,
-      reserved: { session: 60, weekly: 6, fable: 0 },
+      reserved: { session: 41.4, weekly: 6, fable: 0 },
     });
     const planning = plan({ ...load, running: 2 });
     expect(planning.session).toEqual({
       percent: 30,
       ceiling: 75,
       pace: null,
-      reserved: 60,
-      ok: false,
+      reserved: 41.4,
+      ok: true,
     });
-    expect(planning.providers.claude).toEqual({
+    // Polling folds what the running tasks have spent into the percent while their hold stands.
+    const polled = planner(
+      { maxConcurrentRuns: 3 },
+      usageSnapshot({
+        session: { percent: 45, resetsAt: "2026-09-06T16:09:00.000Z" },
+      }),
+    )({ ...load, running: 2 });
+    expect(polled.providers.claude).toEqual({
       status: "waiting",
       reason:
-        "Session 30% + 60% held for running tasks, over the 75% queue cutoff",
+        "Session 45% + 41.4% held for running tasks, over the 75% queue cutoff",
     });
     expect(planning.providers.codex.status).toBe("ready");
     const tasks = store.snapshot().tasks;
     expect(
       await runner.gate(
-        tasks.find((task) => task.id === codexLate.id) as Task,
+        tasks.find((task) => task.id === codexLate.id) as PublicTask,
         plan(runner.load()),
         at,
       ),
@@ -336,7 +368,7 @@ it("keeps serial behaviour with one slot: the second independent task waits for 
       claude: { status: "waiting", reason: "All 1 run slot busy" },
       codex: { status: "waiting", reason: "All 1 run slot busy" },
     });
-    expect(planning.session.reserved).toBe(20);
+    expect(planning.session.reserved).toBe(13.8);
     await expect(runner.start(second.id)).rejects.toThrow(SLOTS_BUSY_ERROR);
     await runner.tick();
     expect(kids.launch).toHaveBeenCalledTimes(1);
@@ -530,7 +562,14 @@ it("reports slots, reservations, and the blocking run through the queue route", 
     launch: kids.launch,
     now,
   });
-  const app = await createApp({ queue, runner, settings, usage: monitor, now });
+  const app = await createApp({
+    queue,
+    runner,
+    settings,
+    usage: monitor,
+    now,
+    sessionRates,
+  });
   try {
     await monitor.refresh();
     const holder = await queue.create({ ...taskInput(a), title: "Holder" });
@@ -555,15 +594,15 @@ it("reports slots, reservations, and the blocking run through the queue route", 
       lastRunEndedAt: null,
       running: 1,
       claudeRuns: 1,
-      reserved: { session: 20, weekly: 3, fable: 0 },
+      reserved: { session: 13.8, weekly: 3, fable: 0 },
     });
     expect(snapshot.planning.session).toMatchObject({
       percent: 16,
-      reserved: 20,
+      reserved: 13.8,
       ok: true,
     });
     expect(snapshot.planning.providers.claude.reason).toBe(
-      `Session 16% + 20% held for running tasks of 75% · Weekly 2% + 3% held for running tasks of ${snapshot.planning.weekly.ceiling}%`,
+      `Session 16% + 13.8% held for running tasks of 75% · Weekly 2% + 3% held for running tasks of ${snapshot.planning.weekly.ceiling}%`,
     );
     const gates = Object.fromEntries(
       snapshot.tasks.map((task: { id: string; gate: unknown }) => [
@@ -602,16 +641,17 @@ it("loads dispatch settings saved before concurrency existed and fills the new k
     await writeFile(path, JSON.stringify(legacy));
     const migrated = (await DispatchSettingsStore.open(temp.path)).snapshot();
     expect(migrated).toEqual({
+      autoApply: false,
+      keepSessionActive: false,
       ...legacy,
       maxConcurrentRuns: 2,
-      runSessionCostPercent: 20,
       runWeeklyCostPercent: 3,
     });
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(migrated);
     const custom = {
       ...migrated,
       maxConcurrentRuns: 1,
-      runSessionCostPercent: 45,
+      runWeeklyCostPercent: 5,
     };
     await writeFile(path, JSON.stringify(custom));
     expect((await DispatchSettingsStore.open(temp.path)).snapshot()).toEqual(
@@ -630,11 +670,13 @@ it("gates Fable tasks on Fable reservations and other Claude tasks on the weekly
   });
   const settings = { ...anyHour, runWeeklyCostPercent: 10 };
   const pending = {
+    id: "a".repeat(24),
     status: "pending" as const,
     provider: "claude" as const,
     model: "fable",
     preferredWindowStart: null,
     earliestStart: null,
+    outputTokens: 20_000,
   };
   const oneFableRunning: DispatchLoad = {
     lastRunEndedAt: null,
@@ -648,6 +690,7 @@ it("gates Fable tasks on Fable reservations and other Claude tasks on the weekly
     at,
     undefined,
     oneFableRunning,
+    { rates: SESSION_RATES, error: null },
   );
   expect(planning.weekly).toMatchObject({ percent: 30, ceiling: 60, ok: true });
   expect(planning.fable).toMatchObject({
@@ -656,12 +699,12 @@ it("gates Fable tasks on Fable reservations and other Claude tasks on the weekly
     reserved: 10,
     ok: false,
   });
-  expect(taskGate(pending, planning, at)).toMatchObject({
+  expect(taskGate(pending, planning, at, [])).toMatchObject({
     status: "waiting",
     reason:
       "Fable weekly 55% + 10% held for running tasks, over the 60% queue cutoff",
   });
-  expect(taskGate({ ...pending, model: "opus" }, planning, at).status).toBe(
+  expect(taskGate({ ...pending, model: "opus" }, planning, at, []).status).toBe(
     "ready",
   );
 });

@@ -6,7 +6,13 @@ import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
 import { UsageHistoryStore } from "../server/usage-history.js";
 import { USAGE_MIN_REFRESH_MS, UsageMonitor } from "../server/usage-monitor.js";
-import { fakeChild, taskInput, temporary, usageSnapshot } from "./helpers";
+import {
+  fakeChild,
+  sessionRates,
+  taskInput,
+  temporary,
+  usageSnapshot,
+} from "./helpers";
 
 it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, and promotes Claude tasks once usage drops", async () => {
   const temp = await temporary();
@@ -31,7 +37,14 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
   const child = fakeChild();
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
-  const app = await createApp({ queue, runner, settings, usage: monitor, now });
+  const app = await createApp({
+    queue,
+    runner,
+    settings,
+    usage: monitor,
+    now,
+    sessionRates,
+  });
   try {
     await monitor.refresh();
     const claude = await queue.create(taskInput(temp.path));
@@ -54,7 +67,7 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
     expect(waiting.gate).toEqual({
       status: "waiting",
       reason: "Session 80%, over the 75% queue cutoff",
-      eligibleAt: now().toISOString(),
+      eligibleAt: "2026-09-06T16:09:00.000Z",
     });
     sessionPercent = 30;
     clock += 60_000;
@@ -111,7 +124,14 @@ it("refreshes official usage after a run ends before dispatching the next Claude
   const child = fakeChild();
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
-  const app = await createApp({ queue, runner, settings, usage: monitor, now });
+  const app = await createApp({
+    queue,
+    runner,
+    settings,
+    usage: monitor,
+    now,
+    sessionRates,
+  });
   try {
     await monitor.refresh();
     const first = await queue.create(taskInput(temp.path));
@@ -141,7 +161,7 @@ it("refreshes official usage after a run ends before dispatching the next Claude
     expect(await gate()).toEqual({
       status: "waiting",
       reason: "Session 80%, over the 75% queue cutoff",
-      eligibleAt: now().toISOString(),
+      eligibleAt: "2026-09-06T16:09:00.000Z",
     });
     sessionPercent = 30;
     clock += USAGE_MIN_REFRESH_MS;
@@ -149,6 +169,68 @@ it("refreshes official usage after a run ends before dispatching the next Claude
     await runner.tick();
     expect(launch).toHaveBeenCalledTimes(2);
     expect(runner.list()[0]?.taskId).toBe(second.id);
+  } finally {
+    child.emit("close", 0);
+    await runner.waitForIdle();
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("lets a small task start when a larger one ahead of it lacks headroom", async () => {
+  const temp = await temporary();
+  const now = () => new Date("2026-09-06T12:00:00Z");
+  const monitor = new UsageMonitor(
+    async (at) =>
+      usageSnapshot({
+        fetchedAt: at.toISOString(),
+        session: { percent: 60, resetsAt: "2026-09-06T16:09:00Z" },
+      }),
+    await UsageHistoryStore.open(temp.path, now()),
+    now,
+  );
+  const queue = await QueueStore.open(temp.path);
+  const settings = await DispatchSettingsStore.open(temp.path);
+  await settings.save({ ...settings.snapshot(), busyHoursReservePercent: 25 });
+  const child = fakeChild();
+  const launch = vi.fn(() => child);
+  const runner = await Runner.open(queue, temp.path, { launch, now });
+  const app = await createApp({
+    queue,
+    runner,
+    settings,
+    usage: monitor,
+    now,
+    sessionRates,
+    loadHistory: async () => ({
+      events: [],
+      health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
+    }),
+  });
+  try {
+    await monitor.refresh();
+    const large = await queue.create({
+      ...taskInput(temp.path),
+      outputTokens: 150_000,
+    });
+    const small = await queue.create({
+      ...taskInput(temp.path),
+      outputTokens: 50_000,
+      priority: 1,
+    });
+    await queue.setAutoDispatch(true);
+    await runner.tick();
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(runner.list()[0]?.taskId).toBe(small.id);
+    const held = (await app.inject("/api/queue"))
+      .json()
+      .tasks.find((task: { id: string }) => task.id === large.id);
+    expect(held.gate).toEqual({
+      status: "waiting",
+      reason:
+        "Session 60% + 6.9% held for running tasks + 20.7% expected, over the 75% queue cutoff",
+      eligibleAt: "2026-09-06T16:09:00.000Z",
+    });
   } finally {
     child.emit("close", 0);
     await runner.waitForIdle();

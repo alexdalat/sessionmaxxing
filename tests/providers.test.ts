@@ -1,5 +1,10 @@
 import { expect, it, vi } from "vitest";
-import { launchProvider, type SpawnProvider } from "../server/providers.js";
+import {
+  AUTO_APPLY_INSTRUCTION,
+  launchProvider,
+  type SpawnProvider,
+  withAutoApply,
+} from "../server/providers.js";
 import { fakeChild, taskInput } from "./helpers";
 
 it("launches exact provider argv with top-level Codex flags, no shell, and the whole prompt as one argument", () => {
@@ -10,6 +15,7 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
     id: "a".repeat(24),
     status: "pending" as const,
     createdAt: new Date().toISOString(),
+    finishedAt: null,
     model: "opus",
   };
   const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
@@ -99,4 +105,70 @@ it("bounds previews and redacts arbitrary text, credentials, environment values,
     /PRIVATE|sk-secret|hidden|OAuth|8a23|ENV_SECRET|xxx/,
   );
   expect(preview.lines().join("\n")).toContain("[redacted");
+});
+it("keeps the final result text as the run summary", async () => {
+  const { OutputPreview } = await import("../server/output.js");
+  const preview = new OutputPreview();
+  preview.push(
+    "stdout",
+    '{"type":"assistant","message":{"content":"working on it","usage":{"output_tokens":3}}}\n',
+  );
+  preview.push(
+    "stdout",
+    '{"type":"result","is_error":false,"num_turns":4,"result":"Renamed the parser and ran the tests."}\n',
+  );
+  preview.flush();
+  expect(preview.summary()).toBe("Renamed the parser and ran the tests.");
+  expect(preview.lines().join("\n")).not.toContain("working on it");
+});
+it("truncates a long summary to its tail", async () => {
+  const { MAX_SUMMARY_CHARS, OutputPreview } = await import(
+    "../server/output.js"
+  );
+  const preview = new OutputPreview();
+  const result = `${"a".repeat(MAX_SUMMARY_CHARS)}That is the end.`;
+  preview.push(
+    "stdout",
+    `${JSON.stringify({ type: "result", is_error: false, num_turns: 1, result })}\n`,
+  );
+  const summary = preview.summary();
+  expect(summary).toHaveLength(MAX_SUMMARY_CHARS);
+  expect(summary?.startsWith("…")).toBe(true);
+  expect(summary?.endsWith("That is the end.")).toBe(true);
+});
+it("uses the last block of plain provider output as the summary", async () => {
+  const { OutputPreview } = await import("../server/output.js");
+  const preview = new OutputPreview();
+  preview.push("stdout", "[2026-09-08T12:00:00] codex\nreading files\n\n");
+  preview.push("stdout", "Updated the parser.\nAll tests pass.\n");
+  preview.flush();
+  expect(preview.summary()).toBe("Updated the parser.\nAll tests pass.");
+  expect(preview.lines().join("\n")).not.toContain("Updated the parser");
+});
+
+it("tells an auto-apply run to ignore git and still deploy", () => {
+  const task = {
+    ...taskInput("/home/user"),
+    id: "a".repeat(24),
+    status: "pending" as const,
+    createdAt: new Date().toISOString(),
+    finishedAt: null,
+    model: "opus",
+  };
+
+  expect(AUTO_APPLY_INSTRUCTION).toContain(
+    "ignore git entirely: do not check git status, commit, stash, branch, or create a worktree",
+  );
+  expect(AUTO_APPLY_INSTRUCTION).toContain(
+    "never skip or refuse a change because of uncommitted changes",
+  );
+  expect(AUTO_APPLY_INSTRUCTION).toContain(
+    "do not attempt `docker compose` yourself",
+  );
+  expect(AUTO_APPLY_INSTRUCTION).toContain(
+    "the dashboard redeploys it on the host after the run ends",
+  );
+  expect(withAutoApply(task).prompt).toBe(
+    `${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`,
+  );
 });

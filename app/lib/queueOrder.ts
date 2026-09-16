@@ -5,9 +5,12 @@ const READY = 1;
 const WAITING = 2;
 const FINISHED = 3;
 
+const isFinished = (task: PublicTask) =>
+  task.status !== "pending" && task.status !== "running";
+
 const rank = (task: PublicTask) => {
   if (task.status === "running") return RUNNING;
-  if (task.status !== "pending") return FINISHED;
+  if (isFinished(task)) return FINISHED;
   return task.gate?.status === "ready" ? READY : WAITING;
 };
 
@@ -32,9 +35,9 @@ const bySoonest = (a: PublicTask, b: PublicTask) => {
   return left - right;
 };
 
-/** Queue display order: running, ready, waiting (soonest first), finished. */
+/** Queue display order for unfinished tasks: running, ready, waiting (soonest first). */
 export const displayOrder = (tasks: PublicTask[]): PublicTask[] =>
-  [RUNNING, READY, WAITING, FINISHED].flatMap((group) => {
+  [RUNNING, READY, WAITING].flatMap((group) => {
     const inGroup = tasks.filter((task) => rank(task) === group);
     return group === WAITING ? inGroup.sort(bySoonest) : inGroup;
   });

@@ -11,7 +11,7 @@ import {
   YAxis,
 } from "recharts";
 import { Skeleton } from "@/app/components/ui/skeleton";
-import { FABLE_COLOR, WEEKLY_COLOR } from "@/app/lib/chart";
+import { FABLE_COLOR, TOOLTIP_STYLE, WEEKLY_COLOR } from "@/app/lib/chart";
 import { dayTicks, paceSeries } from "@/app/lib/pace";
 import {
   localTimestamp,
@@ -78,11 +78,7 @@ export function WeeklyPace({
               <Tooltip
                 labelFormatter={(t) => localTimestamp(Number(t))}
                 formatter={(value) => `${value}%`}
-                contentStyle={{
-                  background: "#191a1b",
-                  border: "1px solid #ffffff20",
-                  borderRadius: 8,
-                }}
+                contentStyle={TOOLTIP_STYLE}
                 separator=": "
               />
               <Legend itemSorter={() => 0} />

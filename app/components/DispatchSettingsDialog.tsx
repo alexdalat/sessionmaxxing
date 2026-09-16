@@ -58,12 +58,13 @@ function useQuietOpportunities(open: boolean) {
 }
 
 const draftFrom = (settings: DispatchSettings) => ({
+  autoApply: settings.autoApply,
+  keepSessionActive: settings.keepSessionActive,
   sessionReservePercent: String(settings.sessionReservePercent),
   busyHoursReservePercent: String(settings.busyHoursReservePercent),
   weeklyMarginPercent: String(settings.weeklyMarginPercent),
   quietStartHours: String(settings.quietStartHours),
   maxConcurrentRuns: String(settings.maxConcurrentRuns),
-  runSessionCostPercent: String(settings.runSessionCostPercent),
   runWeeklyCostPercent: String(settings.runWeeklyCostPercent),
 });
 
@@ -92,7 +93,7 @@ export function DispatchSettingsDialog({
     >
       <DialogContent
         aria-describedby={undefined}
-        className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[640px]"
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[640px]"
       >
         <DialogHeader>
           <DialogTitle>Queue settings</DialogTitle>
@@ -106,6 +107,8 @@ export function DispatchSettingsDialog({
               await api<PlanningSnapshot>("/api/dispatch-settings", {
                 method: "PUT",
                 body: JSON.stringify({
+                  autoApply: draft.autoApply,
+                  keepSessionActive: draft.keepSessionActive,
                   sessionReservePercent: Number(draft.sessionReservePercent),
                   busyHoursReservePercent: Number(
                     draft.busyHoursReservePercent,
@@ -113,7 +116,6 @@ export function DispatchSettingsDialog({
                   weeklyMarginPercent: Number(draft.weeklyMarginPercent),
                   quietStartHours: Number(draft.quietStartHours),
                   maxConcurrentRuns: Number(draft.maxConcurrentRuns),
-                  runSessionCostPercent: Number(draft.runSessionCostPercent),
                   runWeeklyCostPercent: Number(draft.runWeeklyCostPercent),
                 }),
               });
@@ -231,26 +233,6 @@ export function DispatchSettingsDialog({
                 />
               </div>
               <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-session-cost`}>
-                  Session held per running Claude task (%)
-                </Label>
-                <Input
-                  id={`${fieldId}-session-cost`}
-                  type="number"
-                  min={0}
-                  max={MAX_RUN_COST_PERCENT}
-                  step="any"
-                  required
-                  value={draft.runSessionCostPercent}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      runSessionCostPercent: event.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
                 <Label htmlFor={`${fieldId}-weekly-cost`}>
                   Weekly held per running Claude task (%)
                 </Label>
@@ -269,6 +251,43 @@ export function DispatchSettingsDialog({
                     })
                   }
                 />
+              </div>
+              <div className="full">
+                <span className="field-label">
+                  Apply and deploy without review
+                </span>
+                <Button
+                  type="button"
+                  role="switch"
+                  aria-checked={draft.autoApply}
+                  variant={draft.autoApply ? "default" : "outline"}
+                  className="rounded-full"
+                  onClick={() =>
+                    setDraft({ ...draft, autoApply: !draft.autoApply })
+                  }
+                >
+                  {draft.autoApply ? "On" : "Off"}
+                </Button>
+              </div>
+              <div className="full">
+                <span className="field-label">
+                  Start each 5-hour session automatically
+                </span>
+                <Button
+                  type="button"
+                  role="switch"
+                  aria-checked={draft.keepSessionActive}
+                  variant={draft.keepSessionActive ? "default" : "outline"}
+                  className="rounded-full"
+                  onClick={() =>
+                    setDraft({
+                      ...draft,
+                      keepSessionActive: !draft.keepSessionActive,
+                    })
+                  }
+                >
+                  {draft.keepSessionActive ? "On" : "Off"}
+                </Button>
               </div>
               <div className="full">
                 <span className="field-label">Quiet hours</span>

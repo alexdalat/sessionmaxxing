@@ -3,6 +3,13 @@ import { counter } from "./parser.js";
 const MAX_LINE = 16_384;
 const MAX_PREVIEW = 8192;
 const MAX_LINES = 80;
+export const MAX_SUMMARY_CHARS = 8000;
+const ELLIPSIS = "…";
+/** The tail of the text, which is where a provider's closing summary sits. */
+const capTail = (text: string) =>
+  text.length <= MAX_SUMMARY_CHARS
+    ? text
+    : ELLIPSIS + text.slice(text.length - MAX_SUMMARY_CHARS + ELLIPSIS.length);
 type Channel = "stdout" | "stderr";
 export function safePreviewLine(line: string): boolean {
   return /^(?:\[redacted (?:stdout|stderr|oversized output)\]|Provider initialized|Assistant response · output tokens: \d+|Result: (?:completed|failed) · turns: \d+)$/.test(
@@ -13,6 +20,9 @@ export class OutputPreview {
   private buffers: Record<Channel, string> = { stdout: "", stderr: "" };
   private dropping: Record<Channel, boolean> = { stdout: false, stderr: false };
   private preview: string[] = [];
+  private resultText: string | null = null;
+  private block = "";
+  private lastBlock: string | null = null;
   failed = false;
   constructor(saved: string[] = []) {
     for (const line of saved)
@@ -27,8 +37,15 @@ export class OutputPreview {
     )
       this.preview.shift();
   }
+  private endBlock() {
+    if (this.block) this.lastBlock = this.block;
+    this.block = "";
+  }
   private consume(channel: Channel, line: string) {
-    if (!line.trim()) return;
+    if (!line.trim()) {
+      if (channel === "stdout") this.endBlock();
+      return;
+    }
     if (channel === "stdout") {
       try {
         const event = JSON.parse(line);
@@ -44,12 +61,15 @@ export class OutputPreview {
         }
         if (event?.type === "result") {
           this.failed ||= event.is_error === true;
+          if (typeof event.result === "string" && event.result.trim())
+            this.resultText = capTail(event.result);
           this.add(
             `Result: ${event.is_error === true ? "failed" : "completed"} · turns: ${counter(event.num_turns)}`,
           );
           return;
         }
       } catch {
+        this.block = capTail(this.block ? `${this.block}\n${line}` : line);
         this.add("[redacted stdout]");
         return;
       }
@@ -79,8 +99,13 @@ export class OutputPreview {
       if (!this.dropping[channel]) this.consume(channel, this.buffers[channel]);
       this.buffers[channel] = "";
     }
+    this.endBlock();
   }
   lines() {
     return [...this.preview];
+  }
+  /** The provider's closing message: Claude's result text, or the last block Codex printed. */
+  summary(): string | null {
+    return this.resultText ?? this.lastBlock;
   }
 }

@@ -2,7 +2,14 @@ import { createReadStream } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import type { HistoryData, ParsedEvent } from "../shared/types.js";
+import type {
+  ActivityEvent,
+  HistoryData,
+  OutputTokens,
+  ParsedEvent,
+} from "../shared/types.js";
+import { modelFamily } from "../shared/types.js";
+import { emptyOutputTokens } from "./calibration.js";
 import { parseTranscript } from "./parser.js";
 
 interface ParsedFile {
@@ -91,6 +98,51 @@ async function parseFile(path: string, isHistory: boolean) {
     stream.destroy();
   }
   return parsed;
+}
+
+async function sessionFiles(root: string, sessionId: string) {
+  // The session id is matched against directory entries, never joined into a path.
+  const transcript = `${sessionId}.jsonl`;
+  const files: string[] = [];
+  for (const project of await entries(join(root, "projects"))) {
+    if (!project.isDirectory()) continue;
+    const directory = join(root, "projects", project.name);
+    for (const file of await entries(directory)) {
+      if (file.isFile() && file.name === transcript) {
+        files.push(join(directory, file.name));
+        continue;
+      }
+      if (!file.isDirectory() || file.name !== sessionId) continue;
+      const subagents = join(directory, file.name, "subagents");
+      for (const agent of await entries(subagents))
+        if (agent.isFile() && agent.name.endsWith(".jsonl"))
+          files.push(join(subagents, agent.name));
+    }
+  }
+  return files;
+}
+
+/** Output tokens one dispatched session produced, by model family, subagents included. */
+export async function readSessionTokens(
+  root: string,
+  sessionId: string,
+): Promise<OutputTokens> {
+  const tokens = emptyOutputTokens();
+  const latest = new Map<string, ActivityEvent>();
+  const anonymous: ActivityEvent[] = [];
+  for (const path of await sessionFiles(root, sessionId)) {
+    const parsed = await parseFile(path, false);
+    if (!parsed) continue;
+    for (const { messageId, event } of parsed.events)
+      if (messageId === null) anonymous.push(event);
+      else latest.set(messageId, event);
+  }
+  for (const event of [...latest.values(), ...anonymous]) {
+    // A record whose model the parser did not recognize has no family to charge.
+    const family = modelFamily(event.model);
+    if (family !== null) tokens[family] += event.outputTokens;
+  }
+  return tokens;
 }
 
 /** History reader that reparses only the transcript files whose size or mtime changed. */

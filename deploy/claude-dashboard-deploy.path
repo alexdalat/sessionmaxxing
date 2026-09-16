@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for capacity dashboard deploy requests
+
+[Path]
+PathExistsGlob=%h/workspace/claude-capacity-dashboard/data/deploy/requests/*.json
+
+[Install]
+WantedBy=default.target

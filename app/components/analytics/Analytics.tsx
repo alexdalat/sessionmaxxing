@@ -1,19 +1,33 @@
 "use client";
+import { useState } from "react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
-  Line,
-  LineChart,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
+import { Label } from "@/app/components/ui/label";
 import {
-  formatNumber,
-  runningTotals,
-  sourceRows,
-} from "@/app/lib/analyticsRows";
-import { WEEKLY_COLOR } from "@/app/lib/chart";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/app/components/ui/select";
+import {
+  type ActivityRow,
+  activitySeries,
+  BREAKDOWNS,
+  type Breakdown,
+  seriesColor,
+  seriesLabel,
+} from "@/app/lib/activitySeries";
+import { formatNumber, sourceRows } from "@/app/lib/analyticsRows";
+import { CHART_CURSOR_FILL, TOOLTIP_STYLE } from "@/app/lib/chart";
 import type { Analytics, Mix, SourceActivity } from "@/shared/types";
 import { HOURS, hourLabel, shortHourLabel } from "@/shared/types";
 
@@ -89,7 +103,8 @@ function SourceMix({ sources }: { sources: SourceActivity[] }) {
 
 export function AnalyticsView({ data }: { data: Analytics }) {
   const max = Math.max(1, ...data.heatmap.map((c) => c.activeMinutes));
-  const cumulative = runningTotals(data.daily);
+  const [breakdown, setBreakdown] = useState<Breakdown>("source");
+  const { keys, rows } = activitySeries(data.daily, breakdown);
   return (
     <>
       <div className="section-heading">
@@ -163,12 +178,31 @@ export function AnalyticsView({ data }: { data: Analytics }) {
         </div>
       </section>
       <figure
-        className="panel cumulative"
-        aria-label={`Cumulative Claude activity over the last ${data.days} days`}
+        className="panel"
+        aria-label={`Daily active minutes over the last ${data.days} days by ${breakdown}`}
       >
         <div className="section-heading">
-          <h2>Cumulative active minutes</h2>
-          <span className="muted">Since {data.daily[0]?.date}</span>
+          <h2>Active minutes</h2>
+          <div className="grid gap-1.5">
+            <Label htmlFor="activity-breakdown" className="sr-only">
+              Breakdown
+            </Label>
+            <Select
+              value={breakdown}
+              onValueChange={(value) => setBreakdown(value as Breakdown)}
+            >
+              <SelectTrigger id="activity-breakdown">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {BREAKDOWNS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
         <div className="chart">
           <ResponsiveContainer
@@ -176,7 +210,7 @@ export function AnalyticsView({ data }: { data: Analytics }) {
             height={240}
             initialDimension={{ width: 700, height: 240 }}
           >
-            <LineChart data={cumulative} accessibilityLayer>
+            <BarChart data={rows} accessibilityLayer>
               <CartesianGrid stroke="#ffffff10" vertical={false} />
               <XAxis
                 dataKey="date"
@@ -186,26 +220,32 @@ export function AnalyticsView({ data }: { data: Analytics }) {
               />
               <YAxis stroke="#8a8f98" allowDecimals={false} width={50} />
               <Tooltip
-                formatter={(value, _name, item) => [
-                  `${formatNumber(Number(value))} min · ${formatNumber(item.payload.responses)} responses`,
-                  "To date",
+                formatter={(value, name) => [
+                  `${formatNumber(Number(value))} min`,
+                  name,
                 ]}
-                contentStyle={{
-                  background: "#191a1b",
-                  border: "1px solid #ffffff20",
-                  borderRadius: 8,
+                labelFormatter={(date, payload) => {
+                  const row = payload[0]?.payload as ActivityRow | undefined;
+                  return row
+                    ? `${date} · ${formatNumber(row.activeMinutes)} min · ${formatNumber(row.responses)} responses`
+                    : date;
                 }}
+                contentStyle={TOOLTIP_STYLE}
+                cursor={{ fill: CHART_CURSOR_FILL }}
                 separator=": "
               />
-              <Line
-                type="stepAfter"
-                dataKey="activeMinutes"
-                name="Active minutes to date"
-                stroke={WEEKLY_COLOR}
-                strokeWidth={2}
-                dot={false}
-              />
-            </LineChart>
+              <Legend itemSorter={() => 0} />
+              {keys.map((key, index) => (
+                <Bar
+                  key={key}
+                  stackId="minutes"
+                  dataKey={key}
+                  name={seriesLabel(breakdown, key)}
+                  fill={seriesColor(breakdown, key, index)}
+                  isAnimationActive={false}
+                />
+              ))}
+            </BarChart>
           </ResponsiveContainer>
         </div>
       </figure>

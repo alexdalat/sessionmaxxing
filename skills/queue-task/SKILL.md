@@ -17,7 +17,7 @@ auto-dispatches tasks into the quietest five-hour windows, gated by official Cla
 usage. Up to `settings.maxConcurrentRuns` tasks (default 2) run together when their
 work directories belong to different repositories; tasks in the same repository, a
 nested directory, or another worktree of the same repository wait for each other, and
-each running Claude task holds `settings.runSessionCostPercent` of the session budget
+each running Claude task holds the session percent its own expected output tokens cost
 until it finishes. Queue work here instead of burning the current session.
 
 ## 1. Check capacity
@@ -39,8 +39,15 @@ and stop.
   Pick the narrowest directory that is its own repository; two tasks only run in parallel
   when their repositories differ, and a workdir of `/home/user` blocks every other task.
 - **prompt** — self-contained; the queued run starts with no conversation history. It must state:
-  the files to touch, the decisions already made, the checks to run (`pnpm typecheck`,
-  `pnpm test`, …), and **do not commit**.
+  the files to touch, the decisions already made, and the checks to run (`pnpm typecheck`,
+  `pnpm test`, …).
+- **commit line** — depends on `settings.autoApply` from `/api/dispatch-settings`:
+  - `false`: end the prompt with **do not commit**.
+  - `true`: the dashboard appends an edit-in-place paragraph that tells the run to ignore
+    git and to leave `docker compose` to the host, which redeploys a Compose work directory
+    once the run ends. Never write a git step (commit, stash, branch, worktree, clean-tree
+    check) or any docker step in the prompt.
+- **git state** — ignore it. Uncommitted changes never block queuing or applying a task.
 
 Write long prompts to a file in your scratchpad directory and pass `--prompt-file`.
 
@@ -56,7 +63,8 @@ node /home/user/workspace/claude-capacity-dashboard/scripts/queue-task.mjs \
 ```
 
 Other flags: `--provider claude|codex`, `--priority N` (lower runs first),
-`--window HH` (0-23; omit for any quiet hour), `--after ISO`, `--url`, `--dry-run`.
+`--tokens N|auto` (expected output tokens, `auto` by default),
+`--window HH` (0-23; omit for any hour), `--after ISO`, `--url`, `--dry-run`.
 The script prints the usage summary, then the created task id, title, and window.
 
 ## 4. Report back

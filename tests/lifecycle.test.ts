@@ -40,12 +40,13 @@ it("uses the persistent runtime data directory for dispatch settings and usage s
       method: "PUT",
       url: "/api/dispatch-settings",
       payload: {
+        autoApply: false,
+        keepSessionActive: false,
         sessionReservePercent: 30,
         weeklyMarginPercent: 5,
         busyHoursReservePercent: 100,
         quietStartHours: 6,
         maxConcurrentRuns: 2,
-        runSessionCostPercent: 20,
         runWeeklyCostPercent: 3,
       },
     });
@@ -128,6 +129,7 @@ it("binds all container interfaces when HOST is explicitly 0.0.0.0 and still val
         tasks: [],
         runnerError: null,
         planning: (await app.inject("/api/dispatch-settings")).json(),
+        sessionKeeper: { lastStartedAt: null, error: null },
       });
       const denied = await app.inject({
         url: "/api/queue",

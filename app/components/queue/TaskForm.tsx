@@ -17,16 +17,22 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
-import { modelOptions } from "@/app/lib/models";
+import { DEFAULT_MODEL, modelOptions } from "@/app/lib/models";
 import type { Provider, PublicTask, TaskInput } from "@/shared/types";
-import { HOURS, hourLabel, PROVIDER_MODELS } from "@/shared/types";
-
-const DEFAULT_MODEL: Record<Provider, string> = {
-  claude: "opus",
-  codex: PROVIDER_MODELS.codex[0].value,
-};
+import {
+  AUTO_OUTPUT_TOKENS,
+  DEFAULT_MAX_TURNS,
+  HOURS,
+  hourLabel,
+} from "@/shared/types";
+import { WorkdirField } from "./WorkdirField";
 
 const ANY_WINDOW = "any";
+const THOUSAND = 1000;
+const OUTPUT_TOKEN_PRESETS = [
+  10_000, 25_000, 50_000, 100_000, 150_000, 250_000,
+];
+const tokenLabel = (tokens: number) => `${Math.round(tokens / THOUSAND)}k`;
 
 export function TaskFormDialog({
   open,
@@ -49,6 +55,14 @@ export function TaskFormDialog({
   const [windowStart, setWindowStart] = useState(
     String(task?.preferredWindowStart ?? ANY_WINDOW),
   );
+  const [workdir, setWorkdir] = useState(task?.workdir ?? "");
+  const [outputTokens, setOutputTokens] = useState(
+    task ? String(task.outputTokens) : AUTO_OUTPUT_TOKENS,
+  );
+  const tokenChoices =
+    task && !OUTPUT_TOKEN_PRESETS.includes(task.outputTokens)
+      ? [...OUTPUT_TOKEN_PRESETS, task.outputTokens].sort((a, b) => a - b)
+      : OUTPUT_TOKEN_PRESETS;
   const browserDate = task?.earliestStart
     ? new Date(
         Date.parse(task.earliestStart) -
@@ -66,7 +80,7 @@ export function TaskFormDialog({
     >
       <DialogContent
         aria-describedby={undefined}
-        className="max-h-[calc(100vh-2rem)] overflow-y-auto sm:max-w-[640px]"
+        className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[640px]"
       >
         <DialogHeader>
           <DialogTitle>{task ? "Edit task" : "Add task"}</DialogTitle>
@@ -79,7 +93,7 @@ export function TaskFormDialog({
             const fields = new FormData(form);
             const earliest = String(fields.get("earliestStart"));
             const parsedEarliest = earliest ? Date.parse(earliest) : Number.NaN;
-            const input = {
+            const input: TaskInput = {
               title: String(fields.get("title")),
               prompt: String(fields.get("prompt")),
               provider,
@@ -87,6 +101,10 @@ export function TaskFormDialog({
               workdir: String(fields.get("workdir")).trim(),
               priority: Number(fields.get("priority")),
               maxTurns: Number(fields.get("maxTurns")),
+              outputTokens:
+                outputTokens === AUTO_OUTPUT_TOKENS
+                  ? AUTO_OUTPUT_TOKENS
+                  : Number(outputTokens),
               earliestStart: Number.isFinite(parsedEarliest)
                 ? new Date(parsedEarliest).toISOString()
                 : null,
@@ -122,12 +140,11 @@ export function TaskFormDialog({
             </div>
             <div className="full grid gap-1.5">
               <Label htmlFor={`${fieldId}-workdir`}>Work directory</Label>
-              <Input
+              <WorkdirField
                 id={`${fieldId}-workdir`}
-                name="workdir"
-                required
-                defaultValue={task?.workdir ?? "/home/user/workspace"}
-                placeholder="/home/user/workspace/project"
+                value={workdir}
+                onChange={setWorkdir}
+                defaultToRecent={!task}
               />
             </div>
             <div className="grid gap-1.5">
@@ -193,8 +210,31 @@ export function TaskFormDialog({
                 min={1}
                 max={1000}
                 required
-                defaultValue={task?.maxTurns ?? 20}
+                defaultValue={task?.maxTurns ?? DEFAULT_MAX_TURNS}
               />
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor={`${fieldId}-output-tokens`}>Output tokens</Label>
+              <Select
+                name="outputTokens"
+                value={outputTokens}
+                onValueChange={setOutputTokens}
+              >
+                <SelectTrigger
+                  id={`${fieldId}-output-tokens`}
+                  className="w-full"
+                >
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO_OUTPUT_TOKENS}>Auto</SelectItem>
+                  {tokenChoices.map((tokens) => (
+                    <SelectItem key={tokens} value={String(tokens)}>
+                      {tokenLabel(tokens)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-earliest-start`}>
@@ -220,7 +260,7 @@ export function TaskFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={ANY_WINDOW}>Any quiet hour</SelectItem>
+                  <SelectItem value={ANY_WINDOW}>Any hour</SelectItem>
                   {HOURS.map((h) => (
                     <SelectItem key={h} value={String(h)}>
                       {hourLabel(h)} → {hourLabel((h + 5) % 24)}

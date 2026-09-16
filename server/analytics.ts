@@ -50,6 +50,35 @@ function countTimes(times: number[]) {
 function count(events: ActivityEvent[]) {
   return countTimes(events.map((e) => Date.parse(e.timestamp)));
 }
+/** Splits the distinct active minutes of `events` among the owners of `key`, one owner per minute. */
+export function partitionMinutes(
+  events: ActivityEvent[],
+  key: "source" | "model",
+): Map<string, number> {
+  const minutes = new Map<number, Map<string, number>>();
+  for (const event of events) {
+    const minute = Math.floor(Date.parse(event.timestamp) / MINUTE_MS);
+    let owners = minutes.get(minute);
+    if (!owners) {
+      owners = new Map<string, number>();
+      minutes.set(minute, owners);
+    }
+    owners.set(event[key], (owners.get(event[key]) ?? 0) + 1);
+  }
+  const totals = new Map<string, number>();
+  for (const owners of minutes.values()) {
+    let winner = "";
+    let best = 0;
+    // Insertion order is first-seen order, so a strict > leaves ties with the first owner.
+    for (const [owner, hits] of owners)
+      if (hits > best) {
+        winner = owner;
+        best = hits;
+      }
+    totals.set(winner, (totals.get(winner) ?? 0) + 1);
+  }
+  return totals;
+}
 function mix(events: ActivityEvent[], key: "model" | "project") {
   const values = new Map<string, number>();
   for (const event of events)
@@ -83,10 +112,20 @@ export function aggregate(
     days,
     timeZone: TIME_ZONE,
     generatedAt: now.toISOString(),
-    daily: dates.map((date) => ({
-      date,
-      ...count(decorated.filter((e) => e.date === date).map((e) => e.event)),
-    })),
+    daily: dates.map((date) => {
+      const onDate = decorated
+        .filter((e) => e.date === date)
+        .map((e) => e.event);
+      const sources = partitionMinutes(onDate, "source");
+      return {
+        date,
+        ...count(onDate),
+        sources: Object.fromEntries(
+          ACTIVITY_SOURCES.map((source) => [source, sources.get(source) ?? 0]),
+        ) as Record<ActivitySource, number>,
+        models: Object.fromEntries(partitionMinutes(onDate, "model")),
+      };
+    }),
     heatmap: Array.from({ length: 168 }, (_, i) => ({
       day: Math.floor(i / 24),
       hour: i % 24,

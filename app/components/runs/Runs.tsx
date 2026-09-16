@@ -1,25 +1,80 @@
+"use client";
+import { useState } from "react";
 import { ListSkeleton } from "@/app/components/Skeletons";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { usePolling } from "@/app/hooks/usePolling";
-import { localTimestamp, PROVIDER_LABELS, type Run } from "@/shared/types";
+import { api } from "@/app/lib/api";
+import {
+  type DeployStatus,
+  localTimestamp,
+  MODEL_FAMILIES,
+  needsReview,
+  type OutputTokens,
+  PROVIDER_LABELS,
+  type Run,
+} from "@/shared/types";
 
-const statusVariants: Record<Run["status"], "success" | "warning" | "info"> = {
+const THOUSAND = 1000;
+const tokenTotal = (tokens: OutputTokens | null) =>
+  tokens === null
+    ? "—"
+    : `${Math.round(MODEL_FAMILIES.reduce((sum, family) => sum + tokens[family], 0) / THOUSAND)}k`;
+
+type BadgeVariant = "success" | "warning" | "info";
+const statusVariants: Record<Run["status"], BadgeVariant> = {
   running: "success",
   completed: "success",
   failed: "warning",
   cancelled: "warning",
+};
+const deployBadges: Record<
+  DeployStatus,
+  { label: string; variant: BadgeVariant }
+> = {
+  requested: { label: "Deploy queued", variant: "info" },
+  deploying: { label: "Deploying", variant: "info" },
+  succeeded: { label: "Deployed", variant: "success" },
+  failed: { label: "Deploy failed", variant: "warning" },
 };
 export function Runs() {
   const { data, error, reload } = usePolling<{
     runs: Run[];
     runnerError?: string;
   }>("/api/runs");
+  const [busyRun, setBusyRun] = useState("");
+  const [actionError, setActionError] = useState("");
+  async function act(run: Run, path: string, message: string) {
+    setBusyRun(run.id);
+    setActionError("");
+    try {
+      await api(path, { method: "POST" });
+      reload();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : message);
+    } finally {
+      setBusyRun("");
+    }
+  }
+  const markReviewed = (run: Run) =>
+    act(run, `/api/runs/${run.id}/reviewed`, "Could not mark the run.");
+  const retry = (run: Run) =>
+    act(
+      run,
+      `/api/tasks/${run.taskId}/retry`,
+      "Could not queue the task again.",
+    );
+  const pending = data?.runs.filter(needsReview).length ?? 0;
   return (
     <>
-      {(error || data?.runnerError) && (
+      {pending > 0 && (
+        <p className="review-summary" role="status">
+          <Badge variant="warning">{pending}</Badge> need review
+        </p>
+      )}
+      {(error || actionError || data?.runnerError) && (
         <div role="alert" className="error">
-          {error || data?.runnerError}{" "}
+          {error || actionError || data?.runnerError}{" "}
           <Button type="button" variant="outline" onClick={reload}>
             Try again
           </Button>
@@ -33,12 +88,51 @@ export function Runs() {
         </div>
       )}
       {data?.runs.map((run) => (
-        <article className="panel" key={run.id}>
+        <article
+          className={`panel${needsReview(run) ? " panel-review" : ""}`}
+          key={run.id}
+        >
           <div className="section-heading">
             <h2>{run.title}</h2>
-            <Badge variant={statusVariants[run.status]} className="capitalize">
-              {run.status}
-            </Badge>
+            <span className="run-heading-tools">
+              {needsReview(run) && (
+                <>
+                  <Badge variant="warning">Needs review</Badge>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busyRun === run.id}
+                    onClick={() => void markReviewed(run)}
+                  >
+                    Mark reviewed
+                  </Button>
+                </>
+              )}
+              {(run.status === "failed" || run.status === "cancelled") && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busyRun === run.id}
+                  aria-label={`Retry ${run.title}`}
+                  onClick={() => void retry(run)}
+                >
+                  Retry
+                </Button>
+              )}
+              <Badge
+                variant={statusVariants[run.status]}
+                className="capitalize"
+              >
+                {run.status}
+              </Badge>
+              {run.deploy && (
+                <Badge variant={deployBadges[run.deploy.status].variant}>
+                  {deployBadges[run.deploy.status].label}
+                </Badge>
+              )}
+            </span>
           </div>
           <dl className="facts">
             <div>
@@ -59,22 +153,53 @@ export function Runs() {
               <dt>Exit code</dt>
               <dd>{run.exitCode ?? "—"}</dd>
             </div>
+            <div>
+              <dt>Session cost</dt>
+              <dd>
+                {run.sessionCostPercent === null
+                  ? "—"
+                  : `${run.sessionCostPercent}%`}
+              </dd>
+            </div>
+            <div>
+              <dt>Output tokens</dt>
+              <dd>{tokenTotal(run.outputTokens)}</dd>
+            </div>
           </dl>
           {run.endedAt && (
             <p className="muted">Ended {localTimestamp(run.endedAt)}</p>
           )}
           {run.error && <p className="warning">{run.error}</p>}
-          <details>
-            <summary>Output</summary>
-            <pre
-              role="log"
-              aria-live="off"
-              className="run-preview"
-              aria-label={`Output for ${run.title}`}
-            >
-              {run.preview.length ? run.preview.join("\n") : "No output yet"}
-            </pre>
-          </details>
+          {run.summary && <pre className="summary">{run.summary}</pre>}
+          {run.prompt && (
+            <details>
+              <summary>Prompt</summary>
+              <pre className="task-prompt">{run.prompt}</pre>
+            </details>
+          )}
+          {run.changes && run.changes.files.length > 0 && (
+            <details>
+              <summary>Changed files</summary>
+              {run.changes.commits > 0 && (
+                <p className="muted">
+                  {run.changes.branch} · {run.changes.commits} commits
+                </p>
+              )}
+              <ul className="run-changes">
+                {run.changes.files.map((file) => (
+                  <li key={file.path}>
+                    <span>{file.path}</span>
+                    {(file.added > 0 || file.removed > 0) && (
+                      <span>
+                        <span className="added">+{file.added}</span>{" "}
+                        <span className="removed">−{file.removed}</span>
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
         </article>
       ))}
     </>

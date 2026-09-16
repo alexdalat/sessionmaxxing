@@ -1,15 +1,34 @@
-import { mkdir, readdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  writeFile,
+} from "node:fs/promises";
+import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { planDispatch } from "../server/dispatch.js";
+import { gitIn } from "../server/git.js";
+import { AUTO_APPLY_INSTRUCTION } from "../server/providers.js";
 import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
 import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchLoad,
+  needsReview,
+  type OutputTokens,
   type Task,
 } from "../shared/types.js";
-import { fakeChild, taskInput, temporary } from "./helpers";
+import {
+  fakeChild,
+  SESSION_RATES,
+  taskInput,
+  temporary,
+  usageSnapshot,
+} from "./helpers";
 
+const calibration = { rates: SESSION_RATES, error: null };
 const serial = (load: DispatchLoad) =>
   planDispatch(
     { ...DEFAULT_DISPATCH_SETTINGS, maxConcurrentRuns: 1 },
@@ -17,6 +36,7 @@ const serial = (load: DispatchLoad) =>
     new Date(),
     undefined,
     load,
+    calibration,
   );
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -147,6 +167,9 @@ it("auto-dispatches only eligible preferred windows across midnight, respects ea
           error: null,
         },
         new Date("2026-09-06T05:30:00Z"),
+        undefined,
+        undefined,
+        calibration,
       ),
     );
     await runner.tick();
@@ -180,7 +203,7 @@ it("treats provider result errors as failure and returns a safe error when a lau
     const runner = await Runner.open(store, temp.path, { launch: () => child });
     await runner.start(task.id);
     child.stdout.write(
-      '{"type":"result","is_error":true,"result":"PRIVATE ERROR"}',
+      '{"type":"result","is_error":true,"result":"The provider gave up."}',
     );
     child.emit("close", 0, null);
     await runner.waitForIdle();
@@ -194,9 +217,7 @@ it("treats provider result errors as failure and returns a safe error when a lau
     await broken.start(task.id);
     await broken.waitForIdle();
     expect(broken.list()[0].status).toBe("failed");
-    expect(JSON.stringify(broken.list())).not.toMatch(
-      /PRIVATE|SECRET|ENV_VALUE/,
-    );
+    expect(JSON.stringify(broken.list())).not.toMatch(/SECRET|ENV_VALUE/);
     await broken.close();
     await runner.close();
   } finally {
@@ -350,6 +371,8 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         id,
         taskId: "c".repeat(24),
         title: "Legacy run",
+        prompt: null,
+        estimatedOutputTokens: null,
         provider: "claude",
         model: "opus",
         status: "completed",
@@ -358,9 +381,246 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         durationMs: 300_000,
         exitCode: 0,
         error: null,
+        outputTokens: null,
+        sessionCostPercent: null,
+        summary: null,
+        changes: null,
+        deploy: null,
+        reviewedAt: null,
         preview: [],
       },
     ]);
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+const RUN_TIME = new Date("2026-09-06T12:00:00Z");
+const SESSION_TOKENS: OutputTokens = {
+  fable: 100_000,
+  opus: 50_000,
+  sonnet: 0,
+  haiku: 0,
+};
+
+async function runWithTokens(
+  temp: string,
+  sessionTokens: (sessionId: string) => Promise<OutputTokens>,
+) {
+  const store = await QueueStore.open(temp);
+  const task = await store.create(taskInput(temp));
+  const child = fakeChild();
+  const runner = await Runner.open(store, temp, {
+    launch: () => child,
+    now: () => RUN_TIME,
+    sessionTokens,
+  });
+  runner.setPlanner((load) =>
+    planDispatch(
+      DEFAULT_DISPATCH_SETTINGS,
+      {
+        snapshot: usageSnapshot({ fetchedAt: RUN_TIME.toISOString() }),
+        error: null,
+      },
+      RUN_TIME,
+      undefined,
+      load,
+      calibration,
+    ),
+  );
+  await runner.start(task.id);
+  child.emit("close", 0, null);
+  await runner.waitForIdle();
+  const run = runner.list()[0];
+  const persisted = JSON.parse(
+    await readFile(`${temp}/runs/${run.id}.json`, "utf8"),
+  );
+  const error = runner.error;
+  await runner.close();
+  return { run, persisted, error };
+}
+
+it("stores the output tokens of a finished run and prices them at the current rates", async () => {
+  const temp = await temporary();
+  try {
+    const sessions: string[] = [];
+    const { run, persisted } = await runWithTokens(temp.path, async (id) => {
+      sessions.push(id);
+      return SESSION_TOKENS;
+    });
+    expect(run.outputTokens).toEqual(SESSION_TOKENS);
+    expect(persisted.outputTokens).toEqual(SESSION_TOKENS);
+    expect(run.sessionCostPercent).toBe(42.6);
+    expect(persisted.sessionCostPercent).toBeUndefined();
+    expect(sessions).toHaveLength(1);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("leaves a run unmeasured when its transcript recorded no output tokens", async () => {
+  const temp = await temporary();
+  try {
+    const { run, persisted, error } = await runWithTokens(
+      temp.path,
+      async () => ({ fable: 0, opus: 0, sonnet: 0, haiku: 0 }),
+    );
+    expect(run.outputTokens).toBeNull();
+    expect(run.sessionCostPercent).toBeNull();
+    expect(persisted.outputTokens).toBeNull();
+    expect(error).toBeNull();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("pauses auto-dispatch when the output tokens of a run cannot be read", async () => {
+  const temp = await temporary();
+  try {
+    const { run, error } = await runWithTokens(temp.path, async () => {
+      throw new Error("transcripts are unreadable");
+    });
+    expect(run.outputTokens).toBeNull();
+    expect(run.status).toBe("completed");
+    expect(error).toMatch(/output tokens/);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("backfills the output tokens of a saved run that has none", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const id = "b".repeat(24);
+    const sessionId = "11111111-2222-3333-4444-555555555555";
+    await mkdir(join(temp.path, "runs"), { recursive: true });
+    await writeFile(
+      join(temp.path, "runs", `${id}.json`),
+      JSON.stringify({
+        id,
+        taskId: "c".repeat(24),
+        title: "Saved run",
+        provider: "claude",
+        model: "opus",
+        status: "completed",
+        startedAt: "2026-09-01T10:00:00.000Z",
+        endedAt: "2026-09-01T10:05:00.000Z",
+        durationMs: 300_000,
+        exitCode: 0,
+        error: null,
+        sessionCostPercent: 73,
+        sessionId,
+      }),
+    );
+    await writeFile(join(temp.path, "runs", `${id}.log`), JSON.stringify([]));
+    const asked: string[] = [];
+    const runner = await Runner.open(store, temp.path, {
+      sessionTokens: async (session) => {
+        asked.push(session);
+        return SESSION_TOKENS;
+      },
+    });
+    runner.setPlanner(serial);
+    expect(asked).toEqual([sessionId]);
+    expect(runner.list()[0].outputTokens).toEqual(SESSION_TOKENS);
+    const persisted = JSON.parse(
+      await readFile(join(temp.path, "runs", `${id}.json`), "utf8"),
+    );
+    expect(persisted.outputTokens).toEqual(SESSION_TOKENS);
+    expect(persisted.sessionCostPercent).toBeUndefined();
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("stores the summary and changed files of a finished run", async () => {
+  const temp = await temporary();
+  try {
+    const workdir = join(temp.path, "repo");
+    await mkdir(workdir);
+    const git = gitIn(workdir);
+    await git(["init", "-b", "main"]);
+    await writeFile(`${workdir}/notes.md`, "one\n");
+    await git(["add", "notes.md"]);
+    await git([
+      "-c",
+      "user.name=Test",
+      "-c",
+      "user.email=test@example.com",
+      "commit",
+      "-m",
+      "first",
+    ]);
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(workdir));
+    const child = fakeChild();
+    const runner = await Runner.open(store, temp.path, { launch: () => child });
+    const run = await runner.start(task.id);
+    await appendFile(`${workdir}/notes.md`, "two\n");
+    await writeFile(`${workdir}/extra.txt`, "new\n");
+    child.stdout.write(
+      '{"type":"result","is_error":false,"num_turns":3,"result":"Added a note."}\n',
+    );
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    const finished = runner.list()[0];
+    expect(finished.summary).toBe("Added a note.");
+    expect(finished.changes).toEqual({
+      branch: "main",
+      commits: 0,
+      files: [
+        { path: "extra.txt", added: 0, removed: 0 },
+        { path: "notes.md", added: 1, removed: 0 },
+      ],
+    });
+    expect(needsReview(finished)).toBe(true);
+    const persisted = JSON.parse(
+      await readFile(`${temp.path}/runs/${run.id}.json`, "utf8"),
+    );
+    expect(persisted.summary).toBe("Added a note.");
+    expect(persisted.changes.files).toHaveLength(2);
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("appends the apply instruction to a dispatched prompt only while the override is on", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    let autoApply = false;
+    const launched: string[] = [];
+    const children: ReturnType<typeof fakeChild>[] = [];
+    const launch = vi.fn((dispatched: Task) => {
+      launched.push(dispatched.prompt);
+      const child = fakeChild();
+      children.push(child);
+      return child;
+    });
+    const runner = await Runner.open(store, temp.path, {
+      launch,
+      autoApply: () => autoApply,
+    });
+    const finish = async (id: string) => {
+      await runner.start(id);
+      children.at(-1)?.emit("close", 0, null);
+      await runner.waitForIdle();
+    };
+    await finish(task.id);
+    expect(launched[0]).toBe(task.prompt);
+
+    autoApply = true;
+    const second = await store.create(taskInput(temp.path));
+    await finish(second.id);
+    expect(launched[1]).toBe(`${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`);
+    expect(store.snapshot().tasks.find((t) => t.id === second.id)?.prompt).toBe(
+      task.prompt,
+    );
     await runner.close();
   } finally {
     await temp.cleanup();

@@ -1,14 +1,38 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import type {
-  PublicTask,
-  QueueSnapshot,
-  Task,
-  TaskInput,
-  TaskStatus,
+import {
+  type ModelFamily,
+  modelFamily,
+  type Provider,
+  type PublicTask,
+  type QueueSnapshot,
+  type Task,
+  type TaskInput,
+  type TaskStatus,
 } from "../shared/types.js";
 import { atomicJson, DomainError, id } from "./storage.js";
 import { validateFields, validateWorkdir } from "./validation.js";
+
+/** A task input whose "auto" output tokens have already been resolved to a number. */
+export type StoredTaskInput = Omit<TaskInput, "outputTokens"> &
+  Pick<Task, "outputTokens">;
+export const defaultModel = (provider: Provider) =>
+  provider === "claude" ? "opus" : "gpt-6-astra";
+/**
+ * Session rates fitted on 2026-09-15 (data/usage-samples.jsonl against the
+ * transcripts in ~/.claude/projects), used once to convert tasks stored as a
+ * session percent into the output tokens the queue keeps now. Sonnet had too
+ * little data to fit and takes the Opus rate, as Codex and unknown models do.
+ */
+const MIGRATION_RATES: Record<ModelFamily, number> = {
+  fable: 357,
+  opus: 138,
+  sonnet: 138,
+  haiku: 325,
+};
+const MIGRATION_DEFAULT_RATE = MIGRATION_RATES.opus;
+const MIGRATION_DEFAULT_PERCENT = 25;
+const MILLION = 1_000_000;
 
 interface QueueState {
   version: 1;
@@ -26,9 +50,13 @@ export function publicTask(task: Task): PublicTask {
     priority: task.priority,
     status: task.status,
     createdAt: task.createdAt,
+    finishedAt: task.finishedAt,
+    review: null,
     earliestStart: task.earliestStart,
     preferredWindowStart: task.preferredWindowStart,
     maxTurns: task.maxTurns,
+    outputTokens: task.outputTokens,
+    sessionCostPercent: null,
   };
 }
 export class QueueStore {
@@ -61,6 +89,30 @@ export class QueueStore {
     for (const task of state.tasks as (Task & { budgetEstimate?: number })[]) {
       if ("budgetEstimate" in task) {
         delete task.budgetEstimate;
+        migrated = true;
+      }
+      // Task cost moved from a session percent to plan-independent output tokens on 2026-09-15.
+      const persisted: {
+        sessionCostPercent?: number;
+        outputTokens?: number;
+        finishedAt?: string | null;
+      } = task;
+      if (persisted.outputTokens === undefined) {
+        const family = modelFamily(task.model ?? "");
+        const rate =
+          family === null ? MIGRATION_DEFAULT_RATE : MIGRATION_RATES[family];
+        persisted.outputTokens = Math.round(
+          ((persisted.sessionCostPercent ?? MIGRATION_DEFAULT_PERCENT) / rate) *
+            MILLION,
+        );
+        migrated = true;
+      }
+      if (persisted.sessionCostPercent !== undefined) {
+        delete persisted.sessionCostPercent;
+        migrated = true;
+      }
+      if (persisted.finishedAt === undefined) {
+        persisted.finishedAt = null;
         migrated = true;
       }
       validateFields(task);
@@ -115,7 +167,7 @@ export class QueueStore {
     );
     return operation;
   }
-  async create(input: TaskInput) {
+  async create(input: StoredTaskInput) {
     validateFields(input);
     const workdir = await validateWorkdir(input.workdir);
     return this.transact((state) => {
@@ -123,10 +175,10 @@ export class QueueStore {
         ...input,
         workdir,
         id: id(),
-        model:
-          input.model || (input.provider === "claude" ? "opus" : "gpt-6-astra"),
+        model: input.model || defaultModel(input.provider),
         status: "pending",
         createdAt: new Date().toISOString(),
+        finishedAt: null,
       };
       state.tasks.push(task);
       return publicTask(task);
@@ -138,7 +190,7 @@ export class QueueStore {
     if (!task) throw new DomainError("Task not found.", 404);
     return task;
   }
-  async update(taskId: string, patch: Partial<TaskInput>) {
+  async update(taskId: string, patch: Partial<StoredTaskInput>) {
     return this.transact(async (state) => {
       const task = this.find(state, taskId);
       if (task.status !== "pending")
@@ -149,7 +201,7 @@ export class QueueStore {
         patch.provider !== task.provider &&
         patch.model === undefined
       )
-        updated.model = patch.provider === "claude" ? "opus" : "gpt-6-astra";
+        updated.model = defaultModel(patch.provider);
       validateFields(updated);
       updated.workdir = await validateWorkdir(updated.workdir);
       Object.assign(task, updated);
@@ -195,6 +247,7 @@ export class QueueStore {
       if (task.status !== "running")
         throw new DomainError("Only a running task can finish.");
       task.status = status;
+      task.finishedAt = new Date().toISOString();
     });
   }
   async retry(taskId: string) {
@@ -203,6 +256,7 @@ export class QueueStore {
       if (task.status !== "failed" && task.status !== "cancelled")
         throw new DomainError("Only failed or cancelled tasks can be retried.");
       task.status = "pending";
+      task.finishedAt = null;
       return publicTask(task);
     });
   }

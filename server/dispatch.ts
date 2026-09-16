@@ -14,12 +14,16 @@ import {
   type PublicTask,
   type QuietHours,
   quietHoursOnly,
+  type Run,
+  type SessionRates,
+  type Task,
   type TaskGate,
   type UsageState,
   WEEK_MINUTES,
   WEEKLY_HARD_CEILING_PERCENT,
 } from "../shared/types.js";
 import { localParts, localStart, shiftDate } from "./analytics.js";
+import { modelSessionPercent, type SessionCalibration } from "./calibration.js";
 import type { QuietRanking } from "./quiet-hours.js";
 
 const MINUTE_MS = 60_000;
@@ -101,11 +105,12 @@ const plural = (count: number, noun: string) =>
 /** Points one run of `task` holds in each Claude bucket while it is active. */
 export function runReservation(
   task: Pick<PublicTask, "provider" | "model">,
+  expectedSessionPercent: number,
   settings: DispatchSettings,
 ): Record<ClaudeBucket, number> {
   if (task.provider !== "claude") return { session: 0, weekly: 0, fable: 0 };
   return {
-    session: settings.runSessionCostPercent,
+    session: expectedSessionPercent,
     weekly: settings.runWeeklyCostPercent,
     fable: FABLE_MODEL.test(task.model) ? settings.runWeeklyCostPercent : 0,
   };
@@ -114,9 +119,10 @@ export function runReservation(
 export function withRun(
   load: DispatchLoad,
   task: Pick<PublicTask, "provider" | "model">,
+  expectedSessionPercent: number,
   settings: DispatchSettings,
 ): DispatchLoad {
-  const cost = runReservation(task, settings);
+  const cost = runReservation(task, expectedSessionPercent, settings);
   return {
     ...load,
     running: load.running + 1,
@@ -128,6 +134,9 @@ export function withRun(
     },
   };
 }
+
+const inBusyHours = (settings: DispatchSettings, quiet: QuietHours) =>
+  !quiet.active && !quietHoursOnly(settings);
 
 /** Naming the reserve only helps when quiet and busy hours get different budgets. */
 function reserveLabel(settings: DispatchSettings, busyHours: boolean) {
@@ -173,11 +182,12 @@ export function planDispatch(
   now: Date,
   ranking: QuietRanking = { ranking: null, error: null },
   load: DispatchLoad = EMPTY_LOAD,
+  calibration: SessionCalibration = { rates: null, error: null },
 ): PlanningSnapshot {
   const snapshot = usage.snapshot;
   const { lastRunEndedAt } = load;
   const quiet = quietHours(ranking, settings.quietStartHours, now);
-  const busyHours = !quiet.active && !quietHoursOnly(settings);
+  const busyHours = inBusyHours(settings, quiet);
   const session = sessionGate(
     snapshot?.session,
     busyHours
@@ -228,6 +238,11 @@ export function planDispatch(
       status: "waiting",
       reason: USAGE_PREDATES_RUN_REASON,
     };
+  else if (calibration.rates === null)
+    claude = {
+      status: "waiting",
+      reason: `Session cost calibration unavailable: ${calibration.error ?? "no five-hour window has been measured yet"}`,
+    };
   else if (!session.ok)
     claude = {
       status: "waiting",
@@ -245,6 +260,7 @@ export function planDispatch(
     };
   return {
     settings,
+    rates: calibration.rates,
     usage: snapshot,
     usageError: usage.error,
     session,
@@ -266,8 +282,38 @@ export function planDispatch(
 
 type GateTask = Pick<
   PublicTask,
-  "status" | "provider" | "model" | "preferredWindowStart" | "earliestStart"
+  | "id"
+  | "status"
+  | "provider"
+  | "model"
+  | "preferredWindowStart"
+  | "earliestStart"
+  | "outputTokens"
 >;
+type RunCost = Pick<Run, "taskId" | "sessionCostPercent">;
+
+/**
+ * The largest session percent this task's earlier runs cost, or its expected
+ * output tokens priced at the current rates; null while the rates are unknown.
+ */
+export function expectedSessionCost(
+  task: Pick<Task, "id" | "model" | "outputTokens">,
+  runs: readonly RunCost[],
+  rates: SessionRates | null,
+): number | null {
+  let largest: number | null = null;
+  for (const run of runs)
+    if (
+      run.taskId === task.id &&
+      run.sessionCostPercent !== null &&
+      (largest === null || run.sessionCostPercent > largest)
+    )
+      largest = run.sessionCostPercent;
+  if (largest !== null) return largest;
+  return rates === null
+    ? null
+    : modelSessionPercent(task.outputTokens, task.model, rates);
+}
 
 /** The window opening at `hour` that is still open at `at`, searching yesterday through tomorrow. */
 function windowStartAt(hour: number, at: number): number {
@@ -281,14 +327,80 @@ function windowStartAt(hour: number, at: number): number {
 const insideWindow = (hour: number, at: number) =>
   windowStartAt(hour, at) <= at;
 
-/** Earliest instant the time-based gates open, ignoring usage; null when unknowable. */
+/** When the pace-based weekly ceiling rises past `percent`, or the window reset when it never does. */
+function weeklyClearsAt(
+  gate: BucketGate,
+  resetsAt: string | null,
+  marginPercent: number,
+): number | null {
+  if (resetsAt === null) return null;
+  const reset = Date.parse(resetsAt);
+  if (gate.percent === null || gate.percent > WEEKLY_HARD_CEILING_PERCENT)
+    return reset;
+  const neededPace = gate.percent - marginPercent;
+  return Math.min(reset, reset - WEEK_MS + (neededPace / FULL) * WEEK_MS);
+}
+
+const overCeiling = (gate: BucketGate, cost: number) =>
+  gate.percent !== null && gate.percent + cost > gate.ceiling;
+
+/** Earliest instant the usage buckets this task draws on hold enough headroom; null when unknowable. */
+function usageClearsAt(
+  task: Pick<GateTask, "id" | "provider" | "model" | "outputTokens">,
+  planning: PlanningSnapshot,
+  runs: readonly RunCost[],
+  now: Date,
+): number | null {
+  const { usage, session, weekly, fable, settings, rates } = planning;
+  if (task.provider !== "claude" || usage === null) return now.getTime();
+  const expected = expectedSessionCost(task, runs, rates);
+  if (expected === null) return null;
+  let clears = now.getTime();
+  if (overCeiling(session, expected)) {
+    if (usage.session.resetsAt === null) return null;
+    clears = Math.max(clears, Date.parse(usage.session.resetsAt));
+  }
+  if (overCeiling(weekly, 0)) {
+    const at = weeklyClearsAt(
+      weekly,
+      usage.weekly.resetsAt,
+      settings.weeklyMarginPercent,
+    );
+    if (at === null) return null;
+    clears = Math.max(clears, at);
+  }
+  if (fable && FABLE_MODEL.test(task.model) && overCeiling(fable, 0)) {
+    const at = weeklyClearsAt(
+      fable,
+      usage.fable?.resetsAt ?? null,
+      settings.weeklyMarginPercent,
+    );
+    if (at === null) return null;
+    clears = Math.max(clears, at);
+  }
+  return clears;
+}
+
+/** Earliest instant every gate — schedule, quiet hours and usage — opens; null when unknowable. */
 export function eligibleAt(
-  task: Pick<GateTask, "provider" | "preferredWindowStart" | "earliestStart">,
+  task: Pick<
+    GateTask,
+    | "id"
+    | "provider"
+    | "model"
+    | "preferredWindowStart"
+    | "earliestStart"
+    | "outputTokens"
+  >,
   planning: PlanningSnapshot,
   now: Date,
+  runs: readonly RunCost[],
 ): string | null {
+  const usageClears = usageClearsAt(task, planning, runs, now);
+  if (usageClears === null) return null;
   const base = Math.max(
     now.getTime(),
+    usageClears,
     task.earliestStart === null ? 0 : Date.parse(task.earliestStart),
   );
   if (task.preferredWindowStart !== null)
@@ -314,12 +426,13 @@ export function taskGate(
   task: GateTask,
   planning: PlanningSnapshot,
   now: Date,
+  runs: readonly RunCost[],
 ): TaskGate {
   if (task.status === "running")
     return { status: "running", reason: "Running now", eligibleAt: null };
   if (task.status !== "pending")
     return { status: "finished", reason: task.status, eligibleAt: null };
-  const eligible = eligibleAt(task, planning, now);
+  const eligible = eligibleAt(task, planning, now, runs);
   if (
     task.earliestStart !== null &&
     Date.parse(task.earliestStart) > now.getTime()
@@ -377,5 +490,22 @@ export function taskGate(
       reason: `Fable weekly ${fable.percent}%${held(fable)}, over the ${fable.ceiling}% queue cutoff`,
       eligibleAt: eligible,
     };
+  const { session } = planning;
+  if (
+    task.provider === "claude" &&
+    provider.status === "ready" &&
+    session.percent !== null
+  ) {
+    const expected = expectedSessionCost(task, runs, planning.rates);
+    if (
+      expected !== null &&
+      session.percent + session.reserved + expected > session.ceiling
+    )
+      return {
+        status: "waiting",
+        reason: `Session ${session.percent}%${held(session)} + ${expected}% expected, over the ${session.ceiling}% queue cutoff${reserveLabel(settings, inBusyHours(settings, quiet))}`,
+        eligibleAt: eligible,
+      };
+  }
   return { ...provider, eligibleAt: eligible };
 }

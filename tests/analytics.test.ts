@@ -1,5 +1,9 @@
 import { expect, it } from "vitest";
-import { activityBlocks, aggregate } from "../server/analytics.js";
+import {
+  activityBlocks,
+  aggregate,
+  partitionMinutes,
+} from "../server/analytics.js";
 import type { ActivityEvent, HistoryData } from "../shared/types.js";
 
 const event = (
@@ -38,6 +42,8 @@ it("aggregates selected Eastern calendar days with distinct real minutes through
     date: "2026-11-01",
     activeMinutes: 2,
     responses: 3,
+    sources: { local: 2, dispatched: 0, unknown: 0 },
+    models: { "claude-opus-4-6": 2 },
   });
   expect(result.heatmap).toHaveLength(168);
   expect(
@@ -54,6 +60,26 @@ it("aggregates selected Eastern calendar days with distinct real minutes through
   expect(result.models).toEqual([{ name: "claude-opus-4-6", responses: 4 }]);
   expect(result.projects).toEqual([{ name: "demo", responses: 4 }]);
   expect(result.health.warnings).toBe(0);
+});
+it("partitionMinutes assigns each minute to the majority owner and keeps the total equal to distinct minutes", () => {
+  const majority = partitionMinutes(
+    [
+      event("2026-11-01T05:30:00Z"),
+      event("2026-11-01T05:30:20Z", { source: "dispatched" }),
+      event("2026-11-01T05:30:40Z"),
+      event("2026-11-01T06:30:00Z", { source: "dispatched" }),
+    ],
+    "source",
+  );
+  expect(Object.fromEntries(majority)).toEqual({ local: 1, dispatched: 1 });
+  const tied = partitionMinutes(
+    [
+      event("2026-11-01T05:30:00Z", { source: "dispatched" }),
+      event("2026-11-01T05:30:20Z", { source: "local" }),
+    ],
+    "source",
+  );
+  expect(Object.fromEntries(tied)).toEqual({ dispatched: 1 });
 });
 it("ranks all 24 five-hour opportunities over 30 complete local dates, including midnight and spring DST", () => {
   const now = new Date("2026-03-10T16:00:00Z");

@@ -53,6 +53,10 @@ export interface ActivityCount {
 }
 export interface DailyActivity extends ActivityCount {
   date: string;
+  /** Active minutes, each minute owned by one source; every source key is present. */
+  sources: Record<ActivitySource, number>;
+  /** Active minutes, each minute owned by one model; only models with minutes appear. */
+  models: Record<string, number>;
 }
 export interface HeatCell extends ActivityCount {
   day: number;
@@ -101,6 +105,18 @@ export const BUCKET_MINUTES: Record<ClaudeBucket, number> = {
   fable: WEEK_MINUTES,
 };
 export const FABLE_MODEL = /fable/i;
+
+export const MODEL_FAMILIES = ["fable", "opus", "sonnet", "haiku"] as const;
+export type ModelFamily = (typeof MODEL_FAMILIES)[number];
+/** Output tokens a five-hour window consumed, split by the family that produced them. */
+export type OutputTokens = Record<ModelFamily, number>;
+/** Session percent one million output tokens of a family costs on the current plan. */
+export type SessionRates = Record<ModelFamily, number>;
+/** The family behind a model alias (`opus`) or identifier (`claude-fable-5-1`); null for Codex and unknown models. */
+export function modelFamily(model: string): ModelFamily | null {
+  const name = model.toLowerCase();
+  return MODEL_FAMILIES.find((family) => name.includes(family)) ?? null;
+}
 
 export interface OfficialUsage {
   percent: number;
@@ -217,6 +233,12 @@ export type TaskStatus =
   | "completed"
   | "failed"
   | "cancelled";
+/** Generous turn cap: dispatched runs regularly use 130+ turns and a looping run is cheaper than a truncated one. */
+export const DEFAULT_MAX_TURNS = 500;
+export const AUTO_OUTPUT_TOKENS = "auto";
+export type OutputTokensInput = number | typeof AUTO_OUTPUT_TOKENS;
+export const MIN_OUTPUT_TOKENS = 1_000;
+export const MAX_OUTPUT_TOKENS = 2_000_000;
 export interface TaskInput {
   title: string;
   prompt: string;
@@ -227,33 +249,82 @@ export interface TaskInput {
   earliestStart: string | null;
   preferredWindowStart: number | null;
   maxTurns: number;
+  /** A number, or "auto" to have the server estimate it from the prompt before the task is stored. */
+  outputTokens: OutputTokensInput;
 }
-export interface Task extends TaskInput {
+export interface Task extends Omit<TaskInput, "outputTokens"> {
   id: string;
   model: string;
+  /** Output tokens the whole run is expected to produce, every model and subagent included. */
+  outputTokens: number;
   status: TaskStatus;
   createdAt: string;
+  /** When the task last left pending or running; null while queued or for tasks finished before this was tracked. */
+  finishedAt: string | null;
 }
 export interface TaskGate {
   status: "ready" | "waiting" | "running" | "finished";
   reason: string;
-  /** Earliest instant the time-based gates open, ignoring usage; null when unknowable. */
+  /** Earliest instant every gate — schedule, quiet hours and usage — opens; null when unknowable. */
   eligibleAt: string | null;
   /** Title of the running task holding a resource this task needs. */
   blockedBy?: string;
 }
 export type PublicTask = Task & {
   gate?: TaskGate;
+  review: "needed" | null;
+  /** `outputTokens` priced at the current session rates; null for Codex tasks and before calibration. */
+  sessionCostPercent: number | null;
 };
+export interface WorkdirSuggestions {
+  /** Absolute directories under the home root, most recently opened in Claude Code or queued first. */
+  recent: string[];
+  /** Absolute directories whose path starts with the typed prefix. */
+  matches: string[];
+}
 export interface QueueSnapshot {
   planning?: PlanningSnapshot;
+  sessionKeeper?: SessionKeeperState;
   tasks: PublicTask[];
   autoDispatch: boolean;
+}
+/** What the session keeper last did; session ids never reach the browser. */
+export interface SessionKeeperState {
+  lastStartedAt: string | null;
+  error: string | null;
+}
+export interface ChangedFile {
+  path: string;
+  added: number;
+  removed: number;
+}
+export interface RunChanges {
+  branch: string;
+  commits: number;
+  files: ChangedFile[];
+}
+export const DEPLOY_STATUSES = [
+  "requested",
+  "deploying",
+  "succeeded",
+  "failed",
+] as const;
+export type DeployStatus = (typeof DEPLOY_STATUSES)[number];
+export interface RunDeploy {
+  status: DeployStatus;
+  updatedAt: string;
+}
+export interface PendingReview {
+  pending: number;
 }
 export interface Run {
   id: string;
   taskId: string;
   title: string;
+  /** The prompt the run was dispatched with; null for runs recorded before prompts were stored. */
+  prompt: string | null;
+  /** What the task was estimated to produce when it started; null for runs recorded before estimates were tracked. */
+  estimatedOutputTokens: number | null;
   provider: Provider;
   model: string;
   status: Exclude<TaskStatus, "pending">;
@@ -262,7 +333,28 @@ export interface Run {
   durationMs: number;
   exitCode: number | null;
   error: string | null;
+  /** Output tokens the run's session produced; null for Codex runs and runs whose transcript held none. */
+  outputTokens: OutputTokens | null;
+  /** `outputTokens` priced at the current session rates; null when unmeasured or before calibration. */
+  sessionCostPercent: number | null;
+  /** The run's final assistant message; null for runs that ended without one. */
+  summary: string | null;
+  /** What the run left in its work directory; null when the work directory is not a git repository. */
+  changes: RunChanges | null;
+  /** Host redeploy of the run's Compose project; null when none was requested. */
+  deploy: RunDeploy | null;
+  reviewedAt: string | null;
   preview: string[];
+}
+const REVIEWED_ON_MERGE = ["main", "master"];
+/** Whether a finished run left work a person still has to look at. */
+export function needsReview(run: Run): boolean {
+  if (run.changes === null || run.reviewedAt !== null) return false;
+  const { files, commits, branch } = run.changes;
+  return (
+    (files.length > 0 && commits === 0) ||
+    (commits > 0 && !REVIEWED_ON_MERGE.includes(branch))
+  );
 }
 
 export const HOURS = Array.from({ length: 24 }, (_, hour) => hour);
@@ -285,23 +377,26 @@ export const shortHourLabel = (hour: number) =>
   `${clockHour(hour)}${hour < HOURS_PER_HALF_DAY ? "a" : "p"}`;
 
 export interface DispatchSettings {
+  /** Tell every dispatched task to commit its own work and redeploy the service instead of leaving it for review. */
+  autoApply: boolean;
+  /** Start a new five-hour session with a short Claude ping as soon as the previous window has ended. */
+  keepSessionActive: boolean;
   sessionReservePercent: number;
   busyHoursReservePercent: number;
   weeklyMarginPercent: number;
   quietStartHours: number;
   maxConcurrentRuns: number;
-  /** Session points one Claude run is expected to consume, reserved while it runs. */
-  runSessionCostPercent: number;
   /** Weekly (and Fable weekly) points one Claude run is expected to consume. */
   runWeeklyCostPercent: number;
 }
 export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
+  autoApply: false,
+  keepSessionActive: false,
   sessionReservePercent: 25,
   busyHoursReservePercent: 100,
   weeklyMarginPercent: 10,
   quietStartHours: 8,
   maxConcurrentRuns: 2,
-  runSessionCostPercent: 20,
   runWeeklyCostPercent: 3,
 };
 export const MAX_SESSION_RESERVE_PERCENT = 90;
@@ -350,6 +445,8 @@ export interface DispatchGate {
 }
 export interface PlanningSnapshot {
   settings: DispatchSettings;
+  /** Session percent per million output tokens, fitted on this machine; null until a window can be fitted. */
+  rates: SessionRates | null;
   usage: UsageSnapshot | null;
   usageError: string | null;
   session: BucketGate;
@@ -366,6 +463,10 @@ export const PLAN_SCORE_COVERAGE_DAYS = 7;
 export interface CoverageDay {
   date: string;
   coverage: number | null;
+  /** Active minutes, each minute owned by one source; every source key is present. */
+  sources: Record<ActivitySource, number>;
+  /** Active minutes, each minute owned by one model; only models with minutes appear. */
+  models: Record<string, number>;
 }
 /** One official weekly window: final percent for finished weeks, on-pace score for the open one. */
 export interface WeekScore {

@@ -14,6 +14,9 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: "#08090a",
+  // Shrink the layout viewport when the phone keyboard opens so dialogs sized in
+  // dvh keep their submit row above it.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

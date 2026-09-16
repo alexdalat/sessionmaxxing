@@ -5,7 +5,18 @@ import { isAbsolute } from "node:path";
 const DEFAULT_URL =
   process.env.CAPACITY_DASHBOARD_URL ?? "http://127.0.0.1:4317";
 const TAILNET_URL = "http://192.0.2.10:4317";
-const DEFAULT_MAX_TURNS = 100;
+const MAC_HOME = "/Users/me";
+// Syncthing folder pairs between the Mac and deltabeta. Runs execute on deltabeta,
+// so a workdir given from the Mac must name the same folder by its deltabeta path.
+const SYNCED_ROOTS = [
+  ["/Users/me/Documents/Personal", "/home/user/syncthing/Personal"],
+  ["/Users/me/ObsidianVaults", "/home/user/syncthing/Obsidian"],
+  ["/Users/me/.claude", "/home/user/.claude"],
+];
+const DEFAULT_MAX_TURNS = 500;
+const AUTO_OUTPUT_TOKENS = "auto";
+const MIN_OUTPUT_TOKENS = 1_000;
+const MAX_OUTPUT_TOKENS = 2_000_000;
 const CONNECTION_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",
@@ -16,8 +27,10 @@ const CONNECTION_CODES = new Set([
 ]);
 const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." | --prompt-file PATH)
   [--workdir /abs/path]  default: the current directory
-  [--model NAME] [--provider claude|codex] [--priority N] [--max-turns N]
-  [--window HH]          0-23; omit for any quiet hour
+  [--model NAME] [--provider claude|codex] [--priority N]
+  [--max-turns N]        default: 500
+  [--tokens N|auto]      expected output tokens; auto lets the server estimate them
+  [--window HH]          0-23; omit for any hour
   [--after ISO] [--url URL] [--dry-run]`;
 const VALUE_FLAGS = new Set([
   "--title",
@@ -30,6 +43,7 @@ const VALUE_FLAGS = new Set([
   "--window",
   "--after",
   "--max-turns",
+  "--tokens",
   "--url",
 ]);
 
@@ -67,6 +81,19 @@ function integer(raw, flag, min, max) {
   return value;
 }
 
+const within = (path, root) => path === root || path.startsWith(`${root}/`);
+
+function dashboardPath(path) {
+  if (!isAbsolute(path)) fail("--workdir must be an absolute path.");
+  if (!within(path, MAC_HOME)) return path;
+  for (const [mac, deltabeta] of SYNCED_ROOTS) {
+    if (within(path, mac)) return deltabeta + path.slice(mac.length);
+  }
+  fail(
+    `${path} is not in a Syncthing folder shared with deltabeta. Pass --workdir with the deltabeta path.`,
+  );
+}
+
 function buildBody(values) {
   if (!values["--title"]) fail(`--title is required.\n${USAGE}`);
   if (values["--prompt"] !== undefined && values["--prompt-file"] !== undefined)
@@ -76,8 +103,7 @@ function buildBody(values) {
       ? values["--prompt"]
       : readFileSync(values["--prompt-file"], "utf8");
   if (!prompt) fail(`--prompt or --prompt-file is required.\n${USAGE}`);
-  const workdir = values["--workdir"] ?? process.cwd();
-  if (!isAbsolute(workdir)) fail("--workdir must be an absolute path.");
+  const workdir = dashboardPath(values["--workdir"] ?? process.cwd());
   const provider = values["--provider"] ?? "claude";
   if (provider !== "claude" && provider !== "codex")
     fail("--provider must be claude or codex.");
@@ -99,6 +125,16 @@ function buildBody(values) {
       values["--max-turns"] === undefined
         ? DEFAULT_MAX_TURNS
         : integer(values["--max-turns"], "--max-turns", 1, 1000),
+    outputTokens:
+      values["--tokens"] === undefined ||
+      values["--tokens"] === AUTO_OUTPUT_TOKENS
+        ? AUTO_OUTPUT_TOKENS
+        : integer(
+            values["--tokens"],
+            "--tokens",
+            MIN_OUTPUT_TOKENS,
+            MAX_OUTPUT_TOKENS,
+          ),
   };
   if (values["--model"] !== undefined) body.model = values["--model"];
   return body;
@@ -153,5 +189,5 @@ const created = await send(base, "/api/tasks", {
   body: JSON.stringify(body),
 });
 console.log(
-  `Queued ${created.id} · ${created.title} · ${created.preferredWindowStart === null ? "Any quiet hour" : `Window ${hourLabel(created.preferredWindowStart)}`}`,
+  `Queued ${created.id} · ${created.title} · ${created.preferredWindowStart === null ? "Any hour" : `Window ${hourLabel(created.preferredWindowStart)}`}`,
 );

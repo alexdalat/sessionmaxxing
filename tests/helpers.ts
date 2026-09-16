@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { vi } from "vitest";
-import type { UsageSnapshot } from "../shared/types.js";
+import type { SessionRates, UsageSnapshot } from "../shared/types.js";
 export async function temporary() {
   await mkdir("tests/.tmp", { recursive: true });
   const path = await mkdtemp(resolve("tests/.tmp/case-"));
@@ -18,7 +18,16 @@ export const taskInput = (workdir: string) => ({
   earliestStart: null,
   preferredWindowStart: null,
   maxTurns: 10,
+  outputTokens: 100_000,
 });
+/** The rates fitted from tests/fixtures/session-windows.json, so 100k Opus tokens cost 13.8%. */
+export const SESSION_RATES: SessionRates = {
+  fable: 357.2,
+  opus: 137.7,
+  sonnet: 357.2,
+  haiku: 325.3,
+};
+export const sessionRates = async () => SESSION_RATES;
 export const usageSnapshot = (
   patch: Partial<UsageSnapshot> = {},
 ): UsageSnapshot => ({

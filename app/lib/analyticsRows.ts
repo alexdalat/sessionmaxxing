@@ -1,22 +1,11 @@
 import {
   ACTIVITY_SOURCE_LABELS,
-  type DailyActivity,
   EXTERNAL_SOURCE_LABEL,
   type SourceActivity,
 } from "@/shared/types";
 
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat("en-US").format(value);
-
-export function runningTotals(daily: DailyActivity[]) {
-  let activeMinutes = 0;
-  let responses = 0;
-  return daily.map((day) => {
-    activeMinutes += day.activeMinutes;
-    responses += day.responses;
-    return { date: day.date, activeMinutes, responses };
-  });
-}
 
 export interface SourceRow {
   label: string;

@@ -13,12 +13,13 @@ import {
 import { atomicJson, DomainError, exactKeys } from "./storage.js";
 
 const KEYS = [
+  "autoApply",
+  "keepSessionActive",
   "sessionReservePercent",
   "busyHoursReservePercent",
   "weeklyMarginPercent",
   "quietStartHours",
   "maxConcurrentRuns",
-  "runSessionCostPercent",
   "runWeeklyCostPercent",
 ] as const;
 function numeric(value: unknown, max: number) {
@@ -34,6 +35,8 @@ export function validateSettings(
 ): asserts value is DispatchSettings {
   if (
     !exactKeys(value, KEYS) ||
+    typeof value.autoApply !== "boolean" ||
+    typeof value.keepSessionActive !== "boolean" ||
     !numeric(value.sessionReservePercent, MAX_SESSION_RESERVE_PERCENT) ||
     !numeric(value.busyHoursReservePercent, MAX_BUSY_HOURS_RESERVE_PERCENT) ||
     !numeric(value.weeklyMarginPercent, MAX_WEEKLY_MARGIN_PERCENT) ||
@@ -43,11 +46,10 @@ export function validateSettings(
     !Number.isInteger(value.maxConcurrentRuns) ||
     !numeric(value.maxConcurrentRuns, MAX_CONCURRENT_RUNS) ||
     (value.maxConcurrentRuns as number) < 1 ||
-    !numeric(value.runSessionCostPercent, MAX_RUN_COST_PERCENT) ||
     !numeric(value.runWeeklyCostPercent, MAX_RUN_COST_PERCENT)
   )
     throw new DomainError(
-      `Dispatch settings need a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, 1 to ${MAX_QUIET_START_HOURS} quiet start hours, 1 to ${MAX_CONCURRENT_RUNS} concurrent runs, and run costs from 0 to ${MAX_RUN_COST_PERCENT}%.`,
+      `Dispatch settings need an apply override flag, a session keeper flag, a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, 1 to ${MAX_QUIET_START_HOURS} quiet start hours, 1 to ${MAX_CONCURRENT_RUNS} concurrent runs, and a weekly run cost from 0 to ${MAX_RUN_COST_PERCENT}%.`,
       400,
     );
 }
@@ -56,6 +58,8 @@ export const settingsSchema = {
   additionalProperties: false,
   required: [...KEYS],
   properties: {
+    autoApply: { type: "boolean" },
+    keepSessionActive: { type: "boolean" },
     sessionReservePercent: {
       type: "number",
       minimum: 0,
@@ -80,11 +84,6 @@ export const settingsSchema = {
       type: "integer",
       minimum: 1,
       maximum: MAX_CONCURRENT_RUNS,
-    },
-    runSessionCostPercent: {
-      type: "number",
-      minimum: 0,
-      maximum: MAX_RUN_COST_PERCENT,
     },
     runWeeklyCostPercent: {
       type: "number",
@@ -128,6 +127,13 @@ export class DispatchSettingsStore {
           ? MAX_BUSY_HOURS_RESERVE_PERCENT
           : rest.sessionReservePercent,
       } as DispatchSettings;
+      await atomicJson(path, state);
+    }
+    // A run now holds the session percent its own task is expected to cost, so the
+    // flat per-run hold saved before 2026-09-15 is dropped.
+    if ("runSessionCostPercent" in state) {
+      delete (state as { runSessionCostPercent?: number })
+        .runSessionCostPercent;
       await atomicJson(path, state);
     }
     // Settings saved before a newer key existed gain the defaults for the missing keys.

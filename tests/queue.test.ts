@@ -1,6 +1,7 @@
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { expect, it } from "vitest";
 import { QueueStore } from "../server/queue.js";
+import type { Task } from "../shared/types.js";
 import { taskInput, temporary } from "./helpers";
 
 it("atomically creates private queue state and persists tasks while including prompts and workdirs in public views", async () => {
@@ -172,6 +173,47 @@ it("drops legacy budget estimates from saved tasks atomically without losing the
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(current);
     expect(await readdir(temp.path)).toEqual(["queue.json"]);
     expect((await stat(path)).mode & 0o777).toBe(0o600);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("converts tasks saved as a session percent into output tokens at the rates of that plan", async () => {
+  const temp = await temporary();
+  try {
+    const queue = await QueueStore.open(temp.path);
+    await queue.create(taskInput(temp.path));
+    await queue.create({
+      ...taskInput(temp.path),
+      model: "claude-fable-5-1",
+    });
+    await queue.create({
+      ...taskInput(temp.path),
+      provider: "codex",
+      model: "gpt-6-astra",
+    });
+    const path = `${temp.path}/queue.json`;
+    const current = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(
+      path,
+      JSON.stringify({
+        ...current,
+        tasks: current.tasks.map(
+          ({ outputTokens: _tokens, ...task }: Task, index: number) =>
+            index === 0 ? task : { ...task, sessionCostPercent: 40 },
+        ),
+      }),
+    );
+    const migrated = (await QueueStore.open(temp.path)).snapshot().tasks;
+    // 25% of a session at the Opus rate of 138 points per million output tokens.
+    expect(migrated[0].outputTokens).toBe(181_159);
+    expect(migrated[1].outputTokens).toBe(112_045);
+    expect(migrated[2].outputTokens).toBe(289_855);
+    for (const task of migrated)
+      expect(task).not.toHaveProperty("sessionCostPercent", expect.any(Number));
+    const saved = JSON.parse(await readFile(path, "utf8")).tasks;
+    expect(saved[1].outputTokens).toBe(112_045);
+    expect(saved[1].sessionCostPercent).toBeUndefined();
   } finally {
     await temp.cleanup();
   }

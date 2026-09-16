@@ -23,6 +23,13 @@ export interface ProviderAdapter {
   command: string;
   args: (task: Task, sessionId: string | null) => string[];
 }
+/** Appended to a dispatched prompt while the queue's apply override is on. */
+export const AUTO_APPLY_INSTRUCTION =
+  "Apply this work yourself instead of leaving it for review. Edit the files directly in this work directory and ignore git entirely: do not check git status, commit, stash, branch, or create a worktree, and never skip or refuse a change because of uncommitted changes. This run has no docker. When the work directory has a Compose file, the dashboard redeploys it on the host after the run ends, so do not attempt `docker compose` yourself. Run any other deploy (a Coolify deploy, the project's own deploy command) before you finish. If that tooling is unavailable, report the blocker and the command.";
+export const withAutoApply = (task: Task): Task => ({
+  ...task,
+  prompt: `${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`,
+});
 export const providerAdapters: Record<Provider, ProviderAdapter> = {
   claude: {
     command: "claude",

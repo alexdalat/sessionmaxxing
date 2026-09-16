@@ -1,0 +1,6 @@
+[Unit]
+Description=Redeploy Compose projects finished by capacity dashboard runs
+
+[Service]
+Type=oneshot
+ExecStart=%h/workspace/claude-capacity-dashboard/deploy/host-deploy.sh

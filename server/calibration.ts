@@ -1,0 +1,206 @@
+import {
+  type ActivityEvent,
+  MODEL_FAMILIES,
+  type ModelFamily,
+  modelFamily,
+  type OutputTokens,
+  type SessionRates,
+  type SessionWindow,
+} from "../shared/types.js";
+
+/** Days of official samples the fit uses, short enough that a plan change re-calibrates within two weeks. */
+export const CALIBRATION_DAYS = 14;
+export const SESSION_RATES_TTL_MS = 10 * 60_000;
+const MILLION = 1_000_000;
+const FULL_PERCENT = 100;
+/** Below this peak the meter's own rounding is a large share of the reading. */
+const MIN_PEAK_PERCENT = 8;
+/** Output tokens a family needs across the sample before its own fitted rate is trusted. */
+const MIN_FAMILY_TOKENS = 200_000;
+/** List price per million output tokens; the ratio a family with too little usage is priced at. */
+const FAMILY_PRICE: Record<ModelFamily, number> = {
+  fable: 50,
+  opus: 25,
+  sonnet: 10,
+  haiku: 5,
+};
+const MAX_PASSES = 500;
+const CONVERGED = 1e-6;
+
+/** One five-hour window: the peak the meter reported and the output tokens produced inside it. */
+export interface WindowTokens {
+  peakPercent: number;
+  outputTokens: OutputTokens;
+}
+export interface SessionCalibration {
+  rates: SessionRates | null;
+  error: string | null;
+}
+
+const round = (value: number) => Math.round(value * 10) / 10;
+
+export const emptyOutputTokens = (): OutputTokens => ({
+  fable: 0,
+  opus: 0,
+  sonnet: 0,
+  haiku: 0,
+});
+
+export function windowTokens(
+  windows: SessionWindow[],
+  events: ActivityEvent[],
+): WindowTokens[] {
+  const spans = windows.flatMap((window) =>
+    window.peakPercent === null
+      ? []
+      : [
+          {
+            peakPercent: window.peakPercent,
+            start: Date.parse(window.start),
+            end: Date.parse(window.end),
+            outputTokens: emptyOutputTokens(),
+          },
+        ],
+  );
+  for (const event of events) {
+    const family = modelFamily(event.model);
+    if (family === null) continue;
+    const at = Date.parse(event.timestamp);
+    for (const span of spans)
+      if (at >= span.start && at < span.end)
+        span.outputTokens[family] += event.outputTokens;
+  }
+  return spans.map(({ peakPercent, outputTokens }) => ({
+    peakPercent,
+    outputTokens,
+  }));
+}
+
+/**
+ * Non-negative least squares by coordinate descent: peak percent ≈ Σ tokens × rate.
+ * Windows the meter censored at 100% would drag every rate down, and tiny windows
+ * are mostly rounding, so both stay out of the fit.
+ */
+export function fitSessionRates(windows: WindowTokens[]): SessionRates | null {
+  const usable = windows.filter(
+    (window) =>
+      window.peakPercent >= MIN_PEAK_PERCENT &&
+      window.peakPercent < FULL_PERCENT,
+  );
+  if (usable.length === 0) return null;
+  const rows = usable.map((window) => ({
+    peak: window.peakPercent,
+    millions: MODEL_FAMILIES.map(
+      (family) => window.outputTokens[family] / MILLION,
+    ),
+  }));
+  const fitted = MODEL_FAMILIES.map(() => 0);
+  for (let pass = 0; pass < MAX_PASSES; pass++) {
+    let moved = 0;
+    MODEL_FAMILIES.forEach((_family, index) => {
+      let numerator = 0;
+      let denominator = 0;
+      for (const row of rows) {
+        const others = row.millions.reduce(
+          (sum, tokens, other) =>
+            other === index ? sum : sum + tokens * fitted[other],
+          0,
+        );
+        numerator += row.millions[index] * (row.peak - others);
+        denominator += row.millions[index] ** 2;
+      }
+      const next = denominator > 0 ? Math.max(0, numerator / denominator) : 0;
+      moved = Math.max(moved, Math.abs(next - fitted[index]));
+      fitted[index] = next;
+    });
+    if (moved < CONVERGED) break;
+  }
+  // A family the sample barely covers, or one the fit pushed to zero, gets no rate of
+  // its own; it is priced off the best-covered family at their list-price ratio.
+  const mass = MODEL_FAMILIES.map((_family, index) =>
+    rows.reduce((sum, row) => sum + row.millions[index], 0),
+  );
+  const fittedIndexes = MODEL_FAMILIES.map((_family, index) => index).filter(
+    (index) => fitted[index] > 0 && mass[index] * MILLION >= MIN_FAMILY_TOKENS,
+  );
+  if (fittedIndexes.length === 0) return null;
+  const anchor = fittedIndexes.reduce((best, index) =>
+    mass[index] > mass[best] ? index : best,
+  );
+  const anchorPrice = FAMILY_PRICE[MODEL_FAMILIES[anchor]];
+  const rates = {} as SessionRates;
+  MODEL_FAMILIES.forEach((family, index) => {
+    rates[family] = round(
+      fittedIndexes.includes(index)
+        ? fitted[index]
+        : (fitted[anchor] * FAMILY_PRICE[family]) / anchorPrice,
+    );
+  });
+  return rates;
+}
+
+export function sessionPercent(
+  tokens: OutputTokens,
+  rates: SessionRates,
+): number {
+  return round(
+    MODEL_FAMILIES.reduce(
+      (percent, family) => percent + (tokens[family] / MILLION) * rates[family],
+      0,
+    ),
+  );
+}
+
+/** The rate charged for one Claude model; an unrecognized model pays the largest rate. */
+function modelRate(model: string, rates: SessionRates): number {
+  const family: ModelFamily | null = modelFamily(model);
+  return family === null
+    ? Math.max(...MODEL_FAMILIES.map((each) => rates[each]))
+    : rates[family];
+}
+
+/** Caches the fitted rates so the scheduler never refits from transcripts on every tick. */
+export class SessionRatesCache {
+  private state: SessionCalibration = { rates: null, error: null };
+  private computedAt = Number.NEGATIVE_INFINITY;
+  private inflight?: Promise<void>;
+  constructor(
+    private load: () => Promise<SessionRates | null>,
+    private now: () => Date = () => new Date(),
+    private ttlMs = SESSION_RATES_TTL_MS,
+  ) {}
+
+  current(): SessionCalibration {
+    if (this.now().getTime() - this.computedAt >= this.ttlMs)
+      void this.refresh();
+    return structuredClone(this.state);
+  }
+
+  refresh(): Promise<void> {
+    if (this.inflight) return this.inflight;
+    this.inflight = this.load()
+      .then((rates) => {
+        this.state = { rates, error: null };
+      })
+      .catch((error: unknown) => {
+        this.state = {
+          rates: this.state.rates,
+          error: error instanceof Error ? error.message : String(error),
+        };
+      })
+      .finally(() => {
+        this.computedAt = this.now().getTime();
+        this.inflight = undefined;
+      });
+    return this.inflight;
+  }
+}
+
+/** Session percent `tokens` output tokens cost when a run of `model` produces them. */
+export function modelSessionPercent(
+  tokens: number,
+  model: string,
+  rates: SessionRates,
+): number {
+  return round((tokens / MILLION) * modelRate(model, rates));
+}

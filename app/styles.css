@@ -41,6 +41,7 @@
   --chart-4: #e5484d;
   --chart-5: #88d4a5;
   --radius: 0.5rem;
+  --mobile-nav-height: 64px;
   --sidebar: #0f1011;
   --sidebar-foreground: #f7f8f8;
   --sidebar-primary: #7170ff;
@@ -242,6 +243,26 @@
     background: #191a1b;
     color: #f7f8f8;
   }
+  .sidebar :where(nav) a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .nav-count {
+    display: inline-grid;
+    place-items: center;
+    min-width: 20px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    background: #e2b56d;
+    color: #08090a;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+  }
   .local-note {
     margin-top: auto;
     color: #8a8f98;
@@ -254,7 +275,9 @@
   main {
     width: 100%;
     max-width: 1500px;
-    padding: 32px 40px 16px;
+    padding: 32px max(40px, env(safe-area-inset-right))
+      max(16px, env(safe-area-inset-bottom))
+      max(40px, env(safe-area-inset-left));
     margin: 0 auto;
     align-self: start;
   }
@@ -267,6 +290,7 @@
   }
   .header-controls {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
   }
@@ -300,6 +324,7 @@
   }
   .section-heading {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     gap: 12px;
     align-items: baseline;
@@ -429,6 +454,7 @@
   }
   dd {
     margin: 5px 0 0;
+    overflow-wrap: anywhere;
   }
   summary {
     cursor: pointer;
@@ -481,6 +507,7 @@
     border-radius: 8px;
     color: #edc995;
     margin-bottom: 18px;
+    overflow-wrap: anywhere;
   }
   .error button {
     margin-left: 10px;
@@ -492,7 +519,7 @@
     background: #7170ff;
     color: #fff;
     font-weight: 500;
-    padding: 8px 12px;
+    padding: 12px 16px;
     border-radius: 8px;
     z-index: 100;
   }
@@ -516,7 +543,9 @@
       grid-template-columns: 180px minmax(0, 1fr);
     }
     main {
-      padding: 26px 22px;
+      padding: 26px max(22px, env(safe-area-inset-right))
+        max(26px, env(safe-area-inset-bottom))
+        max(22px, env(safe-area-inset-left));
     }
     .facts {
       grid-template-columns: repeat(2, 1fr);
@@ -527,16 +556,16 @@
       display: block;
     }
     .sidebar {
-      position: static;
       height: auto;
+      z-index: 30;
+      background: #08090a;
       border-right: 0;
       border-bottom: 1px solid #ffffff0d;
-      padding: 16px;
+      padding: 8px max(12px, env(safe-area-inset-right)) 8px
+        max(12px, env(safe-area-inset-left));
       gap: 12px;
     }
-    .brand {
-      font-size: 16px;
-    }
+    .brand,
     .sidebar-caption,
     .local-note {
       display: none;
@@ -547,12 +576,17 @@
       gap: 4px;
     }
     .sidebar :where(nav) a {
+      display: flex;
+      align-items: center;
       white-space: nowrap;
-      padding: 8px 10px;
+      padding: 8px 12px;
       font-size: 12px;
     }
     main {
-      padding: 22px 16px;
+      padding: 22px max(16px, env(safe-area-inset-right))
+        max(22px, env(safe-area-inset-bottom))
+        max(16px, env(safe-area-inset-left));
+      scroll-margin-top: var(--mobile-nav-height);
     }
     .page-header {
       display: block;
@@ -650,15 +684,10 @@
     overflow: hidden;
     pointer-events: none;
   }
-  @media (prefers-reduced-motion: reduce) {
-    .task-card {
-      transition: none;
-    }
-  }
   .toast {
     position: fixed;
-    right: 20px;
-    bottom: 20px;
+    right: max(20px, env(safe-area-inset-right));
+    bottom: max(20px, env(safe-area-inset-bottom));
     margin: 0;
     z-index: 50;
     background: #191a1b;
@@ -682,6 +711,7 @@
   }
   .queue-tools {
     display: flex;
+    flex-wrap: wrap;
     gap: 8px;
     align-items: center;
     margin-left: auto;
@@ -738,17 +768,52 @@
     padding: 10px;
     margin-top: 6px;
   }
-  .run-preview {
-    max-height: 250px;
+  .summary {
+    max-height: 320px;
     overflow: auto;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
-    background: #08090a;
-    border-radius: 8px;
-    padding: 14px;
+    margin: 12px 0 0;
+    font-family: Inter, sans-serif;
+    font-size: 13px;
+    color: #8a8f98;
+  }
+  .panel-review {
+    border-color: #e2b56d80;
+    box-shadow: inset 3px 0 0 #e2b56d;
+  }
+  .review-summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 14px;
+    color: #edc995;
+  }
+  .run-heading-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .run-changes {
+    list-style: none;
+    margin: 6px 0 0;
+    padding: 0;
     font-family: "JetBrains Mono", monospace;
-    font-size: 11px;
-    color: #d0d6e0;
+    font-size: 12px;
+  }
+  .run-changes li {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 2px 0;
+    overflow-wrap: anywhere;
+  }
+  .run-changes .added {
+    color: #88d4a5;
+  }
+  .run-changes .removed {
+    color: #8a8f98;
   }
   @media (max-width: 900px) {
     .task-card {
@@ -885,11 +950,66 @@
   }
   .gate-row {
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
+    align-items: center;
   }
-  .dispatch-panel .actions {
-    margin-top: auto;
-    padding-top: 20px;
+  .dispatch-list {
+    list-style: none;
+    margin: 0 0 12px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 0;
+    min-height: 0;
+    /* Five 24px rows plus gaps: the height that sits beside the session windows. */
+    max-height: 136px;
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  .dispatch-task {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 24px;
+    padding: 0 8px;
+    font-size: 12px;
+    color: #d0d6e0;
+    background: #191a1b;
+    border: 1px solid #ffffff0d;
+    border-radius: 5px;
+  }
+  .dispatch-task::before {
+    content: "";
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #8a8f98;
+  }
+  .dispatch-task[data-state="running"]::before,
+  .dispatch-task[data-state="ready"]::before {
+    background: var(--success);
+  }
+  .dispatch-task[data-state="waiting"]::before {
+    background: var(--warning);
+  }
+  .dispatch-task.muted::before {
+    display: none;
+  }
+  .dispatch-title {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dispatch-note {
+    flex: none;
+    color: #8a8f98;
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
   }
   .windows {
     display: grid;
@@ -979,5 +1099,48 @@
   .usage-local {
     margin: 0;
     font-size: 11px;
+  }
+}
+
+/* Unlayered, so these win over the Tailwind utility and component layers
+   without !important. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms;
+    animation-iteration-count: 1;
+    transition-duration: 1ms;
+    scroll-behavior: auto;
+  }
+}
+
+@media (pointer: coarse) {
+  [data-slot="button"],
+  [data-slot="dialog-close"],
+  [data-slot="select-trigger"],
+  [data-slot="select-item"],
+  .sidebar :where(nav) a,
+  summary {
+    min-height: 44px;
+  }
+  [data-slot="button"],
+  [data-slot="dialog-close"] {
+    min-width: 44px;
+  }
+  [data-slot="button"]:active,
+  [data-slot="dialog-close"]:active,
+  [data-slot="select-trigger"]:active,
+  [data-slot="select-item"]:active,
+  .sidebar :where(nav) a:active,
+  summary:active {
+    opacity: 0.6;
+  }
+  /* Root font-size is 14px, so the shadcn text-base default lands at 14px and
+     iOS Safari zooms the page on focus. */
+  [data-slot="input"],
+  [data-slot="textarea"] {
+    font-size: 16px;
+    min-height: 44px;
   }
 }

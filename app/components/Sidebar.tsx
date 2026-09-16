@@ -1,6 +1,10 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { usePolling } from "@/app/hooks/usePolling";
+import type { PendingReview } from "@/shared/types";
+
+const REVIEW_POLL_MS = 10_000;
 
 const NAV_ITEMS = [
   { label: "Overview", href: "/" },
@@ -18,6 +22,11 @@ const normalize = (pathname: string) =>
 
 export function Sidebar() {
   const current = normalize(usePathname());
+  const { data: review } = usePolling<PendingReview>(
+    "/api/runs/pending-review",
+    REVIEW_POLL_MS,
+  );
+  const pending = review?.pending ?? 0;
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -35,6 +44,12 @@ export function Sidebar() {
             aria-current={normalize(item.href) === current ? "page" : undefined}
           >
             {item.label}
+            {item.href === "/runs/" && pending > 0 && (
+              <span className="nav-count">
+                {pending}
+                <span className="sr-only"> runs need review</span>
+              </span>
+            )}
           </Link>
         ))}
       </nav>

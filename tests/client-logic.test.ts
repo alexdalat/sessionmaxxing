@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { activitySeries, type Breakdown } from "../app/lib/activitySeries";
 import { sourceRows } from "../app/lib/analyticsRows";
 import {
   describeHours,
@@ -9,20 +10,28 @@ import { modelOptions } from "../app/lib/models";
 import { dayTicks, paceSeries } from "../app/lib/pace";
 import { scoreSeries } from "../app/lib/planScore";
 import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
+import { queuePreview, waitNote } from "../app/lib/queuePreview";
 import { allowedStartHours } from "../app/lib/quietHours";
 import { clockOfFraction } from "../app/lib/sessionWindows";
 import { easternDay } from "../app/lib/time";
 import type {
+  ActivitySource,
+  ChangedFile,
+  CoverageDay,
+  DailyActivity,
   Opportunity,
   PlanScore as PlanScoreData,
   PublicTask,
+  Run,
   SourceActivity,
   TaskGate,
   UsageSample,
 } from "../shared/types.js";
 import {
+  ACTIVITY_SOURCES,
   DEFAULT_DISPATCH_SETTINGS,
   FABLE_MODEL,
+  needsReview,
   PROVIDER_MODELS,
   planLabel,
 } from "../shared/types.js";
@@ -236,25 +245,87 @@ const queued = (
   priority: 0,
   status,
   createdAt: "2026-09-06T12:00:00.000Z",
+  finishedAt: null,
+  review: null,
   earliestStart: null,
   preferredWindowStart: null,
   maxTurns: 40,
+  outputTokens: 100_000,
+  sessionCostPercent: 13.8,
   gate: { status: gate, reason: gate, eligibleAt },
 });
 
-it("shows running tasks, then ready, then waiting, then finished", () => {
+describe("queuePreview", () => {
+  const now = Date.parse("2026-09-06T12:00:00.000Z");
+  it("lists every unfinished task in dispatch order with a wait countdown", () => {
+    const rows = queuePreview(
+      [
+        queued("done", "completed", "finished"),
+        queued("later", "pending", "waiting", "2026-09-06T14:30:00.000Z"),
+        queued("soon", "pending", "waiting", "2026-09-06T12:05:00.000Z"),
+        queued("go", "pending", "ready"),
+        queued("busy", "running", "running"),
+        queued("someday", "pending", "waiting", null),
+      ],
+      now,
+    );
+    expect(rows.map((row) => [row.id, row.state, row.note])).toEqual([
+      ["busy", "running", "running"],
+      ["go", "ready", "ready"],
+      ["soon", "waiting", "in 5m"],
+      ["later", "waiting", "in 2h 30m"],
+      ["someday", "waiting", "waiting"],
+    ]);
+  });
+  it("says waiting when the eligible instant has passed, is unknown, or is under a minute away", () => {
+    const rows = queuePreview(
+      [
+        queued("past", "pending", "waiting", "2026-09-06T11:00:00.000Z"),
+        queued("unknown", "pending", "waiting", null),
+        queued("seconds", "pending", "waiting", "2026-09-06T12:00:20.000Z"),
+      ],
+      now,
+    );
+    expect(rows.map((row) => row.note)).toEqual([
+      "waiting",
+      "waiting",
+      "waiting",
+    ]);
+  });
+  it("is empty when every task is finished", () => {
+    expect(queuePreview([queued("done", "failed", "finished")], now)).toEqual(
+      [],
+    );
+  });
+});
+
+describe("waitNote", () => {
+  const now = Date.parse("2026-09-06T12:00:00.000Z");
+  it("counts down to the slot of a waiting task", () => {
+    expect(
+      waitNote(
+        queued("later", "pending", "waiting", "2026-09-06T21:55:00.000Z"),
+        now,
+      ),
+    ).toBe("in 9h 55m");
+  });
+  it("has nothing to say for ready, running, or unknowable tasks", () => {
+    expect(waitNote(queued("go", "pending", "ready"), now)).toBeNull();
+    expect(waitNote(queued("busy", "running", "running"), now)).toBeNull();
+    expect(waitNote(queued("someday", "pending", "waiting", null), now)).toBe(
+      null,
+    );
+  });
+});
+
+it("shows running tasks, then ready, then waiting, and leaves finished ones to their own section", () => {
   const order = displayOrder([
     queued("done", "completed", "finished"),
     queued("held", "pending", "waiting"),
     queued("next", "pending", "ready"),
     queued("active", "running", "running"),
   ]);
-  expect(order.map((task) => task.id)).toEqual([
-    "active",
-    "next",
-    "held",
-    "done",
-  ]);
+  expect(order.map((task) => task.id)).toEqual(["active", "next", "held"]);
 });
 
 it("sorts waiting tasks by when they become eligible, unknown starts last in priority order", () => {
@@ -279,12 +350,7 @@ it("keeps the server order within a group", () => {
     queued("ready-b", "pending", "ready"),
     queued("failed", "failed", "finished"),
   ]);
-  expect(order.map((task) => task.id)).toEqual([
-    "ready-a",
-    "ready-b",
-    "cancelled",
-    "failed",
-  ]);
+  expect(order.map((task) => task.id)).toEqual(["ready-a", "ready-b"]);
 });
 
 it("orders an empty queue as an empty list", () => {
@@ -403,15 +469,40 @@ describe("source rows", () => {
 });
 
 describe("plan score series", () => {
+  const coverageDay = (
+    date: string,
+    coverage: number | null,
+    sources: Partial<Record<ActivitySource, number>> = {},
+    models: Record<string, number> = {},
+  ): CoverageDay => ({
+    date,
+    coverage,
+    sources: { local: 0, dispatched: 0, unknown: 0, ...sources },
+    models,
+  });
   const plan: PlanScoreData = {
     score: 71,
     sessionCoverage: 62,
     weeklyScore: 80,
     days: [
-      { date: "2026-08-30", coverage: 40.5 },
-      { date: "2026-08-31", coverage: null },
-      { date: "2026-09-02", coverage: 88 },
-      { date: "2026-09-06", coverage: 12.5 },
+      coverageDay(
+        "2026-08-30",
+        40.5,
+        { local: 30, dispatched: 10 },
+        { "claude-opus-4-6": 30, "claude-fable-5-1": 10 },
+      ),
+      coverageDay("2026-08-31", null),
+      coverageDay(
+        "2026-09-02",
+        88,
+        { local: 60, dispatched: 20, unknown: 20 },
+        {
+          "claude-opus-4-6": 60,
+          "claude-fable-5-1": 20,
+          "claude-haiku-4-5": 20,
+        },
+      ),
+      coverageDay("2026-09-06", 12.5),
     ],
     weeks: [
       {
@@ -432,31 +523,218 @@ describe("plan score series", () => {
     generatedAt: "2026-09-06T14:00:00.000Z",
   };
 
+  const rowFor = (breakdown: Breakdown, date: string) =>
+    scoreSeries(plan, breakdown).rows.find((row) => row.date === date);
+
   it("gives each day its coverage and the score of the week containing it", () => {
-    expect(scoreSeries(plan)).toContainEqual({
-      date: "2026-08-30",
+    expect(rowFor("source", "2026-08-30")).toMatchObject({
       coverage: 40.5,
       weekly: 64,
     });
-    expect(scoreSeries(plan)).toContainEqual({
-      date: "2026-09-02",
+    expect(rowFor("source", "2026-09-02")).toMatchObject({
       coverage: 88,
       weekly: 80,
     });
   });
 
   it("scores a date after the last week as null weekly", () => {
-    const series = scoreSeries({
-      ...plan,
-      days: [{ date: "2026-09-09", coverage: 30 }],
-    });
-    expect(series).toEqual([
-      { date: "2026-09-09", coverage: 30, weekly: null },
+    const { rows } = scoreSeries(
+      { ...plan, days: [coverageDay("2026-09-09", 30, { local: 5 })] },
+      "source",
+    );
+    expect(rows).toEqual([
+      {
+        date: "2026-09-09",
+        coverage: 30,
+        weekly: null,
+        local: 30,
+        dispatched: 0,
+        unknown: 0,
+      },
     ]);
   });
 
-  it("passes a day with no coverage through as null", () => {
-    const day = scoreSeries(plan).find((point) => point.date === "2026-08-31");
-    expect(day).toEqual({ date: "2026-08-31", coverage: null, weekly: 80 });
+  it("splits coverage across sources in proportion to minutes and sums back to coverage", () => {
+    const row = rowFor("source", "2026-09-02");
+    expect(row).toMatchObject({ local: 52, dispatched: 18, unknown: 18 });
+    expect(
+      [...ACTIVITY_SOURCES].reduce(
+        (sum, source) => sum + Number(row?.[source]),
+        0,
+      ),
+    ).toBeCloseTo(88);
   });
+
+  it("splits coverage across models and folds the unnamed ones", () => {
+    const { keys } = scoreSeries(plan, "model");
+    expect(keys).toEqual([
+      "claude-opus-4-6",
+      "claude-fable-5-1",
+      "claude-haiku-4-5",
+      "Other",
+    ]);
+    expect(rowFor("model", "2026-09-02")).toMatchObject({
+      "claude-opus-4-6": 52,
+      "claude-fable-5-1": 18,
+      "claude-haiku-4-5": 18,
+      Other: 0,
+    });
+  });
+
+  it("puts coverage with no local minutes on Unattributed", () => {
+    expect(rowFor("source", "2026-09-06")).toMatchObject({
+      coverage: 12.5,
+      local: 0,
+      dispatched: 0,
+      unknown: 12.5,
+    });
+    expect(rowFor("model", "2026-09-06")).toMatchObject({
+      "claude-opus-4-6": 0,
+      Other: 12.5,
+    });
+  });
+
+  it("leaves null-coverage days without series fields", () => {
+    expect(rowFor("source", "2026-08-31")).toEqual({
+      date: "2026-08-31",
+      coverage: null,
+      weekly: 80,
+    });
+  });
+});
+
+describe("activity series", () => {
+  const day = (
+    date: string,
+    models: Record<string, number>,
+  ): DailyActivity => ({
+    date,
+    activeMinutes: Object.values(models).reduce((sum, n) => sum + n, 0),
+    responses: 0,
+    sources: { local: 0, dispatched: 0, unknown: 0 },
+    models,
+  });
+
+  it("folds models beyond the top four into Other and zero-fills missing keys", () => {
+    const { keys, rows } = activitySeries(
+      [
+        day("2026-09-01", {
+          "claude-fable-5-1": 30,
+          "claude-opus-4-6": 20,
+          "claude-sonnet-4-5": 10,
+        }),
+        day("2026-09-02", {
+          "claude-fable-5-1": 5,
+          "claude-haiku-4-5": 9,
+          "claude-legacy-3": 4,
+          "claude-legacy-2": 3,
+        }),
+      ],
+      "model",
+    );
+    expect(keys).toEqual([
+      "claude-fable-5-1",
+      "claude-opus-4-6",
+      "claude-sonnet-4-5",
+      "claude-haiku-4-5",
+      "Other",
+    ]);
+    expect(rows[0]).toEqual({
+      date: "2026-09-01",
+      responses: 0,
+      activeMinutes: 60,
+      "claude-fable-5-1": 30,
+      "claude-opus-4-6": 20,
+      "claude-sonnet-4-5": 10,
+      "claude-haiku-4-5": 0,
+      Other: 0,
+    });
+    expect(rows[1]).toMatchObject({
+      "claude-fable-5-1": 5,
+      "claude-opus-4-6": 0,
+      Other: 7,
+    });
+  });
+
+  it("by source keeps ACTIVITY_SOURCES order", () => {
+    const { keys, rows } = activitySeries(
+      [
+        {
+          date: "2026-09-01",
+          activeMinutes: 7,
+          responses: 12,
+          sources: { dispatched: 3, unknown: 1, local: 3 },
+          models: { "claude-opus-4-6": 7 },
+        },
+      ],
+      "source",
+    );
+    expect(keys).toEqual([...ACTIVITY_SOURCES]);
+    expect(rows).toEqual([
+      {
+        date: "2026-09-01",
+        responses: 12,
+        activeMinutes: 7,
+        local: 3,
+        dispatched: 3,
+        unknown: 1,
+      },
+    ]);
+  });
+});
+
+const finishedRun = (
+  changes: Run["changes"],
+  reviewedAt: string | null = null,
+): Run => ({
+  id: "a".repeat(24),
+  taskId: "b".repeat(24),
+  title: "Fix a test",
+  prompt: "Rename the parser.",
+  estimatedOutputTokens: 120_000,
+  provider: "claude",
+  model: "opus",
+  status: "completed",
+  startedAt: "2026-09-06T12:00:00.000Z",
+  endedAt: "2026-09-06T12:20:00.000Z",
+  durationMs: 1_200_000,
+  exitCode: 0,
+  error: null,
+  outputTokens: { fable: 0, opus: 87_000, sonnet: 0, haiku: 0 },
+  sessionCostPercent: 12,
+  summary: "Renamed the parser.",
+  changes,
+  deploy: null,
+  reviewedAt,
+  preview: [],
+});
+const changed: ChangedFile[] = [
+  { path: "server/parser.ts", added: 4, removed: 2 },
+];
+
+it("needs review for uncommitted changes and for commits on a feature branch, not after review or for commits on main", () => {
+  expect(
+    needsReview(finishedRun({ branch: "main", commits: 0, files: changed })),
+  ).toBe(true);
+  expect(
+    needsReview(finishedRun({ branch: "rename", commits: 2, files: changed })),
+  ).toBe(true);
+  expect(
+    needsReview(finishedRun({ branch: "main", commits: 2, files: changed })),
+  ).toBe(false);
+  expect(
+    needsReview(finishedRun({ branch: "master", commits: 1, files: changed })),
+  ).toBe(false);
+  expect(
+    needsReview(finishedRun({ branch: "main", commits: 0, files: [] })),
+  ).toBe(false);
+  expect(
+    needsReview(
+      finishedRun(
+        { branch: "main", commits: 0, files: changed },
+        "2026-09-06T13:00:00.000Z",
+      ),
+    ),
+  ).toBe(false);
+  expect(needsReview(finishedRun(null))).toBe(false);
 });

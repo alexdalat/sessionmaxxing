@@ -1,25 +1,18 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { QueueSkeleton } from "@/app/components/Skeletons";
+import { useClock } from "@/app/hooks/useClock";
 import { usePolling } from "@/app/hooks/usePolling";
 import { api } from "@/app/lib/api";
 import type { Analytics, QueueSnapshot, UsageReport } from "@/shared/types";
 import { DispatchPanel } from "./DispatchPanel";
 import { PlanScore } from "./PlanScore";
+import { QuickAdd } from "./QuickAdd";
 import { SessionWindows } from "./SessionWindows";
 import { UsagePanel } from "./UsagePanel";
 import { WeeklyPace } from "./WeeklyPace";
 
-const CLOCK_TICK_MS = 60_000;
 const USAGE_POLL_MS = 30_000;
-function useClock() {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
-    return () => clearInterval(timer);
-  }, []);
-  return now;
-}
 export function Overview({
   data,
   queue,
@@ -55,13 +48,16 @@ export function Overview({
           }
         }}
       />
+      <QuickAdd onQueued={queue.reload} />
       <div className="two-column">
         <SessionWindows windows={usage.data?.windows} now={now} />
         {planning ? (
           <DispatchPanel
             planning={planning}
+            keeper={queue.data?.sessionKeeper}
             tasks={queue.data?.tasks}
             queueOn={queue.data?.autoDispatch}
+            now={now}
             onSaved={queue.reload}
           />
         ) : (
