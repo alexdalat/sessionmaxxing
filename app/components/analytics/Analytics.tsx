@@ -135,7 +135,6 @@ export function AnalyticsView({ data }: { data: Analytics }) {
       <section className="panel">
         <div className="section-heading">
           <h2>Busy hours by weekday</h2>
-          <span className="muted">Less ░ ▒ ▓ More</span>
         </div>
         <div className="table-scroll">
           <table className="heatmap">
