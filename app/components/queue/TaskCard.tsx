@@ -42,8 +42,6 @@ export function TaskCard({
       <div>
         <div className="task-title">
           <h3>{task.title}</h3>
-          <Badge variant={stateVariants[state]}>{STATE_LABELS[state]}</Badge>
-          {wait && <Badge variant="outline">{wait}</Badge>}
           {isNext && <Badge variant="success">Next</Badge>}
           {task.review === "needed" && (
             <Badge variant="warning">Needs review</Badge>
@@ -79,7 +77,12 @@ export function TaskCard({
       <div className="task-budget">
         {task.gate && (
           <>
-            <strong>{STATE_LABELS[state]}</strong>
+            <div className="task-state">
+              <Badge variant={stateVariants[state]}>
+                {STATE_LABELS[state]}
+              </Badge>
+              {wait && <Badge variant="outline">{wait}</Badge>}
+            </div>
             <span className="muted">{task.gate.reason}</span>
           </>
         )}

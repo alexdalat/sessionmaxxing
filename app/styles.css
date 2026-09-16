@@ -703,8 +703,11 @@
     font-size: 12px;
     overflow-wrap: anywhere;
   }
-  .task-budget strong {
-    font-weight: 500;
+  .task-state {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
   }
   .queue-heading {
     flex-wrap: wrap;
