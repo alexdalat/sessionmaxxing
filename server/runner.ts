@@ -18,6 +18,7 @@ import {
 import { sessionPercent } from "./calibration.js";
 import { DeployQueue, hasComposeFile, leftChanges } from "./deploy.js";
 import {
+  costsAhead,
   expectedSessionCost,
   taskGate,
   USAGE_PREDATES_RUN_REASON,
@@ -281,7 +282,14 @@ export class Runner {
     planning: PlanningSnapshot,
     now: Date,
   ): Promise<TaskGate> {
-    const gate = taskGate(task, planning, now, this.list());
+    const runs = this.list();
+    const gate = taskGate(
+      task,
+      planning,
+      now,
+      runs,
+      costsAhead(task.id, this.store.snapshot().tasks, runs, this.rates()),
+    );
     if (gate.status !== "ready") return gate;
     const deploying = this.deploys.pending();
     if (deploying)

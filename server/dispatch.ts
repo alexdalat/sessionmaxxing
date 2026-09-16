@@ -344,22 +344,77 @@ function weeklyClearsAt(
 const overCeiling = (gate: BucketGate, cost: number) =>
   gate.percent !== null && gate.percent + cost > gate.ceiling;
 
+/**
+ * Start of the five-hour window this task lands in once every task queued ahead
+ * has taken its share of the session ceiling; null when the reset is unknown.
+ */
+function sessionWindowStart(
+  session: BucketGate,
+  percent: number,
+  resetsAt: string | null,
+  ahead: readonly number[],
+  expected: number,
+  now: Date,
+): number | null {
+  let start = now.getTime();
+  let used = percent + session.reserved;
+  let reset = resetsAt === null ? null : Date.parse(resetsAt);
+  for (const cost of [...ahead, expected]) {
+    while (used + cost > session.ceiling) {
+      if (reset === null) return null;
+      start = Math.max(reset, now.getTime());
+      reset = start + WINDOW_MS;
+      used = 0;
+      // A task larger than the whole ceiling never fits; it starts the window it reaches.
+      if (cost > session.ceiling) break;
+    }
+    used += cost;
+  }
+  return start;
+}
+
+/** Expected session cost of each pending Claude task queued ahead of `taskId`, in dispatch order. */
+export function costsAhead(
+  taskId: string,
+  tasks: readonly GateTask[],
+  runs: readonly RunCost[],
+  rates: SessionRates | null,
+): number[] {
+  const costs: number[] = [];
+  for (const task of tasks) {
+    if (task.id === taskId) break;
+    if (task.status !== "pending" || task.provider !== "claude") continue;
+    const cost = expectedSessionCost(task, runs, rates);
+    if (cost !== null) costs.push(cost);
+  }
+  return costs;
+}
+
 /** Earliest instant the usage buckets this task draws on hold enough headroom; null when unknowable. */
 function usageClearsAt(
   task: Pick<GateTask, "id" | "provider" | "model" | "outputTokens">,
   planning: PlanningSnapshot,
   runs: readonly RunCost[],
   now: Date,
+  ahead: readonly number[],
 ): number | null {
   const { usage, session, weekly, fable, settings, rates } = planning;
   if (task.provider !== "claude" || usage === null) return now.getTime();
   const expected = expectedSessionCost(task, runs, rates);
   if (expected === null) return null;
-  let clears = now.getTime();
-  if (overCeiling(session, expected)) {
-    if (usage.session.resetsAt === null) return null;
-    clears = Math.max(clears, Date.parse(usage.session.resetsAt));
-  }
+  const windowStart =
+    session.percent === null
+      ? now.getTime()
+      : sessionWindowStart(
+          session,
+          session.percent,
+          usage.session.resetsAt,
+          ahead,
+          expected,
+          now,
+        );
+  if (windowStart === null) return null;
+  let clears = Math.max(now.getTime(), windowStart);
   if (overCeiling(weekly, 0)) {
     const at = weeklyClearsAt(
       weekly,
@@ -395,8 +450,9 @@ export function eligibleAt(
   planning: PlanningSnapshot,
   now: Date,
   runs: readonly RunCost[],
+  ahead: readonly number[] = [],
 ): string | null {
-  const usageClears = usageClearsAt(task, planning, runs, now);
+  const usageClears = usageClearsAt(task, planning, runs, now, ahead);
   if (usageClears === null) return null;
   const base = Math.max(
     now.getTime(),
@@ -427,12 +483,13 @@ export function taskGate(
   planning: PlanningSnapshot,
   now: Date,
   runs: readonly RunCost[],
+  ahead: readonly number[] = [],
 ): TaskGate {
   if (task.status === "running")
     return { status: "running", reason: "Running now", eligibleAt: null };
   if (task.status !== "pending")
     return { status: "finished", reason: task.status, eligibleAt: null };
-  const eligible = eligibleAt(task, planning, now, runs);
+  const eligible = eligibleAt(task, planning, now, runs, ahead);
   if (
     task.earliestStart !== null &&
     Date.parse(task.earliestStart) > now.getTime()

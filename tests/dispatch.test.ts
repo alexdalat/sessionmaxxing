@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+  costsAhead,
   expectedSessionCost,
   planDispatch,
   runReservation,
@@ -643,4 +644,46 @@ it("uses the largest measured cost from previous runs of the same task", () => {
     reason: "Session 60% + 30% expected, over the 75% queue cutoff",
   });
   expect(taskGate(small, planning, now, []).status).toBe("ready");
+});
+
+it("counts only the pending Claude tasks queued ahead of the task", () => {
+  const tasks = [
+    { ...pending, id: "b".repeat(24) },
+    { ...pending, id: "c".repeat(24), status: "running" as const },
+    { ...pending, id: "d".repeat(24), provider: "codex" as const },
+    { ...pending, id: "e".repeat(24), outputTokens: 150_000 },
+    pending,
+    { ...pending, id: "f".repeat(24) },
+  ];
+  expect(costsAhead(pending.id, tasks, [], SESSION_RATES)).toEqual([
+    13.8, 20.7,
+  ]);
+  expect(costsAhead(pending.id, tasks, [], null)).toEqual([]);
+});
+
+it("pushes the start to the session window the queue ahead leaves room in", () => {
+  const planning = plan(halfSpent, null, anyHour);
+  expect(taskGate(pending, planning, now, [], []).eligibleAt).toBe(
+    now.toISOString(),
+  );
+  // 60% spent plus one 13.8% task ahead leaves no room until the window resets.
+  expect(taskGate(pending, planning, now, [], [13.8]).eligibleAt).toBe(
+    "2026-09-06T16:09:00.000Z",
+  );
+  // A 70% task ahead fills the reset window too, so this one waits five hours more.
+  expect(taskGate(pending, planning, now, [], [13.8, 70]).eligibleAt).toBe(
+    "2026-09-06T21:09:00.000Z",
+  );
+});
+
+it("cannot predict a start behind a full queue with no known session reset", () => {
+  const planning = plan(
+    usageSnapshot({ session: { percent: 60, resetsAt: null } }),
+    null,
+    anyHour,
+  );
+  expect(taskGate(pending, planning, now, [], []).eligibleAt).toBe(
+    now.toISOString(),
+  );
+  expect(taskGate(pending, planning, now, [], [13.8]).eligibleAt).toBeNull();
 });
