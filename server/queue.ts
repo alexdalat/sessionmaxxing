@@ -11,7 +11,7 @@ import {
   type TaskStatus,
 } from "../shared/types.js";
 import { atomicJson, DomainError, id } from "./storage.js";
-import { validateFields, validateWorkdir } from "./validation.js";
+import { TASK_ID, validateFields, validateWorkdir } from "./validation.js";
 
 /** A task input whose "auto" output tokens have already been resolved to a number. */
 export type StoredTaskInput = Omit<TaskInput, "outputTokens"> &
@@ -54,10 +54,35 @@ export function publicTask(task: Task): PublicTask {
     review: null,
     earliestStart: task.earliestStart,
     preferredWindowStart: task.preferredWindowStart,
+    dependsOn: [...task.dependsOn],
     maxTurns: task.maxTurns,
     outputTokens: task.outputTokens,
     sessionCostPercent: null,
   };
+}
+/** Every dependency exists and none of them leads back to `taskId`. */
+function validateDependencies(
+  state: QueueState,
+  taskId: string,
+  dependsOn: readonly string[],
+) {
+  const byId = new Map(state.tasks.map((task) => [task.id, task]));
+  const seen = new Set<string>();
+  const pending = [...dependsOn];
+  while (pending.length > 0) {
+    const current = pending.pop() as string;
+    if (current === taskId)
+      throw new DomainError(
+        "A task cannot depend on itself, directly or through another task.",
+        400,
+      );
+    if (seen.has(current)) continue;
+    seen.add(current);
+    const dependency = byId.get(current);
+    if (dependency === undefined)
+      throw new DomainError("Depends on names a task that no longer exists.");
+    pending.push(...dependency.dependsOn);
+  }
 }
 export class QueueStore {
   private chain: Promise<unknown> = Promise.resolve();
@@ -96,7 +121,12 @@ export class QueueStore {
         sessionCostPercent?: number;
         outputTokens?: number;
         finishedAt?: string | null;
+        dependsOn?: string[];
       } = task;
+      if (persisted.dependsOn === undefined) {
+        persisted.dependsOn = [];
+        migrated = true;
+      }
       if (persisted.outputTokens === undefined) {
         const family = modelFamily(task.model ?? "");
         const rate =
@@ -117,7 +147,7 @@ export class QueueStore {
       }
       validateFields(task);
       if (
-        !/^[a-f0-9]{24}$/.test(task.id) ||
+        !TASK_ID.test(task.id) ||
         ids.has(task.id) ||
         typeof task.workdir !== "string" ||
         !(
@@ -171,10 +201,12 @@ export class QueueStore {
     validateFields(input);
     const workdir = await validateWorkdir(input.workdir);
     return this.transact((state) => {
+      const taskId = id();
+      validateDependencies(state, taskId, input.dependsOn);
       const task: Task = {
         ...input,
         workdir,
-        id: id(),
+        id: taskId,
         model: input.model || defaultModel(input.provider),
         status: "pending",
         createdAt: new Date().toISOString(),
@@ -203,6 +235,7 @@ export class QueueStore {
       )
         updated.model = defaultModel(patch.provider);
       validateFields(updated);
+      validateDependencies(state, task.id, updated.dependsOn);
       updated.workdir = await validateWorkdir(updated.workdir);
       Object.assign(task, updated);
       return publicTask(task);
@@ -213,6 +246,10 @@ export class QueueStore {
       if (this.find(state, taskId).status === "running")
         throw new DomainError("Cancel the running task before deleting it.");
       state.tasks = state.tasks.filter((t) => t.id !== taskId);
+      for (const task of state.tasks)
+        task.dependsOn = task.dependsOn.filter(
+          (dependencyId) => dependencyId !== taskId,
+        );
     });
   }
   async reorder(taskIds: string[]) {

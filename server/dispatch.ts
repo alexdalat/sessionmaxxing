@@ -280,6 +280,27 @@ export function planDispatch(
   };
 }
 
+export type Dependency = Pick<Task, "id" | "title" | "status">;
+export const dependencyReason = ({ title, status }: Dependency) => {
+  if (status === "failed") return `Blocked: “${title}” failed`;
+  if (status === "cancelled") return `Blocked: “${title}” was cancelled`;
+  return `Waits for “${title}”`;
+};
+/**
+ * The first dependency of `task` that has not completed; undefined when every
+ * one has. A dependency that is no longer queued was deleted and holds nothing.
+ */
+export function blockingDependency(
+  task: Pick<Task, "dependsOn">,
+  tasks: readonly Dependency[],
+): Dependency | undefined {
+  for (const dependencyId of task.dependsOn) {
+    const dependency = tasks.find(({ id }) => id === dependencyId);
+    if (dependency && dependency.status !== "completed") return dependency;
+  }
+  return undefined;
+}
+
 type GateTask = Pick<
   PublicTask,
   | "id"

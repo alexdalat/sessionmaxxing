@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import {
   AUTO_OUTPUT_TOKENS,
+  MAX_DEPENDENCIES,
   MAX_OUTPUT_TOKENS,
   MIN_OUTPUT_TOKENS,
   needsReview,
@@ -58,6 +59,12 @@ const properties = {
       },
       { const: AUTO_OUTPUT_TOKENS },
     ],
+  },
+  dependsOn: {
+    type: "array",
+    uniqueItems: true,
+    maxItems: MAX_DEPENDENCIES,
+    items: idSchema,
   },
 };
 const workdirQuerySchema = {
@@ -214,6 +221,7 @@ export function registerQueueRoutes(
             "preferredWindowStart",
             "maxTurns",
             "outputTokens",
+            "dependsOn",
           ],
           properties,
         },

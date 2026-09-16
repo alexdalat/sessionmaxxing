@@ -46,6 +46,8 @@ With the session keeper on (`keepSessionActive`, off by default), `server/sessio
 
 Codex tasks are never gated by Claude usage but take a slot and hold locks like any other run. **Run now** overrides the usage gate and the schedule, never the slot bound or the locks. Settings persist in `data/dispatch-settings.json`.
 
+A task can **depend on** other queued tasks (`dependsOn`, up to 20 ids). It waits until every one of them has completed, ahead of every other gate, and Run now refuses while one is unfinished. A dependency that failed or was cancelled keeps the task blocked with that reason until it is retried; deleting a task drops it from the tasks that depended on it, and a cycle is rejected when the task is saved.
+
 ## Host deploy watcher
 
 A dispatched run cannot redeploy its own Compose project: it lives inside the dashboard container, which has no docker CLI, and recreating that container would fail every run inside it. When an applied run completes, left commits or changed files, and its work directory holds a Compose file, `server/deploy.ts` writes `data/deploy/requests/<run id>.json`. A systemd user path unit (`deploy/claude-dashboard-deploy.path`) sees the file and runs `deploy/host-deploy.sh` on the host, which builds the project, waits for every dashboard run to finish before recreating the dashboard's own container, runs `docker compose up -d`, writes `data/deploy/results/<run id>.json` with `deploying`, `succeeded` or `failed`, and removes the request. The run card shows that status as a badge.

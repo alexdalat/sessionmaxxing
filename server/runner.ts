@@ -18,7 +18,9 @@ import {
 import { sessionPercent } from "./calibration.js";
 import { DeployQueue, hasComposeFile, leftChanges } from "./deploy.js";
 import {
+  blockingDependency,
   costsAhead,
+  dependencyReason,
   expectedSessionCost,
   taskGate,
   USAGE_PREDATES_RUN_REASON,
@@ -283,12 +285,23 @@ export class Runner {
     now: Date,
   ): Promise<TaskGate> {
     const runs = this.list();
+    const queued = this.store.snapshot().tasks;
+    if (task.status === "pending") {
+      const dependency = blockingDependency(task, queued);
+      if (dependency)
+        return {
+          status: "waiting",
+          reason: dependencyReason(dependency),
+          eligibleAt: null,
+          blockedBy: dependency.title,
+        };
+    }
     const gate = taskGate(
       task,
       planning,
       now,
       runs,
-      costsAhead(task.id, this.store.snapshot().tasks, runs, this.rates()),
+      costsAhead(task.id, queued, runs, this.rates()),
     );
     if (gate.status !== "ready") return gate;
     const deploying = this.deploys.pending();
@@ -332,12 +345,13 @@ export class Runner {
     await this.deploys.refresh();
     const deploying = this.deploys.pending();
     if (deploying) throw new DomainError(deployReason(deploying.title));
-    const task = this.store
-      .snapshot()
-      .tasks.find((candidate) => candidate.id === taskId);
+    const queued = this.store.snapshot().tasks;
+    const task = queued.find((candidate) => candidate.id === taskId);
     if (!task) throw new DomainError("Task not found.", 404);
     if (task.status !== "pending")
       throw new DomainError("Only pending tasks can run.");
+    const dependency = blockingDependency(task, queued);
+    if (dependency) throw new DomainError(dependencyReason(dependency));
     const resources = await resolveResources(task.workdir);
     if (this.active.size >= this.settings().maxConcurrentRuns)
       throw new DomainError(SLOTS_BUSY_ERROR);
@@ -579,10 +593,12 @@ export class Runner {
     const runs = this.list();
     let load = this.load(settings);
     const picked: Holding[] = [];
-    for (const task of this.store.snapshot().tasks) {
+    const queued = this.store.snapshot().tasks;
+    for (const task of queued) {
       if (load.running >= settings.maxConcurrentRuns) break;
       if (
         task.status !== "pending" ||
+        blockingDependency(task, queued) !== undefined ||
         taskGate(task, this.planning(load), at, runs).status !== "ready"
       )
         continue;

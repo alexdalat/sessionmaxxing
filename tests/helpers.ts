@@ -19,6 +19,7 @@ export const taskInput = (workdir: string) => ({
   preferredWindowStart: null,
   maxTurns: 10,
   outputTokens: 100_000,
+  dependsOn: [] as string[],
 });
 /** The rates fitted from tests/fixtures/session-windows.json, so 100k Opus tokens cost 13.8%. */
 export const SESSION_RATES: SessionRates = {

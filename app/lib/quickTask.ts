@@ -41,5 +41,6 @@ export function quickTask(
     preferredWindowStart: null,
     maxTurns: DEFAULT_MAX_TURNS,
     outputTokens: AUTO_OUTPUT_TOKENS,
+    dependsOn: [],
   };
 }

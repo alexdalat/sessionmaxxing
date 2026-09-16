@@ -27,12 +27,15 @@ export function TaskCard({
   isNext,
   isLeaving,
   now,
+  dependencies,
   children,
 }: {
   task: PublicTask;
   isNext: boolean;
   isLeaving: boolean;
   now: number;
+  /** Titles of the tasks this one waits for. */
+  dependencies: string[];
   children: ReactNode;
 }) {
   const state = previewState(task);
@@ -67,10 +70,13 @@ export function TaskCard({
           <span>
             {task.preferredWindowStart === null
               ? "Any hour"
-              : `${hourLabel(task.preferredWindowStart)} → ${hourLabel((task.preferredWindowStart + 5) % 24)} Eastern`}
+              : `${hourLabel(task.preferredWindowStart)} → ${hourLabel((task.preferredWindowStart + 5) % 24)} ET`}
           </span>
           {task.earliestStart && (
             <span>After {localTimestamp(task.earliestStart)}</span>
+          )}
+          {dependencies.length > 0 && (
+            <span>Depends on {dependencies.join(", ")}</span>
           )}
         </div>
       </div>

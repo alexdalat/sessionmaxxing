@@ -237,6 +237,7 @@ export type TaskStatus =
 export const DEFAULT_MAX_TURNS = 500;
 export const AUTO_OUTPUT_TOKENS = "auto";
 export type OutputTokensInput = number | typeof AUTO_OUTPUT_TOKENS;
+export const MAX_DEPENDENCIES = 20;
 export const MIN_OUTPUT_TOKENS = 1_000;
 export const MAX_OUTPUT_TOKENS = 2_000_000;
 export interface TaskInput {
@@ -251,6 +252,8 @@ export interface TaskInput {
   maxTurns: number;
   /** A number, or "auto" to have the server estimate it from the prompt before the task is stored. */
   outputTokens: OutputTokensInput;
+  /** Ids of tasks that must complete before this one is dispatched. */
+  dependsOn: string[];
 }
 export interface Task extends Omit<TaskInput, "outputTokens"> {
   id: string;
@@ -267,7 +270,7 @@ export interface TaskGate {
   reason: string;
   /** Earliest instant every gate — schedule, quiet hours and usage — opens; null when unknowable. */
   eligibleAt: string | null;
-  /** Title of the running task holding a resource this task needs. */
+  /** Title of the task this one waits on: a running task holding a shared resource, or a dependency that has not completed. */
   blockedBy?: string;
 }
 export type PublicTask = Task & {

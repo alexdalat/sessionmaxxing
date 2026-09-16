@@ -9,6 +9,7 @@ services:
       HOME: /home/user
       HOST: 0.0.0.0
       PORT: "4317"
+      TZ: America/New_York
     ports:
       - target: 4317
         published: "4317"

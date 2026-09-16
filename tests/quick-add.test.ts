@@ -44,6 +44,7 @@ it("queues a claude task with the chosen directory, model and estimated tokens",
     preferredWindowStart: null,
     maxTurns: DEFAULT_MAX_TURNS,
     outputTokens: AUTO_OUTPUT_TOKENS,
+    dependsOn: [],
   });
 });
 

@@ -43,6 +43,7 @@ it("builds the task body from flags without posting when asked for a dry run", a
     preferredWindowStart: 3,
     maxTurns: 5,
     outputTokens: 40000,
+    dependsOn: [],
     model: "claude-fable-5-1",
   });
 });

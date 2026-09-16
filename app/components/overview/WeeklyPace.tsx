@@ -15,6 +15,7 @@ import { FABLE_COLOR, TOOLTIP_STYLE, WEEKLY_COLOR } from "@/app/lib/chart";
 import { dayTicks, paceSeries } from "@/app/lib/pace";
 import {
   localTimestamp,
+  TIME_ZONE,
   type UsageSample,
   type UsageSnapshot,
   WEEKLY_HARD_CEILING_PERCENT,
@@ -69,7 +70,7 @@ export function WeeklyPace({
                 tickFormatter={(t: number) =>
                   new Date(t).toLocaleDateString("en-US", {
                     weekday: "short",
-                    timeZone: "America/New_York",
+                    timeZone: TIME_ZONE,
                   })
                 }
                 stroke="#8a8f98"

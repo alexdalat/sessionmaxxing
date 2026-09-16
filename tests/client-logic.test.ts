@@ -251,6 +251,7 @@ const queued = (
   preferredWindowStart: null,
   maxTurns: 40,
   outputTokens: 100_000,
+  dependsOn: [],
   sessionCostPercent: 13.8,
   gate: { status: gate, reason: gate, eligibleAt },
 });

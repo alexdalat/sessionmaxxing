@@ -1,6 +1,7 @@
 "use client";
 import { useId, useState } from "react";
 import { Button } from "@/app/components/ui/button";
+import { Checkbox } from "@/app/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -37,12 +38,14 @@ const tokenLabel = (tokens: number) => `${Math.round(tokens / THOUSAND)}k`;
 export function TaskFormDialog({
   open,
   task,
+  tasks,
   onSave,
   busy,
   onClose,
 }: {
   open: boolean;
   task?: PublicTask;
+  tasks: PublicTask[];
   onSave: (input: TaskInput | Partial<TaskInput>) => Promise<boolean>;
   busy: boolean;
   onClose: () => void;
@@ -58,6 +61,14 @@ export function TaskFormDialog({
   const [workdir, setWorkdir] = useState(task?.workdir ?? "");
   const [outputTokens, setOutputTokens] = useState(
     task ? String(task.outputTokens) : AUTO_OUTPUT_TOKENS,
+  );
+  const [dependsOn, setDependsOn] = useState<string[]>(task?.dependsOn ?? []);
+  const dependencyOptions = tasks.filter(
+    (candidate) =>
+      candidate.id !== task?.id &&
+      (candidate.status === "pending" ||
+        candidate.status === "running" ||
+        dependsOn.includes(candidate.id)),
   );
   const tokenChoices =
     task && !OUTPUT_TOKEN_PRESETS.includes(task.outputTokens)
@@ -110,6 +121,7 @@ export function TaskFormDialog({
                 : null,
               preferredWindowStart:
                 windowStart === ANY_WINDOW ? null : Number(windowStart),
+              dependsOn,
             };
             if (await onSave(input)) onClose();
           }}
@@ -249,7 +261,7 @@ export function TaskFormDialog({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-window`}>
-                Preferred five-hour window (Eastern)
+                Preferred five-hour window (ET)
               </Label>
               <Select
                 name="preferredWindowStart"
@@ -269,6 +281,34 @@ export function TaskFormDialog({
                 </SelectContent>
               </Select>
             </div>
+            {dependencyOptions.length > 0 && (
+              <div className="full grid gap-1.5">
+                <Label>Depends on</Label>
+                <div className="grid max-h-40 gap-2 overflow-y-auto rounded-md border border-input p-3">
+                  {dependencyOptions.map((option) => (
+                    <div key={option.id} className="flex items-center gap-2">
+                      <Checkbox
+                        id={`${fieldId}-depends-${option.id}`}
+                        checked={dependsOn.includes(option.id)}
+                        onCheckedChange={(checked) =>
+                          setDependsOn((ids) =>
+                            checked === true
+                              ? [...ids, option.id]
+                              : ids.filter((id) => id !== option.id),
+                          )
+                        }
+                      />
+                      <Label
+                        htmlFor={`${fieldId}-depends-${option.id}`}
+                        className="font-normal"
+                      >
+                        {option.title}
+                      </Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
           <div className="actions">
             <Button type="submit" disabled={busy}>

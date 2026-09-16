@@ -144,6 +144,11 @@ export function TaskQueue() {
     );
     void mutate("/api/queue/order", "PUT", "Order updated.", { ids });
   }
+  const dependencyTitles = (task: PublicTask) =>
+    task.dependsOn.flatMap((id) => {
+      const dependency = ordered.find((candidate) => candidate.id === id);
+      return dependency ? [dependency.title] : [];
+    });
   const taskCard = (task: PublicTask) => {
     const isLeaving = leaving.has(task.id);
     return (
@@ -153,6 +158,7 @@ export function TaskQueue() {
         isNext={task.id === nextId}
         isLeaving={isLeaving}
         now={now}
+        dependencies={dependencyTitles(task)}
       >
         <div className="task-actions">
           {task.status === "pending" && (
@@ -316,6 +322,7 @@ export function TaskQueue() {
         key={editing?.id ?? "new"}
         open={formOpen}
         task={editing}
+        tasks={ordered}
         onSave={save}
         busy={busy}
         onClose={closeForm}

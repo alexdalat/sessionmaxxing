@@ -2,6 +2,7 @@ import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative } from "node:path";
 import {
   AUTO_OUTPUT_TOKENS,
+  MAX_DEPENDENCIES,
   MAX_OUTPUT_TOKENS,
   MIN_OUTPUT_TOKENS,
   type TaskInput,
@@ -9,6 +10,7 @@ import {
 import { DomainError } from "./storage.js";
 
 export const ALLOWED_HOME = "/home/user";
+export const TASK_ID = /^[a-f0-9]{24}$/;
 export function underHome(path: string, home = ALLOWED_HOME) {
   const rel = relative(home, path);
   return !rel.startsWith("..") && !isAbsolute(rel);
@@ -82,6 +84,16 @@ export function validateFields(input: TaskInput) {
   )
     throw new DomainError(
       `Output tokens must be an integer from ${MIN_OUTPUT_TOKENS} to ${MAX_OUTPUT_TOKENS}, or "auto".`,
+      400,
+    );
+  if (
+    !Array.isArray(input.dependsOn) ||
+    input.dependsOn.length > MAX_DEPENDENCIES ||
+    new Set(input.dependsOn).size !== input.dependsOn.length ||
+    input.dependsOn.some((taskId) => !TASK_ID.test(taskId))
+  )
+    throw new DomainError(
+      `Depends on must list up to ${MAX_DEPENDENCIES} distinct task ids.`,
       400,
     );
   if (

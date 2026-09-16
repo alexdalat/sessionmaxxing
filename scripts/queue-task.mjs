@@ -135,6 +135,7 @@ function buildBody(values) {
             MIN_OUTPUT_TOKENS,
             MAX_OUTPUT_TOKENS,
           ),
+    dependsOn: [],
   };
   if (values["--model"] !== undefined) body.model = values["--model"];
   return body;
