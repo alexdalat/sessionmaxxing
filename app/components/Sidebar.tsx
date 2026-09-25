@@ -1,7 +1,9 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useEffect } from "react";
 import { usePolling } from "@/app/hooks/usePolling";
+import { QUEUE_CHANGED } from "@/app/lib/api";
 import type { PendingReview, QueueSnapshot } from "@/shared/types";
 
 const NAV_POLL_MS = 10_000;
@@ -26,7 +28,14 @@ export function Sidebar() {
     "/api/runs/pending-review",
     NAV_POLL_MS,
   );
-  const { data: queue } = usePolling<QueueSnapshot>("/api/queue", NAV_POLL_MS);
+  const { data: queue, reload: reloadQueue } = usePolling<QueueSnapshot>(
+    "/api/queue",
+    NAV_POLL_MS,
+  );
+  useEffect(() => {
+    window.addEventListener(QUEUE_CHANGED, reloadQueue);
+    return () => window.removeEventListener(QUEUE_CHANGED, reloadQueue);
+  }, [reloadQueue]);
   const pending = review?.pending ?? 0;
   const queued =
     queue?.tasks.filter((task) => task.status === "pending").length ?? 0;

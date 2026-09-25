@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { useClock } from "@/app/hooks/useClock";
+import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
 import { api } from "@/app/lib/api";
 import { displayOrder, movedPast, moveTarget } from "@/app/lib/queueOrder";
@@ -21,7 +22,6 @@ import { TaskCard } from "./TaskCard";
 import { TaskFormDialog } from "./TaskForm";
 
 const LEAVE_MS = 240;
-const NOTICE_MS = 4000;
 type Confirmation = { kind: "delete" | "run"; task: PublicTask };
 export function TaskQueue() {
   const {
@@ -31,7 +31,7 @@ export function TaskQueue() {
   } = usePolling<QueueSnapshot & { runnerError?: string }>("/api/queue");
   const [filter, setFilter] = useState("all");
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useNotice();
   const [busy, setBusy] = useState(false);
   const [editing, setEditing] = useState<PublicTask>();
   const [formOpen, setFormOpen] = useState(false);
@@ -39,11 +39,6 @@ export function TaskQueue() {
   const [confirm, setConfirm] = useState<Confirmation>();
   const now = useClock();
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
-  useEffect(() => {
-    if (!notice) return;
-    const timer = setTimeout(() => setNotice(""), NOTICE_MS);
-    return () => clearTimeout(timer);
-  }, [notice]);
   useEffect(() => {
     const tasks = data?.tasks;
     if (!tasks) return;

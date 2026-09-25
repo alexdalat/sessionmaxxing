@@ -3,8 +3,9 @@ import { useState } from "react";
 import { ListSkeleton } from "@/app/components/Skeletons";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
+import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
-import { api } from "@/app/lib/api";
+import { api, QUEUE_CHANGED } from "@/app/lib/api";
 import {
   type DeployStatus,
   formatTokens,
@@ -46,26 +47,36 @@ export function Runs() {
   }>("/api/runs");
   const [busyRun, setBusyRun] = useState("");
   const [actionError, setActionError] = useState("");
+  const [notice, setNotice] = useNotice();
+  const [retried, setRetried] = useState<ReadonlySet<string>>(new Set());
   async function act(run: Run, path: string, message: string) {
     setBusyRun(run.id);
     setActionError("");
     try {
       await api(path, { method: "POST" });
       reload();
+      return true;
     } catch (error) {
       setActionError(error instanceof Error ? error.message : message);
+      return false;
     } finally {
       setBusyRun("");
     }
   }
   const markReviewed = (run: Run) =>
     act(run, `/api/runs/${run.id}/reviewed`, "Could not mark the run.");
-  const retry = (run: Run) =>
-    act(
+  async function retry(run: Run) {
+    setNotice("");
+    const queued = await act(
       run,
       `/api/tasks/${run.taskId}/retry`,
       "Could not queue the task again.",
     );
+    if (!queued) return;
+    setRetried((ids) => new Set(ids).add(run.id));
+    setNotice(`Queued ${run.title} again.`);
+    window.dispatchEvent(new Event(QUEUE_CHANGED));
+  }
   const pending = data?.runs.filter(needsReview).length ?? 0;
   return (
     <>
@@ -81,6 +92,11 @@ export function Runs() {
             Try again
           </Button>
         </div>
+      )}
+      {notice && (
+        <p role="status" className="toast">
+          {notice}
+        </p>
       )}
       {!data && !error && <ListSkeleton />}
       {data && data.runs.length === 0 && (
@@ -111,18 +127,19 @@ export function Runs() {
                   </Button>
                 </>
               )}
-              {(run.status === "failed" || run.status === "cancelled") && (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={busyRun === run.id}
-                  aria-label={`Retry ${run.title}`}
-                  onClick={() => void retry(run)}
-                >
-                  Retry
-                </Button>
-              )}
+              {(run.status === "failed" || run.status === "cancelled") &&
+                !retried.has(run.id) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busyRun === run.id}
+                    aria-label={`Retry ${run.title}`}
+                    onClick={() => void retry(run)}
+                  >
+                    Retry
+                  </Button>
+                )}
               <Badge
                 variant={statusVariants[run.status]}
                 className="capitalize"

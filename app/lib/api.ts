@@ -15,3 +15,5 @@ export async function api<T>(
   }
   return response.json() as Promise<T>;
 }
+/** Window event fired after a mutation outside the queue page changes the task queue. */
+export const QUEUE_CHANGED = "queue-changed";

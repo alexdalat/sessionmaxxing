@@ -11,7 +11,8 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
-import { api } from "@/app/lib/api";
+import { useNotice } from "@/app/hooks/useNotice";
+import { api, QUEUE_CHANGED } from "@/app/lib/api";
 import { DEFAULT_MODEL, modelOptions } from "@/app/lib/models";
 import { quickTask } from "@/app/lib/quickTask";
 
@@ -23,6 +24,7 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
   const [model, setModel] = useState(DEFAULT_MODEL.claude);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useNotice();
   const input = quickTask(prompt, { workdir, model });
   return (
     <section className="panel" aria-label="Quick add">
@@ -37,13 +39,16 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
           if (!input) return;
           setBusy(true);
           setError("");
+          setNotice("");
           try {
             await api("/api/tasks", {
               method: "POST",
               body: JSON.stringify(input),
             });
             setPrompt("");
+            setNotice("Task added.");
             onQueued();
+            window.dispatchEvent(new Event(QUEUE_CHANGED));
           } catch (failure) {
             setError(
               failure instanceof Error ? failure.message : "Could not queue.",
@@ -105,6 +110,11 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
           </p>
         )}
       </form>
+      {notice && (
+        <p role="status" className="toast">
+          {notice}
+        </p>
+      )}
     </section>
   );
 }
