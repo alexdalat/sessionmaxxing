@@ -16,15 +16,19 @@ export const ACTIVITY_SOURCE_LABELS: Record<ActivitySource, string> = {
 };
 /** Quota consumption the official API reports but no local transcript explains (claude.ai, laptop). */
 export const EXTERNAL_SOURCE_LABEL = "Other";
-export interface ActivityEvent {
+export const TOKEN_KINDS = [
+  "inputTokens",
+  "outputTokens",
+  "cacheReadTokens",
+  "cacheCreationTokens",
+] as const;
+export type TokenKind = (typeof TOKEN_KINDS)[number];
+export type TokenUsage = Record<TokenKind, number>;
+export interface ActivityEvent extends TokenUsage {
   timestamp: string;
   project: string;
   model: string;
   source: ActivitySource;
-  inputTokens: number;
-  outputTokens: number;
-  cacheReadTokens: number;
-  cacheCreationTokens: number;
 }
 /** One assistant record plus the server-only provenance keys used to deduplicate and attribute it. */
 export interface ParsedEvent {
@@ -68,7 +72,7 @@ export interface Mix {
 }
 export interface SourceActivity extends ActivityCount {
   source: ActivitySource;
-  outputTokens: number;
+  tokens: number;
 }
 export interface Analytics {
   claudeBudgets: ClaudeBudgets;
@@ -79,11 +83,7 @@ export interface Analytics {
   generatedAt: string;
   daily: DailyActivity[];
   heatmap: HeatCell[];
-  totals: ActivityCount &
-    Pick<
-      ActivityEvent,
-      "inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheCreationTokens"
-    >;
+  totals: ActivityCount & TokenUsage;
   models: Mix[];
   projects: Mix[];
   /** Always one entry per ActivitySource, in ACTIVITY_SOURCES order, for the selected range. */
@@ -108,9 +108,62 @@ export const FABLE_MODEL = /fable/i;
 
 export const MODEL_FAMILIES = ["fable", "opus", "sonnet", "haiku"] as const;
 export type ModelFamily = (typeof MODEL_FAMILIES)[number];
-/** Output tokens a five-hour window consumed, split by the family that produced them. */
-export type OutputTokens = Record<ModelFamily, number>;
-/** Session percent one million output tokens of a family costs on the current plan. */
+/**
+ * List price per million tokens of each kind (Fable at the Fable 5.1 cache-read
+ * rate); the ratios weight a family's input against its output.
+ */
+export const FAMILY_PRICING: Record<ModelFamily, TokenUsage> = {
+  fable: {
+    inputTokens: 10,
+    outputTokens: 50,
+    cacheCreationTokens: 12.5,
+    cacheReadTokens: 0.25,
+  },
+  opus: {
+    inputTokens: 5,
+    outputTokens: 25,
+    cacheCreationTokens: 6.25,
+    cacheReadTokens: 0.5,
+  },
+  sonnet: {
+    inputTokens: 2,
+    outputTokens: 10,
+    cacheCreationTokens: 2.5,
+    cacheReadTokens: 0.2,
+  },
+  haiku: {
+    inputTokens: 1,
+    outputTokens: 5,
+    cacheCreationTokens: 1.25,
+    cacheReadTokens: 0.1,
+  },
+};
+/**
+ * Everything a response consumed, in output tokens: input, cache writes and
+ * cache reads count at their list-price ratio to the family's output price.
+ */
+export function weightedTokens(usage: TokenUsage, family: ModelFamily): number {
+  const price = FAMILY_PRICING[family];
+  return (
+    TOKEN_KINDS.reduce((sum, kind) => sum + usage[kind] * price[kind], 0) /
+    price.outputTokens
+  );
+}
+/** Weighted tokens a run or a five-hour window consumed, split by the family that produced them. */
+export type WeightedTokens = Record<ModelFamily, number>;
+export const emptyWeightedTokens = (): WeightedTokens => ({
+  fable: 0,
+  opus: 0,
+  sonnet: 0,
+  haiku: 0,
+});
+const THOUSAND = 1_000;
+const MILLION = 1_000_000;
+export const formatTokens = (tokens: number) =>
+  tokens >= MILLION
+    ? `${(Math.round(tokens / (MILLION / 10)) / 10).toFixed(1)}M`
+    : `${Math.round(tokens / THOUSAND)}k`;
+/** Session percent one million weighted tokens of a family costs on the current plan. */
 export type SessionRates = Record<ModelFamily, number>;
 /** The family behind a model alias (`opus`) or identifier (`claude-fable-5-1`); null for Codex and unknown models. */
 export function modelFamily(model: string): ModelFamily | null {
@@ -235,11 +288,11 @@ export type TaskStatus =
   | "cancelled";
 /** Generous turn cap: dispatched runs regularly use 130+ turns and a looping run is cheaper than a truncated one. */
 export const DEFAULT_MAX_TURNS = 500;
-export const AUTO_OUTPUT_TOKENS = "auto";
-export type OutputTokensInput = number | typeof AUTO_OUTPUT_TOKENS;
+export const AUTO_TOKENS = "auto";
+export type TokensInput = number | typeof AUTO_TOKENS;
 export const MAX_DEPENDENCIES = 20;
-export const MIN_OUTPUT_TOKENS = 1_000;
-export const MAX_OUTPUT_TOKENS = 2_000_000;
+export const MIN_TOKENS = 5_000;
+export const MAX_TOKENS = 10_000_000;
 export interface TaskInput {
   title: string;
   prompt: string;
@@ -250,16 +303,16 @@ export interface TaskInput {
   earliestStart: string | null;
   preferredWindowStart: number | null;
   maxTurns: number;
-  /** A number, or "auto" to have the server estimate it from the prompt before the task is stored. */
-  outputTokens: OutputTokensInput;
+  /** Weighted tokens: a number, or "auto" to have the server estimate it from the prompt before the task is stored. */
+  tokens: TokensInput;
   /** Ids of tasks that must complete before this one is dispatched. */
   dependsOn: string[];
 }
-export interface Task extends Omit<TaskInput, "outputTokens"> {
+export interface Task extends Omit<TaskInput, "tokens"> {
   id: string;
   model: string;
-  /** Output tokens the whole run is expected to produce, every model and subagent included. */
-  outputTokens: number;
+  /** Weighted tokens the whole run is expected to consume, every model and subagent included. */
+  tokens: number;
   status: TaskStatus;
   createdAt: string;
   /** When the task last left pending or running; null while queued or for tasks finished before this was tracked. */
@@ -276,7 +329,7 @@ export interface TaskGate {
 export type PublicTask = Task & {
   gate?: TaskGate;
   review: "needed" | null;
-  /** `outputTokens` priced at the current session rates; null for Codex tasks and before calibration. */
+  /** `tokens` priced at the current session rates; null for Codex tasks and before calibration. */
   sessionCostPercent: number | null;
 };
 export interface WorkdirSuggestions {
@@ -326,8 +379,8 @@ export interface Run {
   title: string;
   /** The prompt the run was dispatched with; null for runs recorded before prompts were stored. */
   prompt: string | null;
-  /** What the task was estimated to produce when it started; null for runs recorded before estimates were tracked. */
-  estimatedOutputTokens: number | null;
+  /** Weighted tokens the task was estimated to consume when it started; null for runs recorded before weighted estimates were tracked. */
+  estimatedTokens: number | null;
   provider: Provider;
   model: string;
   status: Exclude<TaskStatus, "pending">;
@@ -336,9 +389,9 @@ export interface Run {
   durationMs: number;
   exitCode: number | null;
   error: string | null;
-  /** Output tokens the run's session produced; null for Codex runs and runs whose transcript held none. */
-  outputTokens: OutputTokens | null;
-  /** `outputTokens` priced at the current session rates; null when unmeasured or before calibration. */
+  /** Weighted tokens the run's session consumed; null for Codex runs and runs whose transcript held none. */
+  tokens: WeightedTokens | null;
+  /** `tokens` priced at the current session rates; null when unmeasured or before calibration. */
   sessionCostPercent: number | null;
   /** The run's final assistant message; null for runs that ended without one. */
   summary: string | null;

@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { quickTask } from "../app/lib/quickTask";
-import { AUTO_OUTPUT_TOKENS, DEFAULT_MAX_TURNS } from "../shared/types.js";
+import { AUTO_TOKENS, DEFAULT_MAX_TURNS } from "../shared/types.js";
 
 const target = { workdir: "/home/user/workspace/dashboard", model: "sonnet" };
 
@@ -43,7 +43,7 @@ it("queues a claude task with the chosen directory, model and estimated tokens",
     earliestStart: null,
     preferredWindowStart: null,
     maxTurns: DEFAULT_MAX_TURNS,
-    outputTokens: AUTO_OUTPUT_TOKENS,
+    tokens: AUTO_TOKENS,
     dependsOn: [],
   });
 });

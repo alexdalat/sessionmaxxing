@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   appendFile,
   mkdir,
@@ -17,8 +18,8 @@ import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchLoad,
   needsReview,
-  type OutputTokens,
   type Task,
+  type WeightedTokens,
 } from "../shared/types.js";
 import {
   fakeChild,
@@ -124,6 +125,31 @@ it("cancels the process group, holds the execution slot until close, and records
     await runner.waitForIdle();
     expect(store.snapshot().tasks[0].status).toBe("cancelled");
     expect(runner.list()[0].status).toBe("cancelled");
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("kills processes the provider left running in its group when it exits", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    const pidFile = join(temp.path, "straggler.pid");
+    const runner = await Runner.open(store, temp.path, {
+      launch: () =>
+        spawn(
+          "sh",
+          ["-c", `sleep 300 >/dev/null 2>&1 & echo $! > "${pidFile}"`],
+          { detached: true, stdio: ["ignore", "pipe", "pipe"] },
+        ),
+    });
+    await runner.start(task.id);
+    await runner.waitForIdle();
+    const straggler = Number(await readFile(pidFile, "utf8"));
+    await vi.waitFor(() =>
+      expect(() => process.kill(straggler, 0)).toThrow(/ESRCH/),
+    );
     await runner.close();
   } finally {
     await temp.cleanup();
@@ -372,7 +398,7 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         taskId: "c".repeat(24),
         title: "Legacy run",
         prompt: null,
-        estimatedOutputTokens: null,
+        estimatedTokens: null,
         provider: "claude",
         model: "opus",
         status: "completed",
@@ -381,7 +407,7 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         durationMs: 300_000,
         exitCode: 0,
         error: null,
-        outputTokens: null,
+        tokens: null,
         sessionCostPercent: null,
         summary: null,
         changes: null,
@@ -397,7 +423,7 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
 });
 
 const RUN_TIME = new Date("2026-09-06T12:00:00Z");
-const SESSION_TOKENS: OutputTokens = {
+const SESSION_TOKENS: WeightedTokens = {
   fable: 100_000,
   opus: 50_000,
   sonnet: 0,
@@ -406,7 +432,7 @@ const SESSION_TOKENS: OutputTokens = {
 
 async function runWithTokens(
   temp: string,
-  sessionTokens: (sessionId: string) => Promise<OutputTokens>,
+  sessionTokens: (sessionId: string) => Promise<WeightedTokens>,
 ) {
   const store = await QueueStore.open(temp);
   const task = await store.create(taskInput(temp));
@@ -441,7 +467,7 @@ async function runWithTokens(
   return { run, persisted, error };
 }
 
-it("stores the output tokens of a finished run and prices them at the current rates", async () => {
+it("stores the tokens of a finished run and prices them at the current rates", async () => {
   const temp = await temporary();
   try {
     const sessions: string[] = [];
@@ -449,8 +475,8 @@ it("stores the output tokens of a finished run and prices them at the current ra
       sessions.push(id);
       return SESSION_TOKENS;
     });
-    expect(run.outputTokens).toEqual(SESSION_TOKENS);
-    expect(persisted.outputTokens).toEqual(SESSION_TOKENS);
+    expect(run.tokens).toEqual(SESSION_TOKENS);
+    expect(persisted.tokens).toEqual(SESSION_TOKENS);
     expect(run.sessionCostPercent).toBe(42.6);
     expect(persisted.sessionCostPercent).toBeUndefined();
     expect(sessions).toHaveLength(1);
@@ -459,37 +485,37 @@ it("stores the output tokens of a finished run and prices them at the current ra
   }
 });
 
-it("leaves a run unmeasured when its transcript recorded no output tokens", async () => {
+it("leaves a run unmeasured when its transcript recorded no tokens", async () => {
   const temp = await temporary();
   try {
     const { run, persisted, error } = await runWithTokens(
       temp.path,
       async () => ({ fable: 0, opus: 0, sonnet: 0, haiku: 0 }),
     );
-    expect(run.outputTokens).toBeNull();
+    expect(run.tokens).toBeNull();
     expect(run.sessionCostPercent).toBeNull();
-    expect(persisted.outputTokens).toBeNull();
+    expect(persisted.tokens).toBeNull();
     expect(error).toBeNull();
   } finally {
     await temp.cleanup();
   }
 });
 
-it("pauses auto-dispatch when the output tokens of a run cannot be read", async () => {
+it("pauses auto-dispatch when the tokens of a run cannot be read", async () => {
   const temp = await temporary();
   try {
     const { run, error } = await runWithTokens(temp.path, async () => {
       throw new Error("transcripts are unreadable");
     });
-    expect(run.outputTokens).toBeNull();
+    expect(run.tokens).toBeNull();
     expect(run.status).toBe("completed");
-    expect(error).toMatch(/output tokens/);
+    expect(error).toMatch(/tokens of the run/);
   } finally {
     await temp.cleanup();
   }
 });
 
-it("backfills the output tokens of a saved run that has none", async () => {
+it("backfills the tokens of a saved run that has only output tokens", async () => {
   const temp = await temporary();
   try {
     const store = await QueueStore.open(temp.path);
@@ -511,6 +537,7 @@ it("backfills the output tokens of a saved run that has none", async () => {
         exitCode: 0,
         error: null,
         sessionCostPercent: 73,
+        outputTokens: { fable: 0, opus: 1_200, sonnet: 0, haiku: 0 },
         sessionId,
       }),
     );
@@ -524,11 +551,12 @@ it("backfills the output tokens of a saved run that has none", async () => {
     });
     runner.setPlanner(serial);
     expect(asked).toEqual([sessionId]);
-    expect(runner.list()[0].outputTokens).toEqual(SESSION_TOKENS);
+    expect(runner.list()[0].tokens).toEqual(SESSION_TOKENS);
     const persisted = JSON.parse(
       await readFile(join(temp.path, "runs", `${id}.json`), "utf8"),
     );
-    expect(persisted.outputTokens).toEqual(SESSION_TOKENS);
+    expect(persisted.tokens).toEqual(SESSION_TOKENS);
+    expect(persisted.outputTokens).toBeUndefined();
     expect(persisted.sessionCostPercent).toBeUndefined();
     await runner.close();
   } finally {

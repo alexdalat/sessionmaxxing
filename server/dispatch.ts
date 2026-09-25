@@ -309,16 +309,18 @@ type GateTask = Pick<
   | "model"
   | "preferredWindowStart"
   | "earliestStart"
-  | "outputTokens"
+  | "tokens"
 >;
-type RunCost = Pick<Run, "taskId" | "sessionCostPercent">;
+type RunCost = Pick<Run, "taskId" | "status" | "sessionCostPercent">;
 
 /**
- * The largest session percent this task's earlier runs cost, or its expected
- * output tokens priced at the current rates; null while the rates are unknown.
+ * The largest session percent this task's earlier completed runs cost, or its
+ * expected tokens priced at the current rates; null while the rates are unknown.
+ * Failed and cancelled runs are skipped: one that looped or redid work would
+ * otherwise price the task out of every window.
  */
 export function expectedSessionCost(
-  task: Pick<Task, "id" | "model" | "outputTokens">,
+  task: Pick<Task, "id" | "model" | "tokens">,
   runs: readonly RunCost[],
   rates: SessionRates | null,
 ): number | null {
@@ -326,6 +328,7 @@ export function expectedSessionCost(
   for (const run of runs)
     if (
       run.taskId === task.id &&
+      run.status === "completed" &&
       run.sessionCostPercent !== null &&
       (largest === null || run.sessionCostPercent > largest)
     )
@@ -333,8 +336,12 @@ export function expectedSessionCost(
   if (largest !== null) return largest;
   return rates === null
     ? null
-    : modelSessionPercent(task.outputTokens, task.model, rates);
+    : modelSessionPercent(task.tokens, task.model, rates);
 }
+
+/** A task larger than the whole cutoff never fits a window, so it waits for an empty one instead of waiting forever. */
+const fitCost = (expected: number, session: BucketGate) =>
+  Math.min(expected, session.ceiling);
 
 /** The window opening at `hour` that is still open at `at`, searching yesterday through tomorrow. */
 function windowStartAt(hour: number, at: number): number {
@@ -380,14 +387,14 @@ function sessionWindowStart(
   let start = now.getTime();
   let used = percent + session.reserved;
   let reset = resetsAt === null ? null : Date.parse(resetsAt);
-  for (const cost of [...ahead, expected]) {
+  for (const cost of [...ahead, expected].map((each) =>
+    fitCost(each, session),
+  )) {
     while (used + cost > session.ceiling) {
       if (reset === null) return null;
       start = Math.max(reset, now.getTime());
       reset = start + WINDOW_MS;
       used = 0;
-      // A task larger than the whole ceiling never fits; it starts the window it reaches.
-      if (cost > session.ceiling) break;
     }
     used += cost;
   }
@@ -413,7 +420,7 @@ export function costsAhead(
 
 /** Earliest instant the usage buckets this task draws on hold enough headroom; null when unknowable. */
 function usageClearsAt(
-  task: Pick<GateTask, "id" | "provider" | "model" | "outputTokens">,
+  task: Pick<GateTask, "id" | "provider" | "model" | "tokens">,
   planning: PlanningSnapshot,
   runs: readonly RunCost[],
   now: Date,
@@ -466,7 +473,7 @@ export function eligibleAt(
     | "model"
     | "preferredWindowStart"
     | "earliestStart"
-    | "outputTokens"
+    | "tokens"
   >,
   planning: PlanningSnapshot,
   now: Date,
@@ -577,7 +584,8 @@ export function taskGate(
     const expected = expectedSessionCost(task, runs, planning.rates);
     if (
       expected !== null &&
-      session.percent + session.reserved + expected > session.ceiling
+      session.percent + session.reserved + fitCost(expected, session) >
+        session.ceiling
     )
       return {
         status: "waiting",

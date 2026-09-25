@@ -21,19 +21,16 @@ import { Textarea } from "@/app/components/ui/textarea";
 import { DEFAULT_MODEL, modelOptions } from "@/app/lib/models";
 import type { Provider, PublicTask, TaskInput } from "@/shared/types";
 import {
-  AUTO_OUTPUT_TOKENS,
+  AUTO_TOKENS,
   DEFAULT_MAX_TURNS,
+  formatTokens,
   HOURS,
   hourLabel,
 } from "@/shared/types";
 import { WorkdirField } from "./WorkdirField";
 
 const ANY_WINDOW = "any";
-const THOUSAND = 1000;
-const OUTPUT_TOKEN_PRESETS = [
-  10_000, 25_000, 50_000, 100_000, 150_000, 250_000,
-];
-const tokenLabel = (tokens: number) => `${Math.round(tokens / THOUSAND)}k`;
+const TOKEN_PRESETS = [50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000];
 
 export function TaskFormDialog({
   open,
@@ -59,8 +56,8 @@ export function TaskFormDialog({
     String(task?.preferredWindowStart ?? ANY_WINDOW),
   );
   const [workdir, setWorkdir] = useState(task?.workdir ?? "");
-  const [outputTokens, setOutputTokens] = useState(
-    task ? String(task.outputTokens) : AUTO_OUTPUT_TOKENS,
+  const [tokens, setTokens] = useState(
+    task ? String(task.tokens) : AUTO_TOKENS,
   );
   const [dependsOn, setDependsOn] = useState<string[]>(task?.dependsOn ?? []);
   const dependencyOptions = tasks.filter(
@@ -71,9 +68,9 @@ export function TaskFormDialog({
         dependsOn.includes(candidate.id)),
   );
   const tokenChoices =
-    task && !OUTPUT_TOKEN_PRESETS.includes(task.outputTokens)
-      ? [...OUTPUT_TOKEN_PRESETS, task.outputTokens].sort((a, b) => a - b)
-      : OUTPUT_TOKEN_PRESETS;
+    task && !TOKEN_PRESETS.includes(task.tokens)
+      ? [...TOKEN_PRESETS, task.tokens].sort((a, b) => a - b)
+      : TOKEN_PRESETS;
   const browserDate = task?.earliestStart
     ? new Date(
         Date.parse(task.earliestStart) -
@@ -112,10 +109,7 @@ export function TaskFormDialog({
               workdir: String(fields.get("workdir")).trim(),
               priority: Number(fields.get("priority")),
               maxTurns: Number(fields.get("maxTurns")),
-              outputTokens:
-                outputTokens === AUTO_OUTPUT_TOKENS
-                  ? AUTO_OUTPUT_TOKENS
-                  : Number(outputTokens),
+              tokens: tokens === AUTO_TOKENS ? AUTO_TOKENS : Number(tokens),
               earliestStart: Number.isFinite(parsedEarliest)
                 ? new Date(parsedEarliest).toISOString()
                 : null,
@@ -226,23 +220,16 @@ export function TaskFormDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor={`${fieldId}-output-tokens`}>Output tokens</Label>
-              <Select
-                name="outputTokens"
-                value={outputTokens}
-                onValueChange={setOutputTokens}
-              >
-                <SelectTrigger
-                  id={`${fieldId}-output-tokens`}
-                  className="w-full"
-                >
+              <Label htmlFor={`${fieldId}-tokens`}>Tokens</Label>
+              <Select name="tokens" value={tokens} onValueChange={setTokens}>
+                <SelectTrigger id={`${fieldId}-tokens`} className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={AUTO_OUTPUT_TOKENS}>Auto</SelectItem>
-                  {tokenChoices.map((tokens) => (
-                    <SelectItem key={tokens} value={String(tokens)}>
-                      {tokenLabel(tokens)}
+                  <SelectItem value={AUTO_TOKENS}>Auto</SelectItem>
+                  {tokenChoices.map((choice) => (
+                    <SelectItem key={choice} value={String(choice)}>
+                      {formatTokens(choice)}
                     </SelectItem>
                   ))}
                 </SelectContent>

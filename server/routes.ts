@@ -1,24 +1,20 @@
 import type { FastifyInstance } from "fastify";
 import {
-  AUTO_OUTPUT_TOKENS,
+  AUTO_TOKENS,
   MAX_DEPENDENCIES,
-  MAX_OUTPUT_TOKENS,
-  MIN_OUTPUT_TOKENS,
+  MAX_TOKENS,
+  MIN_TOKENS,
   needsReview,
-  type OutputTokensInput,
   type PlanningSnapshot,
   type PublicTask,
   type Run,
   type SessionRates,
   type TaskInput,
+  type TokensInput,
 } from "../shared/types.js";
 import { modelSessionPercent } from "./calibration.js";
 import { emptyQuerySchema } from "./dispatch-settings.js";
-import type {
-  EstimateRun,
-  EstimateTask,
-  OutputTokensEstimator,
-} from "./estimate.js";
+import type { EstimateRun, EstimateTask, TokensEstimator } from "./estimate.js";
 import {
   defaultModel,
   type QueueStore,
@@ -50,14 +46,14 @@ const properties = {
     anyOf: [{ type: "integer", minimum: 0, maximum: 23 }, { type: "null" }],
   },
   maxTurns: { type: "integer", minimum: 1, maximum: 1000 },
-  outputTokens: {
+  tokens: {
     anyOf: [
       {
         type: "integer",
-        minimum: MIN_OUTPUT_TOKENS,
-        maximum: MAX_OUTPUT_TOKENS,
+        minimum: MIN_TOKENS,
+        maximum: MAX_TOKENS,
       },
-      { const: AUTO_OUTPUT_TOKENS },
+      { const: AUTO_TOKENS },
     ],
   },
   dependsOn: {
@@ -77,7 +73,7 @@ export function registerQueueRoutes(
   queue: QueueStore,
   runner: Runner,
   now: () => Date,
-  estimate: OutputTokensEstimator,
+  estimate: TokensEstimator,
   getPlanning?: () => PlanningSnapshot,
   keeper?: SessionKeeper,
 ) {
@@ -94,7 +90,7 @@ export function registerQueueRoutes(
       sessionCostPercent:
         task.provider !== "claude" || rates === null
           ? null
-          : modelSessionPercent(task.outputTokens, task.model, rates),
+          : modelSessionPercent(task.tokens, task.model, rates),
     };
   };
   const plannedTask = async (task: PublicTask) => {
@@ -144,19 +140,18 @@ export function registerQueueRoutes(
               promptLength: prompt.length,
               model: run.model,
               durationMs: run.durationMs,
-              outputTokens: run.outputTokens,
-              estimatedOutputTokens:
-                run.estimatedOutputTokens ?? task?.outputTokens ?? null,
+              tokens: run.tokens,
+              estimatedTokens: run.estimatedTokens ?? task?.tokens ?? null,
             },
           ];
     });
   };
   /** "auto" is resolved here so the queue only ever stores a number. */
   const storedTokens = async (
-    tokens: OutputTokensInput,
+    tokens: TokensInput,
     task: () => EstimateTask,
   ): Promise<number> => {
-    if (tokens !== AUTO_OUTPUT_TOKENS) return tokens;
+    if (tokens !== AUTO_TOKENS) return tokens;
     try {
       return await estimate(task(), calibration());
     } catch (error) {
@@ -220,7 +215,7 @@ export function registerQueueRoutes(
             "earliestStart",
             "preferredWindowStart",
             "maxTurns",
-            "outputTokens",
+            "tokens",
             "dependsOn",
           ],
           properties,
@@ -231,7 +226,7 @@ export function registerQueueRoutes(
       const input = request.body;
       const created = await queue.create({
         ...input,
-        outputTokens: await storedTokens(input.outputTokens, () => ({
+        tokens: await storedTokens(input.tokens, () => ({
           title: input.title,
           prompt: input.prompt,
           model: input.model || defaultModel(input.provider),
@@ -255,13 +250,13 @@ export function registerQueueRoutes(
       },
     },
     async (request) => {
-      const { outputTokens, ...patch } = request.body;
+      const { tokens, ...patch } = request.body;
       const stored: Partial<StoredTaskInput> =
-        outputTokens === undefined
+        tokens === undefined
           ? patch
           : {
               ...patch,
-              outputTokens: await storedTokens(outputTokens, () =>
+              tokens: await storedTokens(tokens, () =>
                 editedTask(request.params.id, request.body),
               ),
             };

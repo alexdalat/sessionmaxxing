@@ -8,14 +8,13 @@ import {
   waitNote,
 } from "@/app/lib/queuePreview";
 import {
+  formatTokens,
   hourLabel,
   localTimestamp,
   PROVIDER_LABELS,
   type PublicTask,
 } from "@/shared/types";
 
-const THOUSAND = 1000;
-const tokenLabel = (tokens: number) => `${Math.round(tokens / THOUSAND)}k`;
 const stateVariants: Record<PreviewState, "success" | "info" | "warning"> = {
   running: "success",
   ready: "info",
@@ -62,7 +61,7 @@ export function TaskCard({
           <span>Priority {task.priority}</span>
           <span>max {task.maxTurns} turns</span>
           <span>
-            {tokenLabel(task.outputTokens)} tokens
+            {formatTokens(task.tokens)} tokens
             {task.sessionCostPercent === null
               ? ""
               : ` · ${task.sessionCostPercent}%`}

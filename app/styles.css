@@ -263,6 +263,11 @@
     font-weight: 600;
     line-height: 1;
   }
+  .nav-count-muted {
+    background: #ffffff0f;
+    color: #8a8f98;
+    font-weight: 500;
+  }
   .local-note {
     margin-top: auto;
     color: #8a8f98;

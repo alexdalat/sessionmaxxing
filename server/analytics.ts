@@ -8,10 +8,12 @@ import {
   type ClaudeBudgetWindow,
   FABLE_MODEL,
   type HistoryData,
+  modelFamily,
   type RangeDays,
   TIME_ZONE,
   type UsageSnapshot,
   WEEK_MINUTES,
+  weightedTokens,
 } from "../shared/types.js";
 
 const MINUTE_MS = 60_000;
@@ -152,7 +154,10 @@ export function aggregate(
       return {
         source,
         ...count(matching),
-        outputTokens: matching.reduce((n, e) => n + e.outputTokens, 0),
+        tokens: matching.reduce((sum, event) => {
+          const family = modelFamily(event.model);
+          return family === null ? sum : sum + weightedTokens(event, family);
+        }, 0),
       };
     }),
     health: history.health,

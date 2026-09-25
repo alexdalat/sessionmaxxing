@@ -1,11 +1,11 @@
 import { spawn } from "node:child_process";
 import {
-  MAX_OUTPUT_TOKENS,
-  MIN_OUTPUT_TOKENS,
+  MAX_TOKENS,
+  MIN_TOKENS,
   MODEL_FAMILIES,
   modelFamily,
-  type OutputTokens,
   type Provider,
+  type WeightedTokens,
 } from "../shared/types.js";
 import type { ProviderProcess } from "./providers.js";
 
@@ -15,13 +15,13 @@ const CALIBRATION_RUNS = 12;
 const ESTIMATE_SCHEMA = JSON.stringify({
   type: "object",
   properties: {
-    outputTokens: {
+    tokens: {
       type: "integer",
-      minimum: MIN_OUTPUT_TOKENS,
-      maximum: MAX_OUTPUT_TOKENS,
+      minimum: MIN_TOKENS,
+      maximum: MAX_TOKENS,
     },
   },
-  required: ["outputTokens"],
+  required: ["tokens"],
   additionalProperties: false,
 });
 
@@ -37,9 +37,9 @@ export interface EstimateRun {
   promptLength: number;
   model: string;
   durationMs: number;
-  outputTokens: OutputTokens | null;
-  /** What the run was estimated to produce before it started; null when the estimate was not recorded. */
-  estimatedOutputTokens: number | null;
+  tokens: WeightedTokens | null;
+  /** What the run was estimated to consume before it started; null when the estimate was not recorded. */
+  estimatedTokens: number | null;
 }
 export interface EstimateOptions {
   cwd: string | undefined;
@@ -53,7 +53,7 @@ export type SpawnEstimator = (
   args: string[],
   options: EstimateOptions,
 ) => ProviderProcess;
-export type OutputTokensEstimator = (
+export type TokensEstimator = (
   task: EstimateTask,
   history: EstimateRun[],
 ) => Promise<number>;
@@ -75,13 +75,13 @@ const median = (values: number[]): number => {
     ? sorted[middle]
     : (sorted[middle - 1] + sorted[middle]) / 2;
 };
-const measuredTotal = (tokens: OutputTokens) =>
+const measuredTotal = (tokens: WeightedTokens) =>
   MODEL_FAMILIES.reduce((sum, family) => sum + tokens[family], 0);
 const ratios = (runs: EstimateRun[]): number[] =>
   runs.flatMap((run) => {
-    if (run.outputTokens === null || !run.estimatedOutputTokens) return [];
-    const measured = measuredTotal(run.outputTokens);
-    return measured > 0 ? [measured / run.estimatedOutputTokens] : [];
+    if (run.tokens === null || !run.estimatedTokens) return [];
+    const measured = measuredTotal(run.tokens);
+    return measured > 0 ? [measured / run.estimatedTokens] : [];
   });
 
 /**
@@ -100,30 +100,32 @@ export function estimateCorrection(
   if (sample.length < MIN_CORRECTION_RUNS) return 1;
   return clamp(median(sample), MIN_CORRECTION, MAX_CORRECTION);
 }
-function tokenMix(tokens: OutputTokens | null) {
+function tokenMix(tokens: WeightedTokens | null) {
   if (tokens === null) return "unknown";
   const parts = MODEL_FAMILIES.filter((family) => tokens[family] > 0).map(
     (family) => `${Math.round(tokens[family] / THOUSAND)}k ${family}`,
   );
-  return `${parts.join(" + ")} output tokens`;
+  return `${parts.join(" + ")} tokens`;
 }
 const calibrationLine = (run: EstimateRun) =>
-  `${run.title} | ${run.promptLength} prompt chars | ${run.model} | ${Math.round(run.durationMs / MS_PER_MINUTE)} min | ${tokenMix(run.outputTokens)}`;
+  `${run.title} | ${run.promptLength} prompt chars | ${run.model} | ${Math.round(run.durationMs / MS_PER_MINUTE)} min | ${tokenMix(run.tokens)}`;
 
 function estimatorPrompt(task: EstimateTask, history: EstimateRun[]): string {
   const calibration = history
     .slice(0, CALIBRATION_RUNS)
     .map(calibrationLine)
     .join("\n");
-  return `Estimate how many output tokens one unattended coding task will produce in total, thinking and every subagent included.
+  return `Estimate how many tokens one unattended coding task will consume in total, thinking, context re-reads and every subagent included.
+
+Tokens are weighted: output tokens count once, and uncached input, cache writes and cache reads count at their price relative to output. A run's total is usually four to six times its output tokens.
 
 The task runs as \`claude -p --dangerously-skip-permissions\` on the ${task.provider} provider with model ${task.model}.
 
 Rules of thumb, from runs on this machine:
-- One-file fix or wording change: 5000-15000.
-- Small feature with tests: 15000-40000.
-- Multi-file feature, migration, or a visual QA pass driving a browser: 50000-130000.
-- A project built through a planning workflow, or research plus a large refactor: 150000-300000.
+- One-file fix or wording change: 25000-75000.
+- Small feature with tests: 75000-200000.
+- Multi-file feature, migration, or a visual QA pass driving a browser: 250000-600000.
+- A project built through a planning workflow, or research plus a large refactor: 700000-1500000.
 
 ${calibration ? `Prior runs on this machine, as calibration:\n${calibration}` : "No prior runs are available as calibration."}
 
@@ -152,20 +154,20 @@ function readEstimate(stdout: string): number {
     (typeof payload.result === "string"
       ? (JSON.parse(payload.result) as unknown)
       : payload.result);
-  const tokens = (output as { outputTokens?: unknown } | null)?.outputTokens;
+  const tokens = (output as { tokens?: unknown } | null)?.tokens;
   if (
     typeof tokens !== "number" ||
     !Number.isInteger(tokens) ||
-    tokens < MIN_OUTPUT_TOKENS ||
-    tokens > MAX_OUTPUT_TOKENS
+    tokens < MIN_TOKENS ||
+    tokens > MAX_TOKENS
   )
     throw new Error(
-      `the model returned ${JSON.stringify(tokens)} instead of an integer from ${MIN_OUTPUT_TOKENS} to ${MAX_OUTPUT_TOKENS}`,
+      `the model returned ${JSON.stringify(tokens)} instead of an integer from ${MIN_TOKENS} to ${MAX_TOKENS}`,
     );
   return tokens;
 }
 
-export async function estimateOutputTokens(
+export async function estimateTokens(
   task: EstimateTask,
   history: EstimateRun[],
   spawnProcess: SpawnEstimator = spawn,
@@ -217,10 +219,10 @@ export async function estimateOutputTokens(
       throw new Error(lastLine(stderr) ?? `claude exited with code ${code}`);
     const corrected =
       readEstimate(stdout) * estimateCorrection(history, task.model);
-    return clamp(Math.round(corrected), MIN_OUTPUT_TOKENS, MAX_OUTPUT_TOKENS);
+    return clamp(Math.round(corrected), MIN_TOKENS, MAX_TOKENS);
   } catch (error) {
     throw new Error(
-      `Could not estimate output tokens: ${
+      `Could not estimate tokens: ${
         controller.signal.aborted
           ? `no answer within ${ESTIMATE_TIMEOUT_MS / 1000}s`
           : (error as Error).message

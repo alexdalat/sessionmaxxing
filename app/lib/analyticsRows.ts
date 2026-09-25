@@ -11,18 +11,18 @@ export interface SourceRow {
   label: string;
   responses: number;
   activeMinutes: number;
-  outputTokens: number;
+  tokens: number;
   measured: boolean;
 }
 
 export function sourceRows(sources: SourceActivity[]): SourceRow[] {
   const measured = sources
     .filter((entry) => entry.source !== "unknown" || entry.responses > 0)
-    .map(({ source, activeMinutes, responses, outputTokens }) => ({
+    .map(({ source, activeMinutes, responses, tokens }) => ({
       label: ACTIVITY_SOURCE_LABELS[source],
       responses,
       activeMinutes,
-      outputTokens,
+      tokens,
       measured: true,
     }));
   return [
@@ -31,7 +31,7 @@ export function sourceRows(sources: SourceActivity[]): SourceRow[] {
       label: EXTERNAL_SOURCE_LABEL,
       responses: 0,
       activeMinutes: 0,
-      outputTokens: 0,
+      tokens: 0,
       measured: false,
     },
   ];

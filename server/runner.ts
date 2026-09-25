@@ -7,13 +7,13 @@ import {
   type DispatchSettings,
   EMPTY_LOAD,
   MODEL_FAMILIES,
-  type OutputTokens,
   type PlanningSnapshot,
   type PublicTask,
   type Run,
   type SessionRates,
   type Task,
   type TaskGate,
+  type WeightedTokens,
 } from "../shared/types.js";
 import { sessionPercent } from "./calibration.js";
 import { DeployQueue, hasComposeFile, leftChanges } from "./deploy.js";
@@ -48,7 +48,7 @@ interface RunnerOptions {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   launch?: (task: Task, sessionId: string | null) => ProviderProcess;
   autoApply?: () => boolean;
-  sessionTokens?: (sessionId: string) => Promise<OutputTokens>;
+  sessionTokens?: (sessionId: string) => Promise<WeightedTokens>;
   now?: () => Date;
 }
 export type Planner = (load: DispatchLoad) => PlanningSnapshot;
@@ -60,15 +60,15 @@ const publicRun = ({
   sessionId: _sessionId,
   ...run
 }: StoredRun): Omit<Run, "deploy" | "sessionCostPercent"> => run;
-const measured = (tokens: OutputTokens) =>
+const measured = (tokens: WeightedTokens) =>
   MODEL_FAMILIES.some((family) => tokens[family] > 0);
-const savedTokens = (value: unknown): OutputTokens | null =>
+const savedTokens = (value: unknown): WeightedTokens | null =>
   value !== null &&
   typeof value === "object" &&
   MODEL_FAMILIES.every(
-    (family) => typeof (value as OutputTokens)[family] === "number",
+    (family) => typeof (value as WeightedTokens)[family] === "number",
   )
-    ? (value as OutputTokens)
+    ? (value as WeightedTokens)
     : null;
 interface Holding {
   task: Pick<Task, "id" | "title">;
@@ -193,7 +193,7 @@ export class Runner {
         taskId: saved.taskId,
         title: saved.title,
         prompt: saved.prompt ?? null,
-        estimatedOutputTokens: saved.estimatedOutputTokens ?? null,
+        estimatedTokens: saved.estimatedTokens ?? null,
         provider: saved.provider,
         model: saved.model,
         status: saved.status,
@@ -204,7 +204,7 @@ export class Runner {
         error: saved.error
           ? "Previous run failed. See status or retry the task."
           : null,
-        outputTokens: savedTokens(saved.outputTokens),
+        tokens: savedTokens(saved.tokens),
         sessionId: typeof saved.sessionId === "string" ? saved.sessionId : null,
         summary: saved.summary ?? null,
         changes: saved.changes ?? null,
@@ -220,10 +220,10 @@ export class Runner {
       runner.runs.push(run);
     }
     for (const run of runner.runs) {
-      if (run.outputTokens !== null) continue;
+      if (run.tokens !== null) continue;
       const tokens = await runner.readTokens(run.sessionId);
       if (tokens === null) continue;
-      run.outputTokens = tokens;
+      run.tokens = tokens;
       await runner.persist(run);
     }
     return runner;
@@ -238,9 +238,9 @@ export class Runner {
       .map((run) => ({
         ...run,
         sessionCostPercent:
-          run.outputTokens === null || rates === null
+          run.tokens === null || rates === null
             ? null
-            : sessionPercent(run.outputTokens, rates),
+            : sessionPercent(run.tokens, rates),
         deploy: this.deploys.status(run.id),
         preview: this.active.get(run.id)?.output.lines() ?? [...run.preview],
         durationMs:
@@ -367,7 +367,7 @@ export class Runner {
       taskId: task.id,
       title: task.title,
       prompt: task.prompt,
-      estimatedOutputTokens: task.outputTokens,
+      estimatedTokens: task.tokens,
       provider: task.provider,
       model: task.model,
       status: "running",
@@ -376,7 +376,7 @@ export class Runner {
       durationMs: 0,
       exitCode: null,
       error: null,
-      outputTokens: null,
+      tokens: null,
       summary: null,
       changes: null,
       reviewedAt: null,
@@ -478,6 +478,14 @@ export class Runner {
     await active.writeChain;
     active.output.flush();
     if (active.killTimer) clearTimeout(active.killTimer);
+    // The provider's tool calls can outlive it (a hung test worker behind `| head`) and would be
+    // reparented to the container's init, holding CPU until the dashboard restarts.
+    try {
+      this.signal(active, "SIGKILL");
+    } catch {
+      this.error =
+        "Could not stop processes left behind by a run. Check for stray provider children.";
+    }
     active.run.status = active.cancelled
       ? "cancelled"
       : code === 0 && !error && !active.output.failed
@@ -508,10 +516,10 @@ export class Runner {
         "Could not read what the run changed in its work directory.";
     }
     try {
-      active.run.outputTokens = await this.readTokens(active.run.sessionId);
+      active.run.tokens = await this.readTokens(active.run.sessionId);
     } catch {
       this.error =
-        "Could not read the output tokens of the run. Auto-dispatch is paused; check transcript file access.";
+        "Could not read the tokens of the run. Auto-dispatch is paused; check transcript file access.";
     }
     try {
       await this.persist(active.run);

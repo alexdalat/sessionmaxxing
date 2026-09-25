@@ -31,6 +31,7 @@ import {
   ACTIVITY_SOURCES,
   DEFAULT_DISPATCH_SETTINGS,
   FABLE_MODEL,
+  formatTokens,
   needsReview,
   PROVIDER_MODELS,
   planLabel,
@@ -250,7 +251,7 @@ const queued = (
   earliestStart: null,
   preferredWindowStart: null,
   maxTurns: 40,
-  outputTokens: 100_000,
+  tokens: 100_000,
   dependsOn: [],
   sessionCostPercent: 13.8,
   gate: { status: gate, reason: gate, eligibleAt },
@@ -421,18 +422,18 @@ describe("move targets", () => {
 
 describe("source rows", () => {
   const sources = (unknownResponses: number): SourceActivity[] => [
-    { source: "local", activeMinutes: 120, responses: 340, outputTokens: 9100 },
+    { source: "local", activeMinutes: 120, responses: 340, tokens: 9100 },
     {
       source: "dispatched",
       activeMinutes: 45,
       responses: 88,
-      outputTokens: 4200,
+      tokens: 4200,
     },
     {
       source: "unknown",
       activeMinutes: unknownResponses ? 12 : 0,
       responses: unknownResponses,
-      outputTokens: unknownResponses ? 700 : 0,
+      tokens: unknownResponses ? 700 : 0,
     },
   ];
 
@@ -450,7 +451,7 @@ describe("source rows", () => {
       label: "Unattributed",
       responses: 17,
       activeMinutes: 12,
-      outputTokens: 700,
+      tokens: 700,
       measured: true,
     });
   });
@@ -461,7 +462,7 @@ describe("source rows", () => {
         label: "Other",
         responses: 0,
         activeMinutes: 0,
-        outputTokens: 0,
+        tokens: 0,
         measured: false,
       });
       expect(rows.slice(0, -1).every((row) => row.measured)).toBe(true);
@@ -692,7 +693,7 @@ const finishedRun = (
   taskId: "b".repeat(24),
   title: "Fix a test",
   prompt: "Rename the parser.",
-  estimatedOutputTokens: 120_000,
+  estimatedTokens: 120_000,
   provider: "claude",
   model: "opus",
   status: "completed",
@@ -701,7 +702,7 @@ const finishedRun = (
   durationMs: 1_200_000,
   exitCode: 0,
   error: null,
-  outputTokens: { fable: 0, opus: 87_000, sonnet: 0, haiku: 0 },
+  tokens: { fable: 0, opus: 87_000, sonnet: 0, haiku: 0 },
   sessionCostPercent: 12,
   summary: "Renamed the parser.",
   changes,
@@ -738,4 +739,13 @@ it("needs review for uncommitted changes and for commits on a feature branch, no
     ),
   ).toBe(false);
   expect(needsReview(finishedRun(null))).toBe(false);
+});
+
+describe("formatTokens", () => {
+  it("shows thousands below a million and tenths of a million above", () => {
+    expect(formatTokens(50_000)).toBe("50k");
+    expect(formatTokens(4_999)).toBe("5k");
+    expect(formatTokens(1_000_000)).toBe("1.0M");
+    expect(formatTokens(2_450_000)).toBe("2.5M");
+  });
 });

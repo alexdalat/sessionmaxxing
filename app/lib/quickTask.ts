@@ -1,8 +1,4 @@
-import {
-  AUTO_OUTPUT_TOKENS,
-  DEFAULT_MAX_TURNS,
-  type TaskInput,
-} from "@/shared/types";
+import { AUTO_TOKENS, DEFAULT_MAX_TURNS, type TaskInput } from "@/shared/types";
 
 const TITLE_MAX = 120;
 const ELLIPSIS = "…";
@@ -40,7 +36,7 @@ export function quickTask(
     earliestStart: null,
     preferredWindowStart: null,
     maxTurns: DEFAULT_MAX_TURNS,
-    outputTokens: AUTO_OUTPUT_TOKENS,
+    tokens: AUTO_TOKENS,
     dependsOn: [],
   };
 }

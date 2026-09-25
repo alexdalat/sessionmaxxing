@@ -279,7 +279,7 @@ it("keeps an event one minute before the block end inside the same block", () =>
   );
 });
 
-it("sums each activity source over the selected range and always reports every source", () => {
+it("sums the weighted tokens of each activity source over the selected range and always reports every source", () => {
   const result = aggregate(
     history([
       event("2026-09-06T10:00:00Z", { source: "dispatched", outputTokens: 3 }),
@@ -295,9 +295,10 @@ it("sums each activity source over the selected range and always reports every s
     new Date("2026-09-06T12:00:00Z"),
   );
   expect(result.sources).toEqual([
-    { source: "local", activeMinutes: 1, responses: 1, outputTokens: 7 },
-    { source: "dispatched", activeMinutes: 1, responses: 2, outputTokens: 8 },
-    { source: "unknown", activeMinutes: 0, responses: 0, outputTokens: 0 },
+    // Every event also carries 2 input, 5 cache-read and 1 cache-write tokens, worth 0.75 output tokens on Opus.
+    { source: "local", activeMinutes: 1, responses: 1, tokens: 7.75 },
+    { source: "dispatched", activeMinutes: 1, responses: 2, tokens: 9.5 },
+    { source: "unknown", activeMinutes: 0, responses: 0, tokens: 0 },
   ]);
 });
 

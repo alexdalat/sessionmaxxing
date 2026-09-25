@@ -14,9 +14,9 @@ const SYNCED_ROOTS = [
   ["/Users/me/.claude", "/home/user/.claude"],
 ];
 const DEFAULT_MAX_TURNS = 500;
-const AUTO_OUTPUT_TOKENS = "auto";
-const MIN_OUTPUT_TOKENS = 1_000;
-const MAX_OUTPUT_TOKENS = 2_000_000;
+const AUTO_TOKENS = "auto";
+const MIN_TOKENS = 5_000;
+const MAX_TOKENS = 10_000_000;
 const CONNECTION_CODES = new Set([
   "ECONNREFUSED",
   "ECONNRESET",
@@ -29,8 +29,9 @@ const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." 
   [--workdir /abs/path]  default: the current directory
   [--model NAME] [--provider claude|codex] [--priority N]
   [--max-turns N]        default: 500
-  [--tokens N|auto]      expected output tokens; auto lets the server estimate them
+  [--tokens N|auto]      expected weighted tokens; auto lets the server estimate them
   [--window HH]          0-23; omit for any hour
+  [--depends-on ID[,ID]] run only after these queued task ids finish
   [--after ISO] [--url URL] [--dry-run]`;
 const VALUE_FLAGS = new Set([
   "--title",
@@ -44,8 +45,10 @@ const VALUE_FLAGS = new Set([
   "--after",
   "--max-turns",
   "--tokens",
+  "--depends-on",
   "--url",
 ]);
+const TASK_ID = /^[a-f0-9]{24}$/;
 
 function fail(message) {
   console.error(message);
@@ -72,6 +75,19 @@ function parseArgs(argv) {
     values[flag] = value;
   }
   return { values, dryRun };
+}
+
+function taskIds(raw) {
+  if (raw === undefined) return [];
+  const ids = raw
+    .split(",")
+    .map((id) => id.trim())
+    .filter(Boolean);
+  if (ids.length === 0) fail("--depends-on needs at least one task id.");
+  for (const id of ids)
+    if (!TASK_ID.test(id)) fail(`--depends-on: ${id} is not a task id.`);
+  if (new Set(ids).size !== ids.length) fail("--depends-on repeats an id.");
+  return ids;
 }
 
 function integer(raw, flag, min, max) {
@@ -125,17 +141,11 @@ function buildBody(values) {
       values["--max-turns"] === undefined
         ? DEFAULT_MAX_TURNS
         : integer(values["--max-turns"], "--max-turns", 1, 1000),
-    outputTokens:
-      values["--tokens"] === undefined ||
-      values["--tokens"] === AUTO_OUTPUT_TOKENS
-        ? AUTO_OUTPUT_TOKENS
-        : integer(
-            values["--tokens"],
-            "--tokens",
-            MIN_OUTPUT_TOKENS,
-            MAX_OUTPUT_TOKENS,
-          ),
-    dependsOn: [],
+    tokens:
+      values["--tokens"] === undefined || values["--tokens"] === AUTO_TOKENS
+        ? AUTO_TOKENS
+        : integer(values["--tokens"], "--tokens", MIN_TOKENS, MAX_TOKENS),
+    dependsOn: taskIds(values["--depends-on"]),
   };
   if (values["--model"] !== undefined) body.model = values["--model"];
   return body;

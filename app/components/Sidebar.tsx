@@ -2,9 +2,9 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { usePolling } from "@/app/hooks/usePolling";
-import type { PendingReview } from "@/shared/types";
+import type { PendingReview, QueueSnapshot } from "@/shared/types";
 
-const REVIEW_POLL_MS = 10_000;
+const NAV_POLL_MS = 10_000;
 
 const NAV_ITEMS = [
   { label: "Overview", href: "/" },
@@ -24,9 +24,12 @@ export function Sidebar() {
   const current = normalize(usePathname());
   const { data: review } = usePolling<PendingReview>(
     "/api/runs/pending-review",
-    REVIEW_POLL_MS,
+    NAV_POLL_MS,
   );
+  const { data: queue } = usePolling<QueueSnapshot>("/api/queue", NAV_POLL_MS);
   const pending = review?.pending ?? 0;
+  const queued =
+    queue?.tasks.filter((task) => task.status === "pending").length ?? 0;
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -48,6 +51,12 @@ export function Sidebar() {
               <span className="nav-count">
                 {pending}
                 <span className="sr-only"> runs need review</span>
+              </span>
+            )}
+            {item.href === "/queue/" && queued > 0 && (
+              <span className="nav-count nav-count-muted">
+                {queued}
+                <span className="sr-only"> tasks queued</span>
               </span>
             )}
           </Link>

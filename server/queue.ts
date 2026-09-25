@@ -13,9 +13,8 @@ import {
 import { atomicJson, DomainError, id } from "./storage.js";
 import { TASK_ID, validateFields, validateWorkdir } from "./validation.js";
 
-/** A task input whose "auto" output tokens have already been resolved to a number. */
-export type StoredTaskInput = Omit<TaskInput, "outputTokens"> &
-  Pick<Task, "outputTokens">;
+/** A task input whose "auto" tokens have already been resolved to a number. */
+export type StoredTaskInput = Omit<TaskInput, "tokens"> & Pick<Task, "tokens">;
 export const defaultModel = (provider: Provider) =>
   provider === "claude" ? "opus" : "gpt-6-astra";
 /**
@@ -33,6 +32,12 @@ const MIGRATION_RATES: Record<ModelFamily, number> = {
 const MIGRATION_DEFAULT_RATE = MIGRATION_RATES.opus;
 const MIGRATION_DEFAULT_PERCENT = 25;
 const MILLION = 1_000_000;
+/**
+ * Median ratio of weighted to output tokens over the dispatched runs of the two
+ * weeks before 2026-09-21, used once to convert tasks stored as output tokens
+ * into the weighted tokens the queue keeps now.
+ */
+const MIGRATION_WEIGHTED_PER_OUTPUT = 4.8;
 
 interface QueueState {
   version: 1;
@@ -56,7 +61,7 @@ export function publicTask(task: Task): PublicTask {
     preferredWindowStart: task.preferredWindowStart,
     dependsOn: [...task.dependsOn],
     maxTurns: task.maxTurns,
-    outputTokens: task.outputTokens,
+    tokens: task.tokens,
     sessionCostPercent: null,
   };
 }
@@ -116,10 +121,12 @@ export class QueueStore {
         delete task.budgetEstimate;
         migrated = true;
       }
-      // Task cost moved from a session percent to plan-independent output tokens on 2026-09-15.
+      // Task cost moved from a session percent to plan-independent output tokens on
+      // 2026-09-15, and from output tokens to weighted tokens on 2026-09-21.
       const persisted: {
         sessionCostPercent?: number;
         outputTokens?: number;
+        tokens?: number;
         finishedAt?: string | null;
         dependsOn?: string[];
       } = task;
@@ -127,18 +134,28 @@ export class QueueStore {
         persisted.dependsOn = [];
         migrated = true;
       }
-      if (persisted.outputTokens === undefined) {
-        const family = modelFamily(task.model ?? "");
-        const rate =
-          family === null ? MIGRATION_DEFAULT_RATE : MIGRATION_RATES[family];
-        persisted.outputTokens = Math.round(
-          ((persisted.sessionCostPercent ?? MIGRATION_DEFAULT_PERCENT) / rate) *
-            MILLION,
+      if (persisted.tokens === undefined) {
+        if (persisted.outputTokens === undefined) {
+          const family = modelFamily(task.model ?? "");
+          const rate =
+            family === null ? MIGRATION_DEFAULT_RATE : MIGRATION_RATES[family];
+          persisted.outputTokens = Math.round(
+            ((persisted.sessionCostPercent ?? MIGRATION_DEFAULT_PERCENT) /
+              rate) *
+              MILLION,
+          );
+        }
+        persisted.tokens = Math.round(
+          persisted.outputTokens * MIGRATION_WEIGHTED_PER_OUTPUT,
         );
         migrated = true;
       }
       if (persisted.sessionCostPercent !== undefined) {
         delete persisted.sessionCostPercent;
+        migrated = true;
+      }
+      if (persisted.outputTokens !== undefined) {
+        delete persisted.outputTokens;
         migrated = true;
       }
       if (persisted.finishedAt === undefined) {

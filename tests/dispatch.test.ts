@@ -138,7 +138,7 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
     provider: "claude" as const,
     preferredWindowStart: 8,
     earliestStart: null,
-    outputTokens: 100_000,
+    tokens: 100_000,
   };
   expect(taskGate({ ...base, model: "opus" }, planning, now, []).status).toBe(
     "ready",
@@ -203,7 +203,7 @@ it("ranks quiet start hours, marks whether now is inside one, and names the next
     model: "opus",
     preferredWindowStart: null,
     earliestStart: null,
-    outputTokens: 100_000,
+    tokens: 100_000,
   };
   expect(taskGate(task, eightAm, now, [])).toEqual({
     status: "waiting",
@@ -293,7 +293,7 @@ it("holds a task until its earliest start time and names that time", () => {
     model: "opus",
     preferredWindowStart: 8,
     earliestStart: "2026-09-08T02:00:00Z",
-    outputTokens: 100_000,
+    tokens: 100_000,
   };
   expect(taskGate(task, planning, now, [])).toEqual({
     status: "waiting",
@@ -317,7 +317,7 @@ const pending = {
   model: "opus",
   preferredWindowStart: null,
   earliestStart: null,
-  outputTokens: 100_000,
+  tokens: 100_000,
 };
 const quietRanking = { ranking: [3, 2, 1, 0, 23, 22, 21, 20], error: null };
 
@@ -476,20 +476,18 @@ const anyHour = { ...DEFAULT_DISPATCH_SETTINGS, busyHoursReservePercent: 25 };
 it("waits when session percent plus the expected cost of the task exceeds the cutoff", () => {
   const planning = plan(halfSpent, null, anyHour);
   expect(planning.providers.claude.status).toBe("ready");
-  expect(
-    taskGate({ ...pending, outputTokens: 150_000 }, planning, now, []),
-  ).toEqual({
+  expect(taskGate({ ...pending, tokens: 150_000 }, planning, now, [])).toEqual({
     status: "waiting",
     reason: "Session 60% + 20.7% expected, over the 75% queue cutoff",
     eligibleAt: "2026-09-06T16:09:00.000Z",
   });
   expect(
-    taskGate({ ...pending, outputTokens: 100_000 }, planning, now, []).status,
+    taskGate({ ...pending, tokens: 100_000 }, planning, now, []).status,
   ).toBe("ready");
   // The same tokens cost far more on Fable than on Opus.
   expect(
     taskGate(
-      { ...pending, model: "claude-fable-5-1", outputTokens: 100_000 },
+      { ...pending, model: "claude-fable-5-1", tokens: 100_000 },
       planning,
       now,
       [],
@@ -626,12 +624,20 @@ it("cannot predict a start for a blocked bucket with no known reset", () => {
 it("uses the largest measured cost from previous runs of the same task", () => {
   const otherTask = "b".repeat(24);
   const runs = [
-    { taskId: pending.id, sessionCostPercent: 8 },
-    { taskId: pending.id, sessionCostPercent: 30 },
-    { taskId: pending.id, sessionCostPercent: null },
-    { taskId: otherTask, sessionCostPercent: 90 },
+    { taskId: pending.id, status: "completed" as const, sessionCostPercent: 8 },
+    {
+      taskId: pending.id,
+      status: "completed" as const,
+      sessionCostPercent: 30,
+    },
+    {
+      taskId: pending.id,
+      status: "completed" as const,
+      sessionCostPercent: null,
+    },
+    { taskId: otherTask, status: "completed" as const, sessionCostPercent: 90 },
   ];
-  const small = { ...pending, outputTokens: 20_000 };
+  const small = { ...pending, tokens: 20_000 };
   expect(expectedSessionCost(small, runs, SESSION_RATES)).toBe(30);
   expect(
     expectedSessionCost({ ...small, id: otherTask }, runs, SESSION_RATES),
@@ -646,12 +652,73 @@ it("uses the largest measured cost from previous runs of the same task", () => {
   expect(taskGate(small, planning, now, []).status).toBe("ready");
 });
 
+it("ignores the cost of failed and cancelled runs", () => {
+  const runs = [
+    {
+      taskId: pending.id,
+      status: "failed" as const,
+      sessionCostPercent: 100.1,
+    },
+    {
+      taskId: pending.id,
+      status: "cancelled" as const,
+      sessionCostPercent: 89,
+    },
+  ];
+  const small = { ...pending, tokens: 20_000 };
+  expect(expectedSessionCost(small, runs, SESSION_RATES)).toBe(2.8);
+  expect(
+    expectedSessionCost(
+      small,
+      [
+        ...runs,
+        {
+          taskId: pending.id,
+          status: "completed" as const,
+          sessionCostPercent: 12,
+        },
+      ],
+      SESSION_RATES,
+    ),
+  ).toBe(12);
+});
+
+it("starts a task larger than the whole cutoff only in an empty session", () => {
+  const runs = [
+    {
+      taskId: pending.id,
+      status: "completed" as const,
+      sessionCostPercent: 100.1,
+    },
+  ];
+  const fresh = plan(
+    usageSnapshot({
+      session: { percent: 0, resetsAt: "2026-09-06T16:09:00.000Z" },
+    }),
+    null,
+    anyHour,
+  );
+  expect(taskGate(pending, fresh, now, runs).status).toBe("ready");
+  const touched = plan(
+    usageSnapshot({
+      session: { percent: 1, resetsAt: "2026-09-06T16:09:00.000Z" },
+    }),
+    null,
+    anyHour,
+  );
+  expect(taskGate(pending, touched, now, runs)).toMatchObject({
+    status: "waiting",
+    reason: "Session 1% + 100.1% expected, over the 75% queue cutoff",
+    eligibleAt: "2026-09-06T16:09:00.000Z",
+  });
+});
+
 it("counts only the pending Claude tasks queued ahead of the task", () => {
   const tasks = [
     { ...pending, id: "b".repeat(24) },
     { ...pending, id: "c".repeat(24), status: "running" as const },
     { ...pending, id: "d".repeat(24), provider: "codex" as const },
-    { ...pending, id: "e".repeat(24), outputTokens: 150_000 },
+    { ...pending, id: "e".repeat(24), tokens: 150_000 },
     pending,
     { ...pending, id: "f".repeat(24) },
   ];

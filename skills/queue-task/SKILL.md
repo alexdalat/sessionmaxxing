@@ -17,7 +17,7 @@ auto-dispatches tasks into the quietest five-hour windows, gated by official Cla
 usage. Up to `settings.maxConcurrentRuns` tasks (default 2) run together when their
 work directories belong to different repositories; tasks in the same repository, a
 nested directory, or another worktree of the same repository wait for each other, and
-each running Claude task holds the session percent its own expected output tokens cost
+each running Claude task holds the session percent its own expected tokens cost
 until it finishes. Queue work here instead of burning the current session.
 
 ## 1. Check capacity
@@ -63,7 +63,7 @@ node /home/user/workspace/claude-capacity-dashboard/scripts/queue-task.mjs \
 ```
 
 Other flags: `--provider claude|codex`, `--priority N` (lower runs first),
-`--tokens N|auto` (expected output tokens, `auto` by default),
+`--tokens N|auto` (expected weighted tokens, `auto` by default),
 `--window HH` (0-23; omit for any hour), `--after ISO`, `--url`, `--dry-run`.
 The script prints the usage summary, then the created task id, title, and window.
 

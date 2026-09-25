@@ -5,11 +5,14 @@ import { createInterface } from "node:readline";
 import type {
   ActivityEvent,
   HistoryData,
-  OutputTokens,
   ParsedEvent,
+  WeightedTokens,
 } from "../shared/types.js";
-import { modelFamily } from "../shared/types.js";
-import { emptyOutputTokens } from "./calibration.js";
+import {
+  emptyWeightedTokens,
+  modelFamily,
+  weightedTokens,
+} from "../shared/types.js";
 import { parseTranscript } from "./parser.js";
 
 interface ParsedFile {
@@ -122,12 +125,12 @@ async function sessionFiles(root: string, sessionId: string) {
   return files;
 }
 
-/** Output tokens one dispatched session produced, by model family, subagents included. */
+/** Weighted tokens one dispatched session consumed, by model family, subagents included. */
 export async function readSessionTokens(
   root: string,
   sessionId: string,
-): Promise<OutputTokens> {
-  const tokens = emptyOutputTokens();
+): Promise<WeightedTokens> {
+  const tokens = emptyWeightedTokens();
   const latest = new Map<string, ActivityEvent>();
   const anonymous: ActivityEvent[] = [];
   for (const path of await sessionFiles(root, sessionId)) {
@@ -140,7 +143,7 @@ export async function readSessionTokens(
   for (const event of [...latest.values(), ...anonymous]) {
     // A record whose model the parser did not recognize has no family to charge.
     const family = modelFamily(event.model);
-    if (family !== null) tokens[family] += event.outputTokens;
+    if (family !== null) tokens[family] += weightedTokens(event, family);
   }
   return tokens;
 }

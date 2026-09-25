@@ -795,9 +795,10 @@ it("reports activity per source in the analytics route", async () => {
   });
   try {
     expect((await app.inject("/api/analytics")).json().sources).toEqual([
-      { source: "local", activeMinutes: 1, responses: 1, outputTokens: 2 },
-      { source: "dispatched", activeMinutes: 1, responses: 1, outputTokens: 5 },
-      { source: "unknown", activeMinutes: 0, responses: 0, outputTokens: 0 },
+      // One uncached input token is worth a fifth of an Opus output token.
+      { source: "local", activeMinutes: 1, responses: 1, tokens: 2.2 },
+      { source: "dispatched", activeMinutes: 1, responses: 1, tokens: 5.2 },
+      { source: "unknown", activeMinutes: 0, responses: 0, tokens: 0 },
     ]);
   } finally {
     await app.close();
@@ -842,7 +843,7 @@ it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
   }
 });
 
-it("rejects output tokens outside the allowed range and requires them on create", async () => {
+it("rejects tokens outside the allowed range and requires them on create", async () => {
   const { taskInput } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
@@ -853,15 +854,13 @@ it("rejects output tokens outside the allowed range and requires them on create"
   const post = (payload: object) =>
     app.inject({ method: "POST", url: "/api/tasks", payload });
   try {
-    const { outputTokens: _tokens, ...withoutTokens } = taskInput(temp.path);
+    const { tokens: _tokens, ...withoutTokens } = taskInput(temp.path);
     expect((await post(withoutTokens)).statusCode).toBe(400);
-    for (const outputTokens of [0, 999, 2_000_001, 25.5, "25000", null])
-      expect((await post({ ...withoutTokens, outputTokens })).statusCode).toBe(
-        400,
-      );
-    const created = await post({ ...withoutTokens, outputTokens: 2_000_000 });
+    for (const tokens of [0, 4_999, 10_000_001, 25.5, "25000", null])
+      expect((await post({ ...withoutTokens, tokens })).statusCode).toBe(400);
+    const created = await post({ ...withoutTokens, tokens: 10_000_000 });
     expect(created.statusCode).toBe(201);
-    expect(created.json().outputTokens).toBe(2_000_000);
+    expect(created.json().tokens).toBe(10_000_000);
     // Without a planner no rates are known, so the derived percent stays null.
     expect(created.json().sessionCostPercent).toBeNull();
     expect(
@@ -869,16 +868,16 @@ it("rejects output tokens outside the allowed range and requires them on create"
         await app.inject({
           method: "PATCH",
           url: `/api/tasks/${created.json().id}`,
-          payload: { outputTokens: 999 },
+          payload: { tokens: 4_999 },
         })
       ).statusCode,
     ).toBe(400);
     const patched = await app.inject({
       method: "PATCH",
       url: `/api/tasks/${created.json().id}`,
-      payload: { outputTokens: 7_000 },
+      payload: { tokens: 7_000 },
     });
-    expect(patched.json().outputTokens).toBe(7_000);
+    expect(patched.json().tokens).toBe(7_000);
   } finally {
     await app.close();
     await temp.cleanup();
@@ -960,7 +959,7 @@ it("stamps a run as reviewed and clears the needs-review flag on its task", asyn
   }
 });
 
-it("stores the estimated output tokens when a task is created or edited with auto", async () => {
+it("stores the estimated tokens when a task is created or edited with auto", async () => {
   const { taskInput } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
@@ -980,18 +979,18 @@ it("stores the estimated output tokens when a task is created or edited with aut
     const created = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { ...taskInput(temp.path), outputTokens: "auto" },
+      payload: { ...taskInput(temp.path), tokens: "auto" },
     });
     expect(created.statusCode).toBe(201);
-    expect(created.json().outputTokens).toBe(31_000);
+    expect(created.json().tokens).toBe(31_000);
     const patched = await app.inject({
       method: "PATCH",
       url: `/api/tasks/${created.json().id}`,
-      payload: { title: "Edited", outputTokens: "auto" },
+      payload: { title: "Edited", tokens: "auto" },
     });
-    expect(patched.json().outputTokens).toBe(62_000);
+    expect(patched.json().tokens).toBe(62_000);
     expect(estimated).toEqual(["Fix a test", "Edited"]);
-    expect(queue.snapshot().tasks[0].outputTokens).toBe(62_000);
+    expect(queue.snapshot().tasks[0].tokens).toBe(62_000);
   } finally {
     await app.close();
     await temp.cleanup();
@@ -1015,7 +1014,7 @@ it("hands the estimator what earlier runs were estimated to produce", async () =
       return 31_000;
     },
   });
-  const submitted = { ...taskInput(temp.path), outputTokens: 210_000 };
+  const submitted = { ...taskInput(temp.path), tokens: 210_000 };
   try {
     const created = await app.inject({
       method: "POST",
@@ -1031,7 +1030,7 @@ it("hands the estimator what earlier runs were estimated to produce", async () =
     await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { ...taskInput(temp.path), outputTokens: "auto" },
+      payload: { ...taskInput(temp.path), tokens: "auto" },
     });
     expect(histories.at(-1)).toEqual([
       {
@@ -1039,8 +1038,8 @@ it("hands the estimator what earlier runs were estimated to produce", async () =
         promptLength: submitted.prompt.length,
         model: created.json().model,
         durationMs: expect.any(Number),
-        outputTokens: null,
-        estimatedOutputTokens: 210_000,
+        tokens: null,
+        estimatedTokens: 210_000,
       },
     ]);
   } finally {
@@ -1067,7 +1066,7 @@ it("refuses to queue an auto-token task when the estimate fails", async () => {
     const created = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { ...taskInput(temp.path), outputTokens: "auto" },
+      payload: { ...taskInput(temp.path), tokens: "auto" },
     });
     expect(created.statusCode).toBe(500);
     expect(created.json().error).toBe("Claude session is exhausted");
@@ -1161,8 +1160,8 @@ it("fits the session rates from official samples and local transcripts, and pric
     now: () => now,
     loadHistory: async () => ({
       events: [
-        event("2026-09-06T01:00:00.000Z", 300_000),
-        event("2026-09-06T06:00:00.000Z", 150_000),
+        event("2026-09-06T01:00:00.000Z", 1_500_000),
+        event("2026-09-06T06:00:00.000Z", 750_000),
       ],
       health: { files: 2, lines: 2, warnings: 0, historyEntries: 0 },
     }),
@@ -1170,20 +1169,20 @@ it("fits the session rates from official samples and local transcripts, and pric
   try {
     await usage.refresh();
     const planning = (await app.inject("/api/dispatch-settings")).json();
-    // Both windows spent 40% per 300k Opus output tokens; the families the
+    // Both windows spent 40% per 1.5M Opus tokens; the families the
     // sample never covered are priced off Opus at their list-price ratio.
     expect(planning.rates).toEqual({
-      fable: 266.7,
-      opus: 133.3,
-      sonnet: 53.3,
-      haiku: 26.7,
+      fable: 53.3,
+      opus: 26.7,
+      sonnet: 10.7,
+      haiku: 5.3,
     });
     const created = await app.inject({
       method: "POST",
       url: "/api/tasks",
-      payload: { ...taskInput(temp.path), outputTokens: 150_000 },
+      payload: { ...taskInput(temp.path), tokens: 150_000 },
     });
-    expect(created.json().sessionCostPercent).toBe(20);
+    expect(created.json().sessionCostPercent).toBe(4);
   } finally {
     await app.close();
     await temp.cleanup();

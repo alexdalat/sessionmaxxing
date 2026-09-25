@@ -23,10 +23,7 @@ import {
   emptyQuerySchema,
   settingsSchema,
 } from "./dispatch-settings.js";
-import {
-  estimateOutputTokens,
-  type OutputTokensEstimator,
-} from "./estimate.js";
+import { estimateTokens, type TokensEstimator } from "./estimate.js";
 import { createHistoryReader } from "./history.js";
 import { planScore } from "./plan-score.js";
 import type { QueueStore } from "./queue.js";
@@ -51,7 +48,7 @@ export interface AppOptions {
   keeper?: SessionKeeper;
   now?: () => Date;
   quietHoursTtlMs?: number;
-  estimate?: OutputTokensEstimator;
+  estimate?: TokensEstimator;
   /** Overrides the fitted session rates; by default they are fitted from samples and transcripts. */
   sessionRates?: () => Promise<SessionRates | null>;
 }
@@ -229,7 +226,7 @@ export async function createApp(options: AppOptions = {}) {
       options.queue,
       options.runner,
       now,
-      options.estimate ?? estimateOutputTokens,
+      options.estimate ?? estimateTokens,
       planning,
       options.keeper,
     );

@@ -7,19 +7,21 @@ import { usePolling } from "@/app/hooks/usePolling";
 import { api } from "@/app/lib/api";
 import {
   type DeployStatus,
+  formatTokens,
   localTimestamp,
   MODEL_FAMILIES,
   needsReview,
-  type OutputTokens,
   PROVIDER_LABELS,
   type Run,
+  type WeightedTokens,
 } from "@/shared/types";
 
-const THOUSAND = 1000;
-const tokenTotal = (tokens: OutputTokens | null) =>
+const tokenTotal = (tokens: WeightedTokens | null) =>
   tokens === null
     ? "—"
-    : `${Math.round(MODEL_FAMILIES.reduce((sum, family) => sum + tokens[family], 0) / THOUSAND)}k`;
+    : formatTokens(
+        MODEL_FAMILIES.reduce((sum, family) => sum + tokens[family], 0),
+      );
 
 type BadgeVariant = "success" | "warning" | "info";
 const statusVariants: Record<Run["status"], BadgeVariant> = {
@@ -162,8 +164,8 @@ export function Runs() {
               </dd>
             </div>
             <div>
-              <dt>Output tokens</dt>
-              <dd>{tokenTotal(run.outputTokens)}</dd>
+              <dt>Tokens</dt>
+              <dd>{tokenTotal(run.tokens)}</dd>
             </div>
           </dl>
           {run.endedAt && (

@@ -178,7 +178,7 @@ it("drops legacy budget estimates from saved tasks atomically without losing the
   }
 });
 
-it("converts tasks saved as a session percent into output tokens at the rates of that plan", async () => {
+it("converts tasks saved as a session percent or as output tokens into weighted tokens", async () => {
   const temp = await temporary();
   try {
     const queue = await QueueStore.open(temp.path);
@@ -199,20 +199,27 @@ it("converts tasks saved as a session percent into output tokens at the rates of
       JSON.stringify({
         ...current,
         tasks: current.tasks.map(
-          ({ outputTokens: _tokens, ...task }: Task, index: number) =>
-            index === 0 ? task : { ...task, sessionCostPercent: 40 },
+          ({ tokens: _tokens, ...task }: Task, index: number) =>
+            index === 0
+              ? { ...task, outputTokens: 100_000 }
+              : { ...task, sessionCostPercent: 40 },
         ),
       }),
     );
     const migrated = (await QueueStore.open(temp.path)).snapshot().tasks;
-    // 25% of a session at the Opus rate of 138 points per million output tokens.
-    expect(migrated[0].outputTokens).toBe(181_159);
-    expect(migrated[1].outputTokens).toBe(112_045);
-    expect(migrated[2].outputTokens).toBe(289_855);
-    for (const task of migrated)
+    // Output tokens count 4.8 times over; 40% of a session at the Fable rate of 357
+    // points per million output tokens is 112,045 of them, and 289,855 at the Opus rate of 138.
+    expect(migrated[0].tokens).toBe(480_000);
+    expect(migrated[1].tokens).toBe(537_816);
+    expect(migrated[2].tokens).toBe(1_391_304);
+    for (const task of migrated) {
       expect(task).not.toHaveProperty("sessionCostPercent", expect.any(Number));
+      expect(task).not.toHaveProperty("outputTokens");
+    }
     const saved = JSON.parse(await readFile(path, "utf8")).tasks;
-    expect(saved[1].outputTokens).toBe(112_045);
+    expect(saved[0].tokens).toBe(480_000);
+    expect(saved[0].outputTokens).toBeUndefined();
+    expect(saved[1].tokens).toBe(537_816);
     expect(saved[1].sessionCostPercent).toBeUndefined();
   } finally {
     await temp.cleanup();

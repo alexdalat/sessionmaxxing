@@ -211,11 +211,11 @@ it("lets a small task start when a larger one ahead of it lacks headroom", async
     await monitor.refresh();
     const large = await queue.create({
       ...taskInput(temp.path),
-      outputTokens: 150_000,
+      tokens: 150_000,
     });
     const small = await queue.create({
       ...taskInput(temp.path),
-      outputTokens: 50_000,
+      tokens: 50_000,
       priority: 1,
     });
     await queue.setAutoDispatch(true);

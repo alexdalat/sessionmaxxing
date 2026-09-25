@@ -42,7 +42,7 @@ it("builds the task body from flags without posting when asked for a dry run", a
     earliestStart: null,
     preferredWindowStart: 3,
     maxTurns: 5,
-    outputTokens: 40000,
+    tokens: 40000,
     dependsOn: [],
     model: "claude-fable-5-1",
   });
@@ -98,7 +98,7 @@ it("queues an unscheduled task against the running dashboard and keeps the promp
       provider: "claude",
       preferredWindowStart: null,
       maxTurns: 500,
-      outputTokens: 75_000,
+      tokens: 75_000,
     });
     expect(stdout).toContain(`Queued ${tasks[0].id}`);
   } finally {
@@ -119,7 +119,7 @@ it("leaves the output tokens for the server to estimate unless a number is given
     "--dry-run",
   ]);
   expect(JSON.parse(auto.stdout)).toMatchObject({
-    outputTokens: "auto",
+    tokens: "auto",
     maxTurns: 500,
   });
   const byDefault = await run(process.execPath, [
@@ -130,7 +130,7 @@ it("leaves the output tokens for the server to estimate unless a number is given
     PROMPT,
     "--dry-run",
   ]);
-  expect(JSON.parse(byDefault.stdout).outputTokens).toBe("auto");
+  expect(JSON.parse(byDefault.stdout).tokens).toBe("auto");
 });
 
 const dryRunWorkdir = (workdir: string) =>

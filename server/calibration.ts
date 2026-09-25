@@ -1,11 +1,14 @@
 import {
   type ActivityEvent,
+  emptyWeightedTokens,
+  FAMILY_PRICING,
   MODEL_FAMILIES,
   type ModelFamily,
   modelFamily,
-  type OutputTokens,
   type SessionRates,
   type SessionWindow,
+  type WeightedTokens,
+  weightedTokens,
 } from "../shared/types.js";
 
 /** Days of official samples the fit uses, short enough that a plan change re-calibrates within two weeks. */
@@ -15,22 +18,18 @@ const MILLION = 1_000_000;
 const FULL_PERCENT = 100;
 /** Below this peak the meter's own rounding is a large share of the reading. */
 const MIN_PEAK_PERCENT = 8;
-/** Output tokens a family needs across the sample before its own fitted rate is trusted. */
-const MIN_FAMILY_TOKENS = 200_000;
-/** List price per million output tokens; the ratio a family with too little usage is priced at. */
-const FAMILY_PRICE: Record<ModelFamily, number> = {
-  fable: 50,
-  opus: 25,
-  sonnet: 10,
-  haiku: 5,
-};
+/** Weighted tokens a family needs across the sample before its own fitted rate is trusted. */
+const MIN_FAMILY_TOKENS = 1_000_000;
+/** The ratio a family with too little usage is priced at. */
+const familyPrice = (family: ModelFamily) =>
+  FAMILY_PRICING[family].outputTokens;
 const MAX_PASSES = 500;
 const CONVERGED = 1e-6;
 
-/** One five-hour window: the peak the meter reported and the output tokens produced inside it. */
+/** One five-hour window: the peak the meter reported and the weighted tokens consumed inside it. */
 export interface WindowTokens {
   peakPercent: number;
-  outputTokens: OutputTokens;
+  tokens: WeightedTokens;
 }
 export interface SessionCalibration {
   rates: SessionRates | null;
@@ -38,13 +37,6 @@ export interface SessionCalibration {
 }
 
 const round = (value: number) => Math.round(value * 10) / 10;
-
-export const emptyOutputTokens = (): OutputTokens => ({
-  fable: 0,
-  opus: 0,
-  sonnet: 0,
-  haiku: 0,
-});
 
 export function windowTokens(
   windows: SessionWindow[],
@@ -58,7 +50,7 @@ export function windowTokens(
             peakPercent: window.peakPercent,
             start: Date.parse(window.start),
             end: Date.parse(window.end),
-            outputTokens: emptyOutputTokens(),
+            tokens: emptyWeightedTokens(),
           },
         ],
   );
@@ -68,12 +60,9 @@ export function windowTokens(
     const at = Date.parse(event.timestamp);
     for (const span of spans)
       if (at >= span.start && at < span.end)
-        span.outputTokens[family] += event.outputTokens;
+        span.tokens[family] += weightedTokens(event, family);
   }
-  return spans.map(({ peakPercent, outputTokens }) => ({
-    peakPercent,
-    outputTokens,
-  }));
+  return spans.map(({ peakPercent, tokens }) => ({ peakPercent, tokens }));
 }
 
 /**
@@ -90,9 +79,7 @@ export function fitSessionRates(windows: WindowTokens[]): SessionRates | null {
   if (usable.length === 0) return null;
   const rows = usable.map((window) => ({
     peak: window.peakPercent,
-    millions: MODEL_FAMILIES.map(
-      (family) => window.outputTokens[family] / MILLION,
-    ),
+    millions: MODEL_FAMILIES.map((family) => window.tokens[family] / MILLION),
   }));
   const fitted = MODEL_FAMILIES.map(() => 0);
   for (let pass = 0; pass < MAX_PASSES; pass++) {
@@ -127,20 +114,20 @@ export function fitSessionRates(windows: WindowTokens[]): SessionRates | null {
   const anchor = fittedIndexes.reduce((best, index) =>
     mass[index] > mass[best] ? index : best,
   );
-  const anchorPrice = FAMILY_PRICE[MODEL_FAMILIES[anchor]];
+  const anchorPrice = familyPrice(MODEL_FAMILIES[anchor]);
   const rates = {} as SessionRates;
   MODEL_FAMILIES.forEach((family, index) => {
     rates[family] = round(
       fittedIndexes.includes(index)
         ? fitted[index]
-        : (fitted[anchor] * FAMILY_PRICE[family]) / anchorPrice,
+        : (fitted[anchor] * familyPrice(family)) / anchorPrice,
     );
   });
   return rates;
 }
 
 export function sessionPercent(
-  tokens: OutputTokens,
+  tokens: WeightedTokens,
   rates: SessionRates,
 ): number {
   return round(
@@ -196,7 +183,7 @@ export class SessionRatesCache {
   }
 }
 
-/** Session percent `tokens` output tokens cost when a run of `model` produces them. */
+/** Session percent `tokens` weighted tokens cost when a run of `model` consumes them. */
 export function modelSessionPercent(
   tokens: number,
   model: string,

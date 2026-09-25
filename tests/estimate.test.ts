@@ -3,9 +3,9 @@ import {
   ESTIMATOR_MODEL,
   type EstimateRun,
   estimateCorrection,
-  estimateOutputTokens,
+  estimateTokens,
 } from "../server/estimate.js";
-import { MAX_OUTPUT_TOKENS, MIN_OUTPUT_TOKENS } from "../shared/types.js";
+import { MAX_TOKENS, MIN_TOKENS } from "../shared/types.js";
 import { fakeChild } from "./helpers";
 
 const TASK = {
@@ -20,16 +20,16 @@ const HISTORY: EstimateRun[] = [
     promptLength: 420,
     model: "opus",
     durationMs: 20 * 60_000,
-    outputTokens: { fable: 87_400, opus: 12_100, sonnet: 0, haiku: 0 },
-    estimatedOutputTokens: 100_000,
+    tokens: { fable: 87_400, opus: 12_100, sonnet: 0, haiku: 0 },
+    estimatedTokens: 100_000,
   },
   {
     title: "Fix the heatmap",
     promptLength: 120,
     model: "sonnet",
     durationMs: 4 * 60_000,
-    outputTokens: null,
-    estimatedOutputTokens: 30_000,
+    tokens: null,
+    estimatedTokens: 30_000,
   },
 ];
 
@@ -52,16 +52,16 @@ function fakeEstimator(code: number, stdout: string, stderr = "") {
 const argumentAfter = (args: string[], flag: string) =>
   args[args.indexOf(flag) + 1];
 
-it("returns the output tokens the estimator model reports for the task", async () => {
+it("returns the weighted tokens the estimator model reports for the task", async () => {
   const spawnProcess = fakeEstimator(
     0,
     JSON.stringify({
-      result: '{"outputTokens":14000}',
-      structured_output: { outputTokens: 14000 },
+      result: '{"tokens":140000}',
+      structured_output: { tokens: 140000 },
     }),
   );
-  await expect(estimateOutputTokens(TASK, HISTORY, spawnProcess)).resolves.toBe(
-    14000,
+  await expect(estimateTokens(TASK, HISTORY, spawnProcess)).resolves.toBe(
+    140000,
   );
   const [command, args] = spawnProcess.mock.calls[0] as unknown as [
     string,
@@ -71,18 +71,18 @@ it("returns the output tokens the estimator model reports for the task", async (
   expect(argumentAfter(args, "--model")).toBe(ESTIMATOR_MODEL);
   expect(JSON.parse(argumentAfter(args, "--json-schema"))).toMatchObject({
     properties: {
-      outputTokens: {
+      tokens: {
         type: "integer",
-        minimum: MIN_OUTPUT_TOKENS,
-        maximum: MAX_OUTPUT_TOKENS,
+        minimum: MIN_TOKENS,
+        maximum: MAX_TOKENS,
       },
     },
-    required: ["outputTokens"],
+    required: ["tokens"],
   });
   const prompt = argumentAfter(args, "-p");
   expect(prompt).toContain(TASK.prompt);
   expect(prompt).toContain("Add the runs route");
-  expect(prompt).toContain("87k fable + 12k opus output tokens");
+  expect(prompt).toContain("87k fable + 12k opus tokens");
   expect(prompt).toContain(
     "Fix the heatmap | 120 prompt chars | sonnet | 4 min | unknown",
   );
@@ -91,11 +91,9 @@ it("returns the output tokens the estimator model reports for the task", async (
 it("reads the estimate from the result text when no structured output is returned", async () => {
   const spawnProcess = fakeEstimator(
     0,
-    JSON.stringify({ result: '{"outputTokens":45000}' }),
+    JSON.stringify({ result: '{"tokens":45000}' }),
   );
-  await expect(estimateOutputTokens(TASK, [], spawnProcess)).resolves.toBe(
-    45000,
-  );
+  await expect(estimateTokens(TASK, [], spawnProcess)).resolves.toBe(45000);
 });
 
 it("fails with the last stderr line when the estimator exits non-zero", async () => {
@@ -104,39 +102,39 @@ it("fails with the last stderr line when the estimator exits non-zero", async ()
     "",
     "warming up\nCredit balance is too low\n",
   );
-  await expect(estimateOutputTokens(TASK, [], spawnProcess)).rejects.toThrow(
-    "Could not estimate output tokens: Credit balance is too low",
+  await expect(estimateTokens(TASK, [], spawnProcess)).rejects.toThrow(
+    "Could not estimate tokens: Credit balance is too low",
   );
 });
 
 it("fails instead of defaulting when the estimator returns tokens out of range", async () => {
   const spawnProcess = fakeEstimator(
     0,
-    JSON.stringify({ structured_output: { outputTokens: 9_000_000 } }),
+    JSON.stringify({ structured_output: { tokens: 90_000_000 } }),
   );
-  await expect(estimateOutputTokens(TASK, [], spawnProcess)).rejects.toThrow(
-    /^Could not estimate output tokens: the model returned 9000000/,
+  await expect(estimateTokens(TASK, [], spawnProcess)).rejects.toThrow(
+    /^Could not estimate tokens: the model returned 90000000/,
   );
 });
 
 it("fails when the estimator output is not JSON", async () => {
   const spawnProcess = fakeEstimator(0, "claude: command not understood");
-  await expect(estimateOutputTokens(TASK, [], spawnProcess)).rejects.toThrow(
-    /^Could not estimate output tokens: /,
+  await expect(estimateTokens(TASK, [], spawnProcess)).rejects.toThrow(
+    /^Could not estimate tokens: /,
   );
 });
 
 const measuredRun = (
   model: string,
-  estimatedOutputTokens: number,
+  estimatedTokens: number,
   measured: number,
 ): EstimateRun => ({
   title: `${model} run`,
   promptLength: 300,
   model,
   durationMs: 10 * 60_000,
-  outputTokens: { fable: 0, opus: 0, sonnet: 0, haiku: 0, [model]: measured },
-  estimatedOutputTokens,
+  tokens: { fable: 0, opus: 0, sonnet: 0, haiku: 0, [model]: measured },
+  estimatedTokens,
 });
 const runs = (
   count: number,
@@ -164,8 +162,8 @@ it("corrects by the median of what past runs actually produced", () => {
 
 it("ignores runs with no measured tokens and no recorded estimate", () => {
   const unusable: EstimateRun[] = [
-    { ...measuredRun("opus", 100_000, 0), outputTokens: null },
-    { ...measuredRun("opus", 0, 900_000), estimatedOutputTokens: null },
+    { ...measuredRun("opus", 100_000, 0), tokens: null },
+    { ...measuredRun("opus", 0, 900_000), estimatedTokens: null },
     measuredRun("opus", 100_000, 0),
   ];
   expect(
@@ -205,19 +203,19 @@ it("keeps the correction inside its bounds when history is extreme", () => {
 it("scales the estimator's answer by the correction its history earns", async () => {
   const spawnProcess = fakeEstimator(
     0,
-    JSON.stringify({ structured_output: { outputTokens: 200_000 } }),
+    JSON.stringify({ structured_output: { tokens: 200_000 } }),
   );
   await expect(
-    estimateOutputTokens(TASK, runs(5, "opus", 100_000, 50_000), spawnProcess),
+    estimateTokens(TASK, runs(5, "opus", 100_000, 50_000), spawnProcess),
   ).resolves.toBe(100_000);
 });
 
 it("never corrects an estimate below the smallest one a task may hold", async () => {
   const spawnProcess = fakeEstimator(
     0,
-    JSON.stringify({ structured_output: { outputTokens: MIN_OUTPUT_TOKENS } }),
+    JSON.stringify({ structured_output: { tokens: MIN_TOKENS } }),
   );
   await expect(
-    estimateOutputTokens(TASK, runs(5, "opus", 100_000, 25_000), spawnProcess),
-  ).resolves.toBe(MIN_OUTPUT_TOKENS);
+    estimateTokens(TASK, runs(5, "opus", 100_000, 25_000), spawnProcess),
+  ).resolves.toBe(MIN_TOKENS);
 });

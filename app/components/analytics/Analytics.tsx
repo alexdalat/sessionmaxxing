@@ -76,7 +76,7 @@ function SourceMix({ sources }: { sources: SourceActivity[] }) {
             key={row.label}
             title={
               row.measured
-                ? `${formatNumber(row.activeMinutes)} active minutes · ${formatNumber(row.outputTokens)} output tokens`
+                ? `${formatNumber(row.activeMinutes)} active minutes · ${formatNumber(Math.round(row.tokens))} weighted tokens`
                 : EXTERNAL_SOURCE_TITLE
             }
           >

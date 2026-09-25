@@ -253,17 +253,17 @@ it("admits Claude tasks only while the session budget covers every running task'
     const store = await QueueStore.open(temp.path);
     const first = await store.create({
       ...taskInput(a),
-      outputTokens: 150_000,
+      tokens: 150_000,
       priority: 0,
     });
     const second = await store.create({
       ...taskInput(b),
-      outputTokens: 150_000,
+      tokens: 150_000,
       priority: 1,
     });
     const third = await store.create({
       ...taskInput(c),
-      outputTokens: 150_000,
+      tokens: 150_000,
       priority: 2,
     });
     const codex = await store.create({
@@ -676,7 +676,7 @@ it("gates Fable tasks on Fable reservations and other Claude tasks on the weekly
     model: "fable",
     preferredWindowStart: null,
     earliestStart: null,
-    outputTokens: 20_000,
+    tokens: 20_000,
   };
   const oneFableRunning: DispatchLoad = {
     lastRunEndedAt: null,

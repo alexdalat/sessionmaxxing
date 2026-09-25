@@ -1,252 +1,242 @@
 [
   {
-    "start": "2026-09-06T21:10:00.000Z",
+    "start": "2026-09-06T21:09:59.925Z",
     "peakPercent": 94,
-    "outputTokens": {
-      "fable": 208057,
-      "opus": 122294,
+    "tokens": {
+      "fable": 535340,
+      "opus": 727232,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-07T02:20:00.000Z",
+    "start": "2026-09-07T02:19:59.851Z",
     "peakPercent": 77,
-    "outputTokens": {
-      "fable": 212510,
-      "opus": 82871,
-      "sonnet": 76818,
+    "tokens": {
+      "fable": 725489,
+      "opus": 445853,
+      "sonnet": 645184,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-07T12:40:00.000Z",
+    "start": "2026-09-07T12:39:59.552Z",
     "peakPercent": 85,
-    "outputTokens": {
-      "fable": 198037,
-      "opus": 104512,
+    "tokens": {
+      "fable": 572069,
+      "opus": 688819,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-07T17:40:00.000Z",
+    "start": "2026-09-07T17:39:59.880Z",
     "peakPercent": 100,
-    "outputTokens": {
-      "fable": 103720,
-      "opus": 170803,
+    "tokens": {
+      "fable": 288680,
+      "opus": 599810,
       "sonnet": 0,
-      "haiku": 4507
+      "haiku": 25257
     }
   },
   {
-    "start": "2026-09-08T00:50:00.000Z",
+    "start": "2026-09-08T00:49:59.942Z",
     "peakPercent": 57,
-    "outputTokens": {
-      "fable": 125660,
-      "opus": 86921,
-      "sonnet": 2107,
-      "haiku": 26559
+    "tokens": {
+      "fable": 330612,
+      "opus": 614553,
+      "sonnet": 30902,
+      "haiku": 89707
     }
   },
   {
-    "start": "2026-09-08T13:00:00.000Z",
+    "start": "2026-09-08T13:00:00.331Z",
     "peakPercent": 6,
-    "outputTokens": {
-      "fable": 4108,
+    "tokens": {
+      "fable": 56654,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-08T21:00:00.000Z",
+    "start": "2026-09-08T20:59:59.541Z",
     "peakPercent": 4,
-    "outputTokens": {
-      "fable": 5127,
+    "tokens": {
+      "fable": 15343,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-09T04:00:00.000Z",
+    "start": "2026-09-09T03:59:59.636Z",
     "peakPercent": 41,
-    "outputTokens": {
+    "tokens": {
       "fable": 0,
-      "opus": 319705,
+      "opus": 1753512,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-09T09:00:00.000Z",
+    "start": "2026-09-09T08:59:59.769Z",
     "peakPercent": 36,
-    "outputTokens": {
-      "fable": 3615,
-      "opus": 277009,
+    "tokens": {
+      "fable": 15888,
+      "opus": 739038,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-09T14:00:00.000Z",
+    "start": "2026-09-09T13:59:59.852Z",
     "peakPercent": 100,
-    "outputTokens": {
-      "fable": 150532,
-      "opus": 140230,
+    "tokens": {
+      "fable": 452505,
+      "opus": 537453,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-09T19:00:00.000Z",
+    "start": "2026-09-09T18:59:59.992Z",
     "peakPercent": 15,
-    "outputTokens": {
-      "fable": 7228,
+    "tokens": {
+      "fable": 63936,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-10T01:30:00.000Z",
+    "start": "2026-09-10T01:30:00.039Z",
     "peakPercent": 75,
-    "outputTokens": {
-      "fable": 106772,
-      "opus": 116292,
+    "tokens": {
+      "fable": 298286,
+      "opus": 620374,
       "sonnet": 0,
-      "haiku": 10684
+      "haiku": 97566
     }
   },
   {
-    "start": "2026-09-10T06:30:00.000Z",
+    "start": "2026-09-10T06:29:59.981Z",
     "peakPercent": 53,
-    "outputTokens": {
+    "tokens": {
       "fable": 0,
-      "opus": 375253,
+      "opus": 2068473,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-10T13:00:00.000Z",
+    "start": "2026-09-10T12:59:59.205Z",
     "peakPercent": 8,
-    "outputTokens": {
+    "tokens": {
       "fable": 0,
-      "opus": 52314,
+      "opus": 328768,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-10T18:00:00.000Z",
+    "start": "2026-09-10T18:00:00.352Z",
     "peakPercent": 10,
-    "outputTokens": {
+    "tokens": {
       "fable": 0,
-      "opus": 1914,
+      "opus": 48403,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-11T00:40:00.000Z",
+    "start": "2026-09-11T00:40:00.486Z",
     "peakPercent": 35,
-    "outputTokens": {
-      "fable": 30358,
-      "opus": 97242,
-      "sonnet": 17791,
+    "tokens": {
+      "fable": 104946,
+      "opus": 421670,
+      "sonnet": 67161,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-11T13:30:00.000Z",
+    "start": "2026-09-11T13:30:00.292Z",
     "peakPercent": 9,
-    "outputTokens": {
-      "fable": 15089,
+    "tokens": {
+      "fable": 47068,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-11T21:00:00.000Z",
+    "start": "2026-09-11T21:00:00.452Z",
     "peakPercent": 3,
-    "outputTokens": {
-      "fable": 2070,
+    "tokens": {
+      "fable": 10243,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-12T21:00:00.000Z",
+    "start": "2026-09-12T21:00:00.117Z",
     "peakPercent": 4,
-    "outputTokens": {
-      "fable": 3929,
+    "tokens": {
+      "fable": 18327,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-13T18:50:00.000Z",
+    "start": "2026-09-13T18:50:00.179Z",
     "peakPercent": 22,
-    "outputTokens": {
-      "fable": 53218,
-      "opus": 50459,
+    "tokens": {
+      "fable": 142580,
+      "opus": 218288,
       "sonnet": 0,
-      "haiku": 16619
+      "haiku": 81346
     }
   },
   {
-    "start": "2026-09-14T01:40:00.000Z",
+    "start": "2026-09-14T01:40:00.932Z",
     "peakPercent": 100,
-    "outputTokens": {
-      "fable": 138962,
-      "opus": 5625,
-      "sonnet": 69277,
-      "haiku": 30005
+    "tokens": {
+      "fable": 132360,
+      "opus": 45353,
+      "sonnet": 178194,
+      "haiku": 79138
     }
   },
   {
-    "start": "2026-09-14T06:40:00.000Z",
+    "start": "2026-09-14T06:40:00.459Z",
     "peakPercent": 100,
-    "outputTokens": {
-      "fable": 223547,
-      "opus": 29713,
+    "tokens": {
+      "fable": 515588,
+      "opus": 117196,
       "sonnet": 0,
-      "haiku": 30422
+      "haiku": 93511
     }
   },
   {
-    "start": "2026-09-14T13:40:00.000Z",
+    "start": "2026-09-14T13:39:59.826Z",
     "peakPercent": 32,
-    "outputTokens": {
-      "fable": 43186,
+    "tokens": {
+      "fable": 99229,
       "opus": 0,
       "sonnet": 0,
       "haiku": 0
     }
   },
   {
-    "start": "2026-09-14T18:40:00.000Z",
+    "start": "2026-09-14T18:40:00.453Z",
     "peakPercent": 5,
-    "outputTokens": {
+    "tokens": {
       "fable": 0,
-      "opus": 18511,
+      "opus": 86737,
       "sonnet": 0,
       "haiku": 0
-    }
-  },
-  {
-    "start": "2026-09-15T01:00:00.000Z",
-    "peakPercent": 33,
-    "outputTokens": {
-      "fable": 37293,
-      "opus": 7051,
-      "sonnet": 0,
-      "haiku": 43755
     }
   }
 ]
