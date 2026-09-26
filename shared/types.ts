@@ -62,9 +62,25 @@ export interface DailyActivity extends ActivityCount {
   /** Active minutes, each minute owned by one model; only models with minutes appear. */
   models: Record<string, number>;
 }
+/** Active minutes owned by one model or project inside a heatmap cell. */
+export interface HeatShare {
+  name: string;
+  activeMinutes: number;
+}
+export const HEATMAP_TOP_SHARES = 3;
 export interface HeatCell extends ActivityCount {
   day: number;
   hour: number;
+  /** Active minutes ÷ the number of times this weekday occurs in the selected range. */
+  averageActiveMinutes: number;
+  /** Active minutes, each minute owned by one source; every source key is present. */
+  sources: Record<ActivitySource, number>;
+  /** Up to HEATMAP_TOP_SHARES models by active minutes, largest first. */
+  models: HeatShare[];
+  /** Up to HEATMAP_TOP_SHARES projects by active minutes, largest first. */
+  projects: HeatShare[];
+  /** Weighted tokens of every response whose model family is known. */
+  tokens: number;
 }
 export interface Mix {
   name: string;
@@ -402,6 +418,19 @@ export interface Run {
   reviewedAt: string | null;
   preview: string[];
 }
+export const COMMIT_SUBJECT_MAX = 72;
+/** Room to edit past the suggested length; still one line. */
+export const COMMIT_MESSAGE_MAX = 120;
+export const CONVENTIONAL_SUBJECT =
+  /^(feat|fix|refactor|perf|test|docs|chore|style|build|ci)(\([^()\r\n]+\))?!?: \S[^\r\n]*$/;
+/** Whether a finished run left edits in its work directory that nothing has committed yet. */
+export const needsCommit = <T extends Pick<Run, "reviewedAt" | "changes">>(
+  run: T,
+): run is T & { changes: RunChanges } =>
+  run.reviewedAt === null &&
+  run.changes !== null &&
+  run.changes.files.length > 0 &&
+  run.changes.commits === 0;
 const REVIEWED_ON_MERGE = ["main", "master"];
 /** Whether a finished run left work a person still has to look at. */
 export function needsReview(run: Run): boolean {

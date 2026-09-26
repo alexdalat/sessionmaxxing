@@ -29,9 +29,7 @@ import {
 import { formatNumber, sourceRows } from "@/app/lib/analyticsRows";
 import { CHART_CURSOR_FILL, TOOLTIP_STYLE } from "@/app/lib/chart";
 import type { Analytics, Mix, SourceActivity } from "@/shared/types";
-import { HOURS, hourLabel, shortHourLabel } from "@/shared/types";
-
-const weekdays = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+import { Heatmap } from "./Heatmap";
 
 function MixList({ title, items }: { title: string; items: Mix[] }) {
   const max = Math.max(1, ...items.map((i) => i.responses));
@@ -101,8 +99,13 @@ function SourceMix({ sources }: { sources: SourceActivity[] }) {
   );
 }
 
-export function AnalyticsView({ data }: { data: Analytics }) {
-  const max = Math.max(1, ...data.heatmap.map((c) => c.activeMinutes));
+export function AnalyticsView({
+  data,
+  quietStartHours,
+}: {
+  data: Analytics;
+  quietStartHours?: number;
+}) {
   const [breakdown, setBreakdown] = useState<Breakdown>("source");
   const { keys, rows } = activitySeries(data.daily, breakdown);
   return (
@@ -132,50 +135,7 @@ export function AnalyticsView({ data }: { data: Analytics }) {
           </section>
         ))}
       </div>
-      <section className="panel">
-        <div className="section-heading">
-          <h2>Busy hours by weekday</h2>
-        </div>
-        <div className="table-scroll">
-          <table className="heatmap">
-            <thead>
-              <tr>
-                <th scope="col">Day</th>
-                {HOURS.map((h) => (
-                  <th scope="col" key={h}>
-                    {shortHourLabel(h)}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {weekdays.map((day, d) => (
-                <tr key={day}>
-                  <th scope="row">{day}</th>
-                  {data.heatmap
-                    .filter((c) => c.day === d)
-                    .map((c) => (
-                      <td key={c.hour}>
-                        <button
-                          type="button"
-                          style={{
-                            backgroundColor: c.activeMinutes
-                              ? `rgb(113 112 255 / ${0.2 + (0.8 * c.activeMinutes) / max})`
-                              : "#191a1b",
-                          }}
-                          aria-label={`${day} ${hourLabel(c.hour)}, ${c.activeMinutes} active minutes, ${c.responses} responses`}
-                          title={`${c.activeMinutes} active minutes · ${c.responses} responses`}
-                        >
-                          <span className="sr-only">{c.activeMinutes}</span>
-                        </button>
-                      </td>
-                    ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </section>
+      <Heatmap data={data} quietStartHours={quietStartHours} />
       <figure
         className="panel"
         aria-label={`Daily active minutes over the last ${data.days} days by ${breakdown}`}

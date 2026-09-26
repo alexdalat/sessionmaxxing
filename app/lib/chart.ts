@@ -16,6 +16,9 @@ export const MODEL_SERIES_COLORS = [
   MUTED_COLOR,
 ];
 export const CHART_CURSOR_FILL = "#ffffff0a";
+/** shadcn TooltipContent on the panel surface, stacked rows. */
+export const TOOLTIP_CLASS =
+  "flex-col items-start gap-0.5 bg-popover text-popover-foreground ring-1 ring-foreground/10 [&_svg]:bg-popover [&_svg]:fill-popover";
 export const TOOLTIP_STYLE = {
   background: "#191a1b",
   border: "1px solid #ffffff20",

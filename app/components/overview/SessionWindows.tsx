@@ -6,7 +6,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/app/components/ui/tooltip";
-import { accentAlpha } from "@/app/lib/chart";
+import { accentAlpha, TOOLTIP_CLASS } from "@/app/lib/chart";
 import { formatRemaining } from "@/app/lib/duration";
 import { clockOfFraction, daySegments } from "@/app/lib/sessionWindows";
 import { easternDay, localClock, shiftDate, weekdayOf } from "@/app/lib/time";
@@ -17,8 +17,6 @@ const DAYS = 7;
 const HOURS = 24;
 const WEEK_HOURS = DAYS * HOURS;
 const BLOCK_HOURS = BLOCK_MINUTES / 60;
-const TOOLTIP_CLASS =
-  "flex-col items-start gap-0.5 bg-popover text-popover-foreground ring-1 ring-foreground/10 [&_svg]:bg-popover [&_svg]:fill-popover";
 const pct = (fraction: number) => `${Math.round(fraction * 10000) / 100}%`;
 
 const activeLabel = (window: SessionWindow) =>

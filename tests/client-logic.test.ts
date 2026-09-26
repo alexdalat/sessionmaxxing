@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { activitySeries, type Breakdown } from "../app/lib/activitySeries";
-import { sourceRows } from "../app/lib/analyticsRows";
+import { heatmapTotals, sourceRows } from "../app/lib/analyticsRows";
 import {
   describeHours,
   quietSummary,
@@ -13,12 +13,13 @@ import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
 import { queuePreview, waitNote } from "../app/lib/queuePreview";
 import { allowedStartHours } from "../app/lib/quietHours";
 import { clockOfFraction } from "../app/lib/sessionWindows";
-import { easternDay } from "../app/lib/time";
+import { easternCell, easternDay } from "../app/lib/time";
 import type {
   ActivitySource,
   ChangedFile,
   CoverageDay,
   DailyActivity,
+  HeatCell,
   Opportunity,
   PlanScore as PlanScoreData,
   PublicTask,
@@ -747,5 +748,51 @@ describe("formatTokens", () => {
     expect(formatTokens(4_999)).toBe("5k");
     expect(formatTokens(1_000_000)).toBe("1.0M");
     expect(formatTokens(2_450_000)).toBe("2.5M");
+  });
+});
+
+describe("heatmapTotals", () => {
+  const cell = (
+    day: number,
+    hour: number,
+    activeMinutes: number,
+  ): HeatCell => ({
+    day,
+    hour,
+    activeMinutes,
+    responses: activeMinutes * 2,
+    averageActiveMinutes: activeMinutes,
+    sources: { local: activeMinutes, dispatched: 0, unknown: 0 },
+    models: [],
+    projects: [],
+    tokens: 0,
+  });
+
+  it("sums active minutes per weekday, per hour and overall", () => {
+    const totals = heatmapTotals([
+      cell(1, 2, 5),
+      cell(1, 3, 7),
+      cell(4, 2, 1),
+      cell(6, 23, 0),
+    ]);
+    expect(totals.days).toEqual([0, 12, 0, 0, 1, 0, 0]);
+    expect(totals.hours).toEqual([
+      0, 0, 6, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    ]);
+    expect(totals.total).toBe(13);
+  });
+
+  it("reports zero rows and columns for an empty heatmap", () => {
+    const totals = heatmapTotals([]);
+    expect(totals.days).toHaveLength(7);
+    expect(totals.hours).toHaveLength(24);
+    expect(totals.total).toBe(0);
+  });
+});
+
+describe("easternCell", () => {
+  it("maps an instant to its Eastern weekday and hour across DST", () => {
+    expect(easternCell("2026-09-06T12:00:00Z")).toEqual({ day: 0, hour: 8 });
+    expect(easternCell("2026-01-15T03:30:00Z")).toEqual({ day: 3, hour: 22 });
   });
 });

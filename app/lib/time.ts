@@ -18,22 +18,32 @@ export const localClock = (time: string | number) =>
     minute: "2-digit",
   }).format(new Date(time));
 
-/** Eastern calendar date plus the fraction of that day already elapsed. */
-export function easternDay(time: string | number) {
+function localParts(time: string | number) {
   const parts = Object.fromEntries(
     formatter.formatToParts(new Date(time)).map((p) => [p.type, p.value]),
   );
   return {
     date: `${parts.year}-${parts.month}-${parts.day}`,
-    fraction:
-      (Number(parts.hour) * 60 + Number(parts.minute)) / MINUTES_PER_DAY,
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
   };
+}
+/** Eastern calendar date plus the fraction of that day already elapsed. */
+export function easternDay(time: string | number) {
+  const { date, hour, minute } = localParts(time);
+  return { date, fraction: (hour * 60 + minute) / MINUTES_PER_DAY };
+}
+const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const weekdayIndex = (date: string) =>
+  new Date(`${date}T12:00:00Z`).getUTCDay();
+/** Eastern weekday (0 = Sunday) and hour of the clock time, matching the heatmap grid. */
+export function easternCell(time: string | number) {
+  const { date, hour } = localParts(time);
+  return { day: weekdayIndex(date), hour };
 }
 export const shiftDate = (date: string, days: number) =>
   new Date(Date.parse(`${date}T12:00:00Z`) + days * DAY_MS)
     .toISOString()
     .slice(0, 10);
-export const weekdayOf = (date: string) =>
-  ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][
-    new Date(`${date}T12:00:00Z`).getUTCDay()
-  ];
+export const weekdayOf = (date: string) => WEEKDAY_NAMES[weekdayIndex(date)];
+export const WEEKDAYS = WEEKDAY_NAMES;

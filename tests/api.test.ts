@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import { createApp } from "../server/app.js";
+import type { CommitRun } from "../server/commit-message.js";
 import { DispatchSettingsStore } from "../server/dispatch-settings.js";
 import type { EstimateRun } from "../server/estimate.js";
 import { UsageHistoryStore } from "../server/usage-history.js";
@@ -659,6 +660,10 @@ it("serves the snapshot persisted before a restart when the usage fetch fails", 
       usage,
       settings: await DispatchSettingsStore.open(temp.path),
       now: () => now,
+      loadHistory: async () => ({
+        events: [],
+        health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
+      }),
     });
     try {
       expect((await app.inject("/api/usage")).json()).toMatchObject({
@@ -1186,5 +1191,177 @@ it("fits the session rates from official samples and local transcripts, and pric
   } finally {
     await app.close();
     await temp.cleanup();
+  }
+});
+
+/** A finished run that edited notes.md and added added.ts next to other.md, which was already dirty. */
+async function finishedRun(suggestCommit: (run: CommitRun) => Promise<string>) {
+  const { taskInput, fakeChild } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const { gitIn } = await import("../server/git.js");
+  const temp = await temporary();
+  const workdir = join(temp.path, "repo");
+  await mkdir(workdir);
+  const git = gitIn(workdir);
+  await git(["init", "-b", "main"]);
+  await git(["config", "user.name", "Test"]);
+  await git(["config", "user.email", "test@example.com"]);
+  await writeFile(`${workdir}/notes.md`, "one\n");
+  await writeFile(`${workdir}/other.md`, "base\n");
+  await git(["add", "."]);
+  await git(["commit", "-m", "first"]);
+  await writeFile(`${workdir}/other.md`, "base\nwip\n");
+  const queue = await QueueStore.open(temp.path);
+  const child = fakeChild();
+  const runner = await Runner.open(queue, temp.path, { launch: () => child });
+  const app = await createApp({ queue, runner, suggestCommit });
+  const task = (
+    await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: taskInput(workdir),
+    })
+  ).json();
+  await app.inject({ method: "POST", url: `/api/tasks/${task.id}/run` });
+  await writeFile(`${workdir}/notes.md`, "one\ntwo\n");
+  await writeFile(`${workdir}/added.ts`, "export {};\n");
+  child.emit("close", 0, null);
+  await runner.waitForIdle();
+  const run = (await app.inject("/api/runs")).json().runs[0];
+  return {
+    app,
+    git,
+    run,
+    cleanup: async () => {
+      await app.close();
+      await temp.cleanup();
+    },
+  };
+}
+
+it("suggests a commit message from the run's title and changed files", async () => {
+  const asked: CommitRun[] = [];
+  const { app, run, cleanup } = await finishedRun(async (commitRun) => {
+    asked.push(commitRun);
+    return "feat: add the second note";
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/commit-message`,
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({ message: "feat: add the second note" });
+    expect(asked).toEqual([
+      {
+        title: "Fix a test",
+        summary: null,
+        files: [
+          { path: "added.ts", added: 0, removed: 0 },
+          { path: "notes.md", added: 1, removed: 0 },
+        ],
+      },
+    ]);
+  } finally {
+    await cleanup();
+  }
+});
+
+it("reports a failed suggestion as a bad gateway with the model's error", async () => {
+  const { app, run, cleanup } = await finishedRun(async () => {
+    throw new Error(
+      "Could not suggest a commit message: Credit balance is too low",
+    );
+  });
+  try {
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/commit-message`,
+    });
+    expect(response.statusCode).toBe(502);
+    expect(response.json().error).toBe(
+      "Could not suggest a commit message: Credit balance is too low",
+    );
+  } finally {
+    await cleanup();
+  }
+});
+
+it("commits only the run's files with the edited message and marks the run reviewed", async () => {
+  const { app, git, run, cleanup } = await finishedRun(
+    async () => "feat: add the second note",
+  );
+  try {
+    const committed = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/commit`,
+      payload: { message: "  fix: keep the second note  " },
+    });
+    expect(committed.statusCode).toBe(200);
+    expect(Date.parse(committed.json().reviewedAt)).toBeGreaterThan(0);
+    expect(await git(["log", "-1", "--format=%s"])).toBe(
+      "fix: keep the second note\n",
+    );
+    expect(await git(["show", "--name-status", "--format=", "HEAD"])).toBe(
+      "A\tadded.ts\nM\tnotes.md\n",
+    );
+    expect(await git(["status", "--porcelain"])).toBe(" M other.md\n");
+    expect((await app.inject("/api/runs/pending-review")).json()).toEqual({
+      pending: 0,
+    });
+    const again = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/commit`,
+      payload: { message: "fix: again" },
+    });
+    expect(again.statusCode).toBe(409);
+    expect(again.json().error).toBe("This run has nothing left to commit.");
+  } finally {
+    await cleanup();
+  }
+});
+
+it("refuses a multi-line or blank commit message and leaves the work uncommitted", async () => {
+  const { app, git, run, cleanup } = await finishedRun(
+    async () => "feat: add the second note",
+  );
+  try {
+    for (const message of ["feat: one\nsecond line", "   "]) {
+      const response = await app.inject({
+        method: "POST",
+        url: `/api/runs/${run.id}/commit`,
+        payload: { message },
+      });
+      expect(response.statusCode).toBe(400);
+    }
+    expect((await git(["rev-list", "--count", "HEAD"])).trim()).toBe("1");
+    expect(
+      (await app.inject("/api/runs")).json().runs[0].reviewedAt,
+    ).toBeNull();
+  } finally {
+    await cleanup();
+  }
+});
+
+it("surfaces git's error when the run's files were committed outside the dashboard", async () => {
+  const { app, git, run, cleanup } = await finishedRun(
+    async () => "feat: add the second note",
+  );
+  try {
+    await git(["add", "notes.md", "added.ts"]);
+    await git(["commit", "-m", "by hand"]);
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/commit`,
+      payload: { message: "feat: add the second note" },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toMatch(/^Could not commit: git /);
+    expect(
+      (await app.inject("/api/runs")).json().runs[0].reviewedAt,
+    ).toBeNull();
+  } finally {
+    await cleanup();
   }
 });

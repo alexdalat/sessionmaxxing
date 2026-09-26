@@ -1,6 +1,7 @@
 import {
   ACTIVITY_SOURCE_LABELS,
   EXTERNAL_SOURCE_LABEL,
+  type HeatCell,
   type SourceActivity,
 } from "@/shared/types";
 
@@ -35,4 +36,25 @@ export function sourceRows(sources: SourceActivity[]): SourceRow[] {
       measured: false,
     },
   ];
+}
+
+const WEEKDAYS = 7;
+const HOURS_PER_DAY = 24;
+export interface HeatmapTotals {
+  /** Active minutes per weekday, Sunday first. */
+  days: number[];
+  /** Active minutes per hour of the day. */
+  hours: number[];
+  total: number;
+}
+export function heatmapTotals(heatmap: HeatCell[]): HeatmapTotals {
+  const days = new Array<number>(WEEKDAYS).fill(0);
+  const hours = new Array<number>(HOURS_PER_DAY).fill(0);
+  let total = 0;
+  for (const cell of heatmap) {
+    days[cell.day] += cell.activeMinutes;
+    hours[cell.hour] += cell.activeMinutes;
+    total += cell.activeMinutes;
+  }
+  return { days, hours, total };
 }

@@ -1,6 +1,6 @@
 import type { Analytics, RangeDays } from "@/shared/types";
 
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 
 type CacheStorage = Pick<Storage, "getItem" | "setItem" | "removeItem">;
 

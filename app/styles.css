@@ -425,7 +425,7 @@
     font-weight: 400;
   }
   .heatmap {
-    min-width: 690px;
+    min-width: 740px;
   }
   .heatmap th {
     font-size: 10px;
@@ -446,6 +446,111 @@
     padding: 0;
     border: 0;
     border-radius: 3px;
+    overflow: hidden;
+  }
+  .heatmap button.now {
+    outline: 1.5px solid #f7f8f8;
+    outline-offset: -1.5px;
+  }
+  .heatmap th.now {
+    color: #f7f8f8;
+    font-weight: 500;
+  }
+  .heatmap th.quiet {
+    position: relative;
+  }
+  .heatmap th.quiet::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 0;
+    width: 4px;
+    height: 4px;
+    margin-left: -2px;
+    border-radius: 50%;
+    background: #88d4a5;
+  }
+  .heat-dispatched {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    height: 3px;
+    min-width: 3px;
+    background: #b8893f;
+  }
+  .heatmap .heat-total {
+    padding: 2px 6px;
+    font-size: 10px;
+    color: #d0d6e0;
+    text-align: right;
+    white-space: nowrap;
+    border-radius: 3px;
+  }
+  .heatmap th.heat-total {
+    text-align: right;
+    color: #8a8f98;
+    font-weight: 400;
+  }
+  .heatmap td.heat-total {
+    border: 2px solid #0f1011;
+    background-clip: padding-box;
+  }
+  .heatmap .heat-grand {
+    color: #f7f8f8;
+    background: #191a1b;
+  }
+  .heat-legend {
+    display: flex;
+    gap: 14px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    font-size: 11px;
+    font-weight: 400;
+    color: #8a8f98;
+  }
+  .heat-legend li {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .heat-key {
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: #191a1b;
+  }
+  .heat-key.now {
+    outline: 1.5px solid #f7f8f8;
+    outline-offset: -1.5px;
+  }
+  .heat-key.quiet {
+    background: #88d4a5;
+    border-radius: 50%;
+    width: 6px;
+    height: 6px;
+    margin: 0 2px;
+  }
+  .heat-key.dispatched {
+    background: #b8893f;
+    height: 3px;
+    border-radius: 1px;
+  }
+  .heat-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    width: 100%;
+  }
+  .heat-row .metric {
+    font-size: 11px;
+  }
+  .heat-group {
+    margin-top: 4px;
+    color: #8a8f98;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
   .facts {
     display: grid;
@@ -802,6 +907,11 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+  }
+  .commit-form {
+    display: flex;
+    gap: 8px;
+    margin: 12px 0 0;
   }
   .run-changes {
     list-style: none;

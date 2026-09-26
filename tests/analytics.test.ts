@@ -324,3 +324,74 @@ it("ranks quiet hours from interactive activity only, so dispatched and unattrib
   expect(covering.length).toBeGreaterThan(0);
   expect(covering.every((w) => w.averageActiveMinutes === 1 / 30)).toBe(true);
 });
+
+it("details each heatmap cell: source split, top models and projects by owned minutes, weighted tokens and the per-occurrence average", () => {
+  // 2026-09-05T14:00Z is Saturday 10:00 EDT; a 14-day range ending Sunday 2026-09-06 holds every weekday twice.
+  const events = [
+    event("2026-09-05T14:00:00Z", { project: "alpha" }),
+    event("2026-09-05T14:00:20Z", {
+      source: "dispatched",
+      project: "beta",
+      model: "claude-sonnet-5",
+    }),
+    event("2026-09-05T14:00:40Z", {
+      source: "dispatched",
+      project: "beta",
+      model: "claude-sonnet-5",
+    }),
+    event("2026-09-05T14:05:00Z", { project: "alpha" }),
+    event("2026-09-05T14:07:00Z", {
+      project: "gamma",
+      model: "claude-fable-5-1",
+    }),
+    event("2026-09-05T14:09:00Z", { project: "alpha" }),
+    event("2026-09-05T14:11:00Z", {
+      project: "delta",
+      model: "claude-haiku-4-5-20251001",
+    }),
+    event("2026-09-05T14:13:00Z", { project: "alpha", model: "gpt-5.3-codex" }),
+  ];
+  const now = new Date("2026-09-06T12:00:00Z");
+  const cell = aggregate(history(events), 14, now).heatmap.find(
+    (c) => c.day === 6 && c.hour === 10,
+  );
+  expect(cell).toMatchObject({
+    activeMinutes: 6,
+    responses: 8,
+    averageActiveMinutes: 3,
+    sources: { local: 5, dispatched: 1, unknown: 0 },
+    models: [
+      { name: "claude-opus-4-6", activeMinutes: 2 },
+      { name: "claude-fable-5-1", activeMinutes: 1 },
+      { name: "claude-haiku-4-5-20251001", activeMinutes: 1 },
+    ],
+    projects: [
+      { name: "alpha", activeMinutes: 3 },
+      { name: "beta", activeMinutes: 1 },
+      { name: "delta", activeMinutes: 1 },
+    ],
+  });
+  // Every event carries 2 input, 3 output, 5 cache-read and 1 cache-write tokens:
+  // 3.75 weighted on Opus, Sonnet and Haiku, 3.675 on Fable, nothing for Codex.
+  expect(cell?.tokens).toBeCloseTo(6 * 3.75 + 3.675, 10);
+  expect(
+    aggregate(history(events), 7, now).heatmap.find(
+      (c) => c.day === 6 && c.hour === 10,
+    )?.averageActiveMinutes,
+  ).toBe(6);
+  expect(
+    aggregate(history(events), 14, now).heatmap.find(
+      (c) => c.day === 6 && c.hour === 11,
+    ),
+  ).toEqual({
+    day: 6,
+    hour: 11,
+    activeMinutes: 0,
+    responses: 0,
+    averageActiveMinutes: 0,
+    sources: { local: 0, dispatched: 0, unknown: 0 },
+    models: [],
+    projects: [],
+    tokens: 0,
+  });
+});

@@ -7,6 +7,9 @@ import {
   type ClaudeBudgets,
   type ClaudeBudgetWindow,
   FABLE_MODEL,
+  HEATMAP_TOP_SHARES,
+  type HeatCell,
+  type HeatShare,
   type HistoryData,
   modelFamily,
   type RangeDays,
@@ -55,7 +58,7 @@ function count(events: ActivityEvent[]) {
 /** Splits the distinct active minutes of `events` among the owners of `key`, one owner per minute. */
 export function partitionMinutes(
   events: ActivityEvent[],
-  key: "source" | "model",
+  key: "source" | "model" | "project",
 ): Map<string, number> {
   const minutes = new Map<number, Map<string, number>>();
   for (const event of events) {
@@ -80,6 +83,60 @@ export function partitionMinutes(
     totals.set(winner, (totals.get(winner) ?? 0) + 1);
   }
   return totals;
+}
+function sourceMinutes(events: ActivityEvent[]) {
+  const minutes = partitionMinutes(events, "source");
+  return Object.fromEntries(
+    ACTIVITY_SOURCES.map((source) => [source, minutes.get(source) ?? 0]),
+  ) as Record<ActivitySource, number>;
+}
+function topShares(
+  events: ActivityEvent[],
+  key: "model" | "project",
+): HeatShare[] {
+  return [...partitionMinutes(events, key)]
+    .map(([name, activeMinutes]) => ({ name, activeMinutes }))
+    .sort(
+      (a, b) =>
+        b.activeMinutes - a.activeMinutes || a.name.localeCompare(b.name),
+    )
+    .slice(0, HEATMAP_TOP_SHARES);
+}
+function tokensOf(events: ActivityEvent[]) {
+  return events.reduce((sum, event) => {
+    const family = modelFamily(event.model);
+    return family === null ? sum : sum + weightedTokens(event, family);
+  }, 0);
+}
+const HOURS_PER_DAY = 24;
+const WEEKDAYS = 7;
+const weekdayOf = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
+function heatmap(
+  decorated: { event: ActivityEvent; day: number; hour: number }[],
+  dates: string[],
+): HeatCell[] {
+  const occurrences = new Array<number>(WEEKDAYS).fill(0);
+  for (const date of dates) occurrences[weekdayOf(date)] += 1;
+  const cells = Array.from(
+    { length: WEEKDAYS * HOURS_PER_DAY },
+    (): ActivityEvent[] => [],
+  );
+  for (const e of decorated)
+    cells[e.day * HOURS_PER_DAY + e.hour].push(e.event);
+  return cells.map((events, i) => {
+    const day = Math.floor(i / HOURS_PER_DAY);
+    const totals = count(events);
+    return {
+      day,
+      hour: i % HOURS_PER_DAY,
+      ...totals,
+      averageActiveMinutes: totals.activeMinutes / occurrences[day],
+      sources: sourceMinutes(events),
+      models: topShares(events, "model"),
+      projects: topShares(events, "project"),
+      tokens: tokensOf(events),
+    };
+  });
 }
 function mix(events: ActivityEvent[], key: "model" | "project") {
   const values = new Map<string, number>();
@@ -118,25 +175,14 @@ export function aggregate(
       const onDate = decorated
         .filter((e) => e.date === date)
         .map((e) => e.event);
-      const sources = partitionMinutes(onDate, "source");
       return {
         date,
         ...count(onDate),
-        sources: Object.fromEntries(
-          ACTIVITY_SOURCES.map((source) => [source, sources.get(source) ?? 0]),
-        ) as Record<ActivitySource, number>,
+        sources: sourceMinutes(onDate),
         models: Object.fromEntries(partitionMinutes(onDate, "model")),
       };
     }),
-    heatmap: Array.from({ length: 168 }, (_, i) => ({
-      day: Math.floor(i / 24),
-      hour: i % 24,
-      ...count(
-        decorated
-          .filter((e) => e.day === Math.floor(i / 24) && e.hour === i % 24)
-          .map((e) => e.event),
-      ),
-    })),
+    heatmap: heatmap(decorated, dates),
     totals: {
       ...count(events),
       inputTokens: events.reduce((n, e) => n + e.inputTokens, 0),
@@ -151,14 +197,7 @@ export function aggregate(
     projects: mix(events, "project"),
     sources: ACTIVITY_SOURCES.map((source) => {
       const matching = events.filter((event) => event.source === source);
-      return {
-        source,
-        ...count(matching),
-        tokens: matching.reduce((sum, event) => {
-          const family = modelFamily(event.model);
-          return family === null ? sum : sum + weightedTokens(event, family);
-        }, 0),
-      };
+      return { source, ...count(matching), tokens: tokensOf(matching) };
     }),
     health: history.health,
   };
