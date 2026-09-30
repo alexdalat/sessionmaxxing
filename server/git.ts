@@ -120,6 +120,24 @@ export async function snapshotWorkdir(
     throw error;
   }
 }
+/** Commits exactly `paths`; anything else staged or modified in the work directory stays out of the commit. */
+export async function commitPaths(
+  paths: string[],
+  message: string,
+  git: RunGit,
+): Promise<void> {
+  // Literal pathspecs so a file named like a glob commits only itself.
+  await git(["--literal-pathspecs", "add", "-A", "--", ...paths]);
+  await git([
+    "--literal-pathspecs",
+    "commit",
+    "--only",
+    "-m",
+    message,
+    "--",
+    ...paths,
+  ]);
+}
 /** What changed in the work directory between two snapshots, counting commits the run made itself. */
 export async function diffSnapshots(
   before: GitSnapshot,

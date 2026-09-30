@@ -17,6 +17,10 @@ import {
   SessionRatesCache,
   windowTokens,
 } from "./calibration.js";
+import {
+  type CommitMessageSuggester,
+  suggestCommitMessage,
+} from "./commit-message.js";
 import { planDispatch } from "./dispatch.js";
 import {
   type DispatchSettingsStore,
@@ -49,6 +53,7 @@ export interface AppOptions {
   now?: () => Date;
   quietHoursTtlMs?: number;
   estimate?: TokensEstimator;
+  suggestCommit?: CommitMessageSuggester;
   /** Overrides the fitted session rates; by default they are fitted from samples and transcripts. */
   sessionRates?: () => Promise<SessionRates | null>;
 }
@@ -227,6 +232,7 @@ export async function createApp(options: AppOptions = {}) {
       options.runner,
       now,
       options.estimate ?? estimateTokens,
+      options.suggestCommit ?? suggestCommitMessage,
       planning,
       options.keeper,
     );

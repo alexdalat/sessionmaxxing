@@ -48,3 +48,20 @@ export function fakeChild() {
     kill: vi.fn(() => true),
   });
 }
+/** A `claude -p` process that prints `stdout` and `stderr`, then exits with `code`. */
+export function fakeEstimator(code: number, stdout: string, stderr = "") {
+  const child = fakeChild();
+  return vi.fn(() => {
+    setImmediate(() => {
+      let ended = 0;
+      const close = () => {
+        if (++ended === 2) child.emit("close", code);
+      };
+      child.stdout.on("end", close);
+      child.stderr.on("end", close);
+      child.stdout.end(stdout);
+      child.stderr.end(stderr);
+    });
+    return child;
+  });
+}

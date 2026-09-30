@@ -1,8 +1,9 @@
-import { appendFile, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdtemp, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it } from "vitest";
 import {
+  commitPaths,
   diffSnapshots,
   ensureRepository,
   type GitSnapshot,
@@ -18,6 +19,8 @@ async function repository(path: string) {
   await writeFile(`${path}/notes.md`, "one\n");
   await git(["add", "."]);
   await git([...IDENTITY, "commit", "-m", "first"]);
+  await git(["config", "user.name", "Test"]);
+  await git(["config", "user.email", "test@example.com"]);
   return git;
 }
 const snapshot = (patch: Partial<GitSnapshot>): GitSnapshot => ({
@@ -169,6 +172,68 @@ it("leaves an existing repository and its dirty files alone", async () => {
     expect(await ensureRepository(temp.path)).toBe(false);
     expect((await git(["rev-parse", "HEAD"])).trim()).toBe(head);
     expect(await git(["status", "--porcelain"])).toBe(" M notes.md\n");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("commits the listed paths and leaves other staged and modified files out", async () => {
+  const temp = await temporary();
+  try {
+    const git = await repository(temp.path);
+    await writeFile(`${temp.path}/other.md`, "base\n");
+    await writeFile(`${temp.path}/gone.md`, "base\n");
+    await git(["add", "."]);
+    await git(["commit", "-m", "second"]);
+    await appendFile(`${temp.path}/notes.md`, "two\n");
+    await writeFile(`${temp.path}/added.ts`, "export {};\n");
+    await unlink(`${temp.path}/gone.md`);
+    await appendFile(`${temp.path}/other.md`, "wip\n");
+    await writeFile(`${temp.path}/staged.md`, "staged\n");
+    await git(["add", "staged.md"]);
+    await commitPaths(
+      ["added.ts", "gone.md", "notes.md"],
+      "feat: add the parser",
+      git,
+    );
+    expect(await git(["log", "-1", "--format=%s"])).toBe(
+      "feat: add the parser\n",
+    );
+    expect(await git(["show", "--name-status", "--format=", "HEAD"])).toBe(
+      "A\tadded.ts\nD\tgone.md\nM\tnotes.md\n",
+    );
+    expect(await git(["status", "--porcelain"])).toBe(
+      " M other.md\nA  staged.md\n",
+    );
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("treats a path containing glob characters as that one file", async () => {
+  const temp = await temporary();
+  try {
+    const git = await repository(temp.path);
+    await writeFile(`${temp.path}/*.md`, "star\n");
+    await appendFile(`${temp.path}/notes.md`, "two\n");
+    await commitPaths(["*.md"], "chore: add the star file", git);
+    expect(await git(["show", "--name-status", "--format=", "HEAD"])).toBe(
+      "A\t*.md\n",
+    );
+    expect(await git(["status", "--porcelain"])).toBe(" M notes.md\n");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails when the listed paths hold nothing to commit", async () => {
+  const temp = await temporary();
+  try {
+    const git = await repository(temp.path);
+    await expect(
+      commitPaths(["notes.md"], "fix: nothing", git),
+    ).rejects.toThrow(/git --literal-pathspecs commit/);
+    expect((await git(["rev-list", "--count", "HEAD"])).trim()).toBe("1");
   } finally {
     await temp.cleanup();
   }

@@ -1,4 +1,4 @@
-import { expect, it, vi } from "vitest";
+import { expect, it } from "vitest";
 import {
   ESTIMATOR_MODEL,
   type EstimateRun,
@@ -6,7 +6,7 @@ import {
   estimateTokens,
 } from "../server/estimate.js";
 import { MAX_TOKENS, MIN_TOKENS } from "../shared/types.js";
-import { fakeChild } from "./helpers";
+import { fakeEstimator } from "./helpers";
 
 const TASK = {
   title: "Rename the parser",
@@ -33,22 +33,6 @@ const HISTORY: EstimateRun[] = [
   },
 ];
 
-function fakeEstimator(code: number, stdout: string, stderr = "") {
-  const child = fakeChild();
-  return vi.fn(() => {
-    setImmediate(() => {
-      let ended = 0;
-      const close = () => {
-        if (++ended === 2) child.emit("close", code);
-      };
-      child.stdout.on("end", close);
-      child.stderr.on("end", close);
-      child.stdout.end(stdout);
-      child.stderr.end(stderr);
-    });
-    return child;
-  });
-}
 const argumentAfter = (args: string[], flag: string) =>
   args[args.indexOf(flag) + 1];
 

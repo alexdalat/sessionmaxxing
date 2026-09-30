@@ -7,6 +7,7 @@ import {
   type DispatchSettings,
   EMPTY_LOAD,
   MODEL_FAMILIES,
+  needsCommit,
   type PlanningSnapshot,
   type PublicTask,
   type Run,
@@ -27,6 +28,7 @@ import {
   withRun,
 } from "./dispatch.js";
 import {
+  commitPaths,
   diffSnapshots,
   ensureRepository,
   type GitSnapshot,
@@ -263,6 +265,33 @@ export class Runner {
     run.reviewedAt = this.now().toISOString();
     await this.persist(run);
     return this.list().find((listed) => listed.id === run.id) as Run;
+  }
+  /** Commits the files a finished run left uncommitted, then marks the run reviewed. */
+  async commit(runId: string, message: string): Promise<Run> {
+    const run = this.runs.find((candidate) => candidate.id === runId);
+    if (!run) throw new DomainError("Run not found.", 404);
+    if (!needsCommit(run))
+      throw new DomainError("This run has nothing left to commit.", 409);
+    const task = this.store
+      .snapshot()
+      .tasks.find((candidate) => candidate.id === run.taskId);
+    if (!task) throw new DomainError("Task not found.", 404);
+    const workdir = await validateWorkdir(task.workdir);
+    const busy = this.holder(await resolveResources(workdir));
+    if (busy) throw new DomainError(blockedReason(busy.title), 409);
+    try {
+      await commitPaths(
+        run.changes.files.map((file) => file.path),
+        message,
+        gitIn(workdir),
+      );
+    } catch (error) {
+      throw new DomainError(
+        `Could not commit: ${(error as Error).message}`,
+        409,
+      );
+    }
+    return this.markReviewed(runId);
   }
   private async persist(run: StoredRun) {
     const { preview, ...metadata } = run;

@@ -1,9 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import {
   AUTO_TOKENS,
+  COMMIT_MESSAGE_MAX,
   MAX_DEPENDENCIES,
   MAX_TOKENS,
   MIN_TOKENS,
+  needsCommit,
   needsReview,
   type PlanningSnapshot,
   type PublicTask,
@@ -13,6 +15,7 @@ import {
   type TokensInput,
 } from "../shared/types.js";
 import { modelSessionPercent } from "./calibration.js";
+import type { CommitMessageSuggester } from "./commit-message.js";
 import { emptyQuerySchema } from "./dispatch-settings.js";
 import type { EstimateRun, EstimateTask, TokensEstimator } from "./estimate.js";
 import {
@@ -63,6 +66,18 @@ const properties = {
     items: idSchema,
   },
 };
+const commitSchema = {
+  type: "object",
+  additionalProperties: false,
+  required: ["message"],
+  properties: {
+    message: {
+      type: "string",
+      maxLength: COMMIT_MESSAGE_MAX,
+      pattern: "^[^\\r\\n]*\\S[^\\r\\n]*$",
+    },
+  },
+};
 const workdirQuerySchema = {
   type: "object",
   additionalProperties: false,
@@ -74,6 +89,7 @@ export function registerQueueRoutes(
   runner: Runner,
   now: () => Date,
   estimate: TokensEstimator,
+  suggestCommit: CommitMessageSuggester,
   getPlanning?: () => PlanningSnapshot,
   keeper?: SessionKeeper,
 ) {
@@ -198,6 +214,45 @@ export function registerQueueRoutes(
     "/api/runs/:id/reviewed",
     { schema: { params } },
     (request) => runner.markReviewed(request.params.id),
+  );
+  /** One suggestion per run, so reloading the page does not ask the model again. */
+  const suggestions = new Map<string, Promise<string>>();
+  app.post<{ Params: { id: string } }>(
+    "/api/runs/:id/commit-message",
+    { schema: { params } },
+    async (request) => {
+      const run = runner.list().find(({ id }) => id === request.params.id);
+      if (!run) throw new DomainError("Run not found.", 404);
+      if (!needsCommit(run))
+        throw new DomainError("This run has nothing left to commit.", 409);
+      let suggestion = suggestions.get(run.id);
+      if (!suggestion) {
+        suggestion = suggestCommit({
+          title: run.title,
+          summary: run.summary,
+          files: run.changes.files,
+        });
+        suggestions.set(run.id, suggestion);
+      }
+      try {
+        return { message: await suggestion };
+      } catch (error) {
+        suggestions.delete(run.id);
+        throw new DomainError((error as Error).message, 502);
+      }
+    },
+  );
+  app.post<{ Params: { id: string }; Body: { message: string } }>(
+    "/api/runs/:id/commit",
+    { schema: { params, body: commitSchema } },
+    async (request) => {
+      const committed = await runner.commit(
+        request.params.id,
+        request.body.message.trim(),
+      );
+      suggestions.delete(committed.id);
+      return committed;
+    },
   );
   app.post<{ Body: TaskInput }>(
     "/api/tasks",

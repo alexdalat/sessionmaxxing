@@ -1,16 +1,19 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ListSkeleton } from "@/app/components/Skeletons";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
+import { Input } from "@/app/components/ui/input";
 import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
 import { api, QUEUE_CHANGED } from "@/app/lib/api";
 import {
+  COMMIT_MESSAGE_MAX,
   type DeployStatus,
   formatTokens,
   localTimestamp,
   MODEL_FAMILIES,
+  needsCommit,
   needsReview,
   PROVIDER_LABELS,
   type Run,
@@ -40,6 +43,58 @@ const deployBadges: Record<
   succeeded: { label: "Deployed", variant: "success" },
   failed: { label: "Deploy failed", variant: "warning" },
 };
+function CommitForm({
+  run,
+  busy,
+  onCommit,
+  onError,
+}: {
+  run: Run;
+  busy: boolean;
+  onCommit: (message: string) => void;
+  onError: (message: string) => void;
+}) {
+  const [message, setMessage] = useState("");
+  const [suggesting, setSuggesting] = useState(true);
+  useEffect(() => {
+    let current = true;
+    api<{ message: string }>(`/api/runs/${run.id}/commit-message`, {
+      method: "POST",
+    })
+      .then((suggestion) => {
+        if (current) setMessage((typed) => typed || suggestion.message);
+      })
+      .catch((error: Error) => {
+        if (current) onError(error.message);
+      })
+      .finally(() => {
+        if (current) setSuggesting(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [run.id, onError]);
+  return (
+    <form
+      className="commit-form"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onCommit(message);
+      }}
+    >
+      <Input
+        aria-label="Commit message"
+        value={message}
+        maxLength={COMMIT_MESSAGE_MAX}
+        placeholder={suggesting ? "Suggesting…" : "Commit message"}
+        onChange={(event) => setMessage(event.target.value)}
+      />
+      <Button type="submit" size="sm" disabled={busy || message.trim() === ""}>
+        Commit
+      </Button>
+    </form>
+  );
+}
 export function Runs() {
   const { data, error, reload } = usePolling<{
     runs: Run[];
@@ -49,11 +104,14 @@ export function Runs() {
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useNotice();
   const [retried, setRetried] = useState<ReadonlySet<string>>(new Set());
-  async function act(run: Run, path: string, message: string) {
+  async function act(run: Run, path: string, message: string, body?: unknown) {
     setBusyRun(run.id);
     setActionError("");
     try {
-      await api(path, { method: "POST" });
+      await api(path, {
+        method: "POST",
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      });
       reload();
       return true;
     } catch (error) {
@@ -65,6 +123,10 @@ export function Runs() {
   }
   const markReviewed = (run: Run) =>
     act(run, `/api/runs/${run.id}/reviewed`, "Could not mark the run.");
+  const commit = (run: Run, message: string) =>
+    act(run, `/api/runs/${run.id}/commit`, "Could not commit the run.", {
+      message,
+    });
   async function retry(run: Run) {
     setNotice("");
     const queued = await act(
@@ -153,6 +215,14 @@ export function Runs() {
               )}
             </span>
           </div>
+          {needsCommit(run) && (
+            <CommitForm
+              run={run}
+              busy={busyRun === run.id}
+              onCommit={(message) => void commit(run, message)}
+              onError={setActionError}
+            />
+          )}
           <dl className="facts">
             <div>
               <dt>Model</dt>

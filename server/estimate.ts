@@ -144,16 +144,20 @@ const lastLine = (text: string) =>
     .filter(Boolean)
     .at(-1);
 
-function readEstimate(stdout: string): number {
+function structuredOutput(stdout: string): unknown {
   const payload = JSON.parse(stdout) as {
     structured_output?: unknown;
     result?: unknown;
   };
-  const output =
+  return (
     payload.structured_output ??
     (typeof payload.result === "string"
       ? (JSON.parse(payload.result) as unknown)
-      : payload.result);
+      : payload.result)
+  );
+}
+
+function readEstimate(output: unknown): number {
   const tokens = (output as { tokens?: unknown } | null)?.tokens;
   if (
     typeof tokens !== "number" ||
@@ -167,11 +171,12 @@ function readEstimate(stdout: string): number {
   return tokens;
 }
 
-export async function estimateTokens(
-  task: EstimateTask,
-  history: EstimateRun[],
+/** One tool-less, sessionless Haiku answer shaped by `schema`. */
+export async function askEstimator(
+  prompt: string,
+  schema: string,
   spawnProcess: SpawnEstimator = spawn,
-): Promise<number> {
+): Promise<unknown> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ESTIMATE_TIMEOUT_MS);
   timer.unref();
@@ -179,7 +184,7 @@ export async function estimateTokens(
     "claude",
     [
       "-p",
-      estimatorPrompt(task, history),
+      prompt,
       "--model",
       ESTIMATOR_MODEL,
       "--output-format",
@@ -192,7 +197,7 @@ export async function estimateTokens(
       "--setting-sources",
       "",
       "--json-schema",
-      ESTIMATE_SCHEMA,
+      schema,
     ],
     {
       cwd: process.env.HOME,
@@ -217,18 +222,32 @@ export async function estimateTokens(
     });
     if (code !== 0)
       throw new Error(lastLine(stderr) ?? `claude exited with code ${code}`);
-    const corrected =
-      readEstimate(stdout) * estimateCorrection(history, task.model);
-    return clamp(Math.round(corrected), MIN_TOKENS, MAX_TOKENS);
+    return structuredOutput(stdout);
   } catch (error) {
-    throw new Error(
-      `Could not estimate tokens: ${
-        controller.signal.aborted
-          ? `no answer within ${ESTIMATE_TIMEOUT_MS / 1000}s`
-          : (error as Error).message
-      }`,
-    );
+    if (controller.signal.aborted)
+      throw new Error(`no answer within ${ESTIMATE_TIMEOUT_MS / 1000}s`);
+    throw error;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+export async function estimateTokens(
+  task: EstimateTask,
+  history: EstimateRun[],
+  spawnProcess: SpawnEstimator = spawn,
+): Promise<number> {
+  try {
+    const corrected =
+      readEstimate(
+        await askEstimator(
+          estimatorPrompt(task, history),
+          ESTIMATE_SCHEMA,
+          spawnProcess,
+        ),
+      ) * estimateCorrection(history, task.model);
+    return clamp(Math.round(corrected), MIN_TOKENS, MAX_TOKENS);
+  } catch (error) {
+    throw new Error(`Could not estimate tokens: ${(error as Error).message}`);
   }
 }
