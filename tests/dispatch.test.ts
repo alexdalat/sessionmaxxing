@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import {
   costsAhead,
+  eligibleAt,
   expectedSessionCost,
   planDispatch,
   runReservation,
@@ -318,6 +319,7 @@ const pending = {
   preferredWindowStart: null,
   earliestStart: null,
   tokens: 100_000,
+  dependsOn: [] as string[],
 };
 const quietRanking = { ranking: [3, 2, 1, 0, 23, 22, 21, 20], error: null };
 
@@ -753,4 +755,174 @@ it("cannot predict a start behind a full queue with no known session reset", () 
     now.toISOString(),
   );
   expect(taskGate(pending, planning, now, [], [13.8]).eligibleAt).toBeNull();
+});
+
+it("leaves out tasks queued ahead that wait on the task, directly or through a chain", () => {
+  const child = { ...pending, id: "b".repeat(24), dependsOn: [pending.id] };
+  const grandchild = {
+    ...pending,
+    id: "c".repeat(24),
+    tokens: 150_000,
+    dependsOn: [child.id],
+  };
+  const independent = { ...pending, id: "d".repeat(24), tokens: 200_000 };
+  expect(
+    costsAhead(
+      pending.id,
+      [child, grandchild, independent, pending],
+      [],
+      SESSION_RATES,
+    ),
+  ).toEqual([27.5]);
+});
+
+it("sizes each future window with the reserve of the hour it opens in", () => {
+  const settings = {
+    ...DEFAULT_DISPATCH_SETTINGS,
+    sessionReservePercent: 20,
+    busyHoursReservePercent: 60,
+    quietStartHours: 1,
+  };
+  const noonQuiet = { ranking: [12, 3, 2, 1], error: null };
+  const planning = plan(
+    usageSnapshot({
+      session: { percent: 90, resetsAt: "2026-09-06T16:00:00.000Z" },
+    }),
+    null,
+    settings,
+    noonQuiet,
+  );
+  // 49.6% ahead plus 13.8% overflows the 40% busy cutoff but fits the 80% quiet one.
+  expect(eligibleAt(pending, planning, now, [], [49.6])).toBe(
+    "2026-09-06T16:00:00.000Z",
+  );
+});
+
+const splitNight = {
+  ...DEFAULT_DISPATCH_SETTINGS,
+  sessionReservePercent: 20,
+  busyHoursReservePercent: 60,
+  quietStartHours: 4,
+};
+const smallHoursQuiet = { ranking: [0, 1, 2, 3], error: null };
+const elevenThirtyPm = new Date("2026-09-07T03:30:00Z");
+const windowFromElevenThirty = "2026-09-07T08:30:00Z";
+const priced = [
+  {
+    taskId: pending.id,
+    status: "completed" as const,
+    sessionCostPercent: 41.5,
+  },
+];
+const planAt = (at: Date, sessionPercent: number) =>
+  planDispatch(
+    splitNight,
+    {
+      snapshot: usageSnapshot({
+        fetchedAt: at.toISOString(),
+        session: { percent: sessionPercent, resetsAt: windowFromElevenThirty },
+      }),
+      error: null,
+    },
+    at,
+    smallHoursQuiet,
+    EMPTY_LOAD,
+    calibration,
+  );
+
+it("estimates a start at the quiet hour inside the open window whose cutoff fits", () => {
+  // 11:30 PM busy cutoff is 40%: 2% + 41.5% (capped at 40%) overflows it; the 12 AM quiet cutoff is 80%.
+  expect(
+    taskGate(pending, planAt(elevenThirtyPm, 2), elevenThirtyPm, priced),
+  ).toEqual({
+    status: "waiting",
+    reason:
+      "Session 2% + 41.5% expected, over the 40% queue cutoff (busy hours)",
+    eligibleAt: "2026-09-07T04:00:00.000Z",
+  });
+});
+
+it("is admitted by the live gate at the estimated quiet hour and not a minute before", () => {
+  const minuteBefore = new Date("2026-09-07T03:59:00Z");
+  const midnight = new Date("2026-09-07T04:00:00Z");
+  expect(
+    taskGate(pending, planAt(minuteBefore, 2), minuteBefore, priced).status,
+  ).toBe("waiting");
+  expect(taskGate(pending, planAt(midnight, 2), midnight, priced)).toEqual({
+    status: "ready",
+    reason: "Session 2% of 80% · Weekly 2% of 22%",
+    eligibleAt: midnight.toISOString(),
+  });
+});
+
+it("lets the work queued ahead take its share of the window before the quiet hour", () => {
+  // The 2% task ahead starts at 11:30 PM; this one then overflows the 40% busy cutoff until 12 AM.
+  expect(
+    eligibleAt(pending, planAt(elevenThirtyPm, 0), elevenThirtyPm, priced, [2]),
+  ).toBe("2026-09-07T04:00:00.000Z");
+});
+
+it("waits for the next window when no hour before the reset fits the task", () => {
+  // 50% + 41.5% overflows the 80% quiet cutoff from 12 to 4 AM and the 40% busy one at 4 AM;
+  // the window resets at 4:30 AM, where 41.5% capped at the 40% busy cutoff fits an empty session.
+  expect(
+    taskGate(pending, planAt(elevenThirtyPm, 50), elevenThirtyPm, priced),
+  ).toMatchObject({
+    status: "waiting",
+    eligibleAt: "2026-09-07T08:30:00.000Z",
+  });
+});
+
+it("holds the work queued ahead to quiet hours too when the queue runs only in them", () => {
+  const planning = plan(
+    usageSnapshot({
+      session: { percent: 30, resetsAt: "2026-09-06T11:00:00Z" },
+    }),
+    null,
+    { ...DEFAULT_DISPATCH_SETTINGS, quietStartHours: 4 },
+    smallHoursQuiet,
+  );
+  // The 60% task ahead starts at 12 AM and opens a window until 5 AM; 60% + 20.7% overflows the
+  // 75% cutoff in it, and 5 AM is not a quiet hour, so this one waits for 12 AM the next night.
+  expect(
+    eligibleAt({ ...pending, tokens: 150_000 }, planning, now, [], [60]),
+  ).toBe("2026-09-08T04:00:00.000Z");
+});
+
+it("places a preferred window that opens in busy hours only where its cutoff fits", () => {
+  const planning = plan(busySession, null, splitReserves, {
+    ranking: [8, 9],
+    error: null,
+  });
+  // 8 AM is quiet (90% cutoff), but the 10 AM window opens in busy hours, where 40% + 13.8% overflows
+  // the 30% cutoff until the session resets at 12:09 PM, still inside the window.
+  expect(
+    taskGate({ ...pending, preferredWindowStart: 10 }, planning, now, []),
+  ).toMatchObject({
+    status: "waiting",
+    eligibleAt: "2026-09-06T16:09:00.000Z",
+  });
+});
+
+it("waits for the weekly ceiling to clear what running tasks hold on top of the measured percent", () => {
+  const load = {
+    ...EMPTY_LOAD,
+    running: 1,
+    claudeRuns: 1,
+    reserved: { session: 0, weekly: 3, fable: 0 },
+  };
+  const planning = plan(
+    usageSnapshot({
+      weekly: { percent: 57, resetsAt: "2026-09-10T12:00:00Z" },
+    }),
+    null,
+    anyHour,
+    undefined,
+    load,
+  );
+  // 57% + 3% held needs the pace-plus-10% ceiling at 60%, a pace of 50%: half of the week from Sep 3, 12:00 UTC.
+  expect(taskGate(pending, planning, now, [])).toMatchObject({
+    status: "waiting",
+    eligibleAt: "2026-09-07T00:00:00.000Z",
+  });
 });

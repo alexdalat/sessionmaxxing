@@ -340,8 +340,8 @@ export function expectedSessionCost(
 }
 
 /** A task larger than the whole cutoff never fits a window, so it waits for an empty one instead of waiting forever. */
-const fitCost = (expected: number, session: BucketGate) =>
-  Math.min(expected, session.ceiling);
+const fitCost = (expected: number, ceiling: number) =>
+  Math.min(expected, ceiling);
 
 /** The window opening at `hour` that is still open at `at`, searching yesterday through tomorrow. */
 function windowStartAt(hour: number, at: number): number {
@@ -355,7 +355,40 @@ function windowStartAt(hour: number, at: number): number {
 const insideWindow = (hour: number, at: number) =>
   windowStartAt(hour, at) <= at;
 
-/** When the pace-based weekly ceiling rises past `percent`, or the window reset when it never does. */
+/** Expected session cost of each pending Claude task queued ahead of `taskId` that can run before it, in dispatch order. */
+export function costsAhead(
+  taskId: string,
+  tasks: readonly (GateTask & Pick<PublicTask, "dependsOn">)[],
+  runs: readonly RunCost[],
+  rates: SessionRates | null,
+): number[] {
+  // A task that waits on this one, directly or through a chain, can never run before it.
+  const after = new Set([taskId]);
+  let grew = true;
+  while (grew) {
+    grew = false;
+    for (const task of tasks)
+      if (!after.has(task.id) && task.dependsOn.some((id) => after.has(id))) {
+        after.add(task.id);
+        grew = true;
+      }
+  }
+  const costs: number[] = [];
+  for (const task of tasks) {
+    if (task.id === taskId) break;
+    if (
+      task.status !== "pending" ||
+      task.provider !== "claude" ||
+      after.has(task.id)
+    )
+      continue;
+    const cost = expectedSessionCost(task, runs, rates);
+    if (cost !== null) costs.push(cost);
+  }
+  return costs;
+}
+
+/** When the pace-based weekly ceiling rises past what the bucket uses and holds, or the window reset when it never does. */
 function weeklyClearsAt(
   gate: BucketGate,
   resetsAt: string | null,
@@ -363,108 +396,166 @@ function weeklyClearsAt(
 ): number | null {
   if (resetsAt === null) return null;
   const reset = Date.parse(resetsAt);
-  if (gate.percent === null || gate.percent > WEEKLY_HARD_CEILING_PERCENT)
-    return reset;
-  const neededPace = gate.percent - marginPercent;
+  if (gate.percent === null) return reset;
+  const needed = gate.percent + gate.reserved;
+  if (needed > WEEKLY_HARD_CEILING_PERCENT) return reset;
+  const neededPace = needed - marginPercent;
   return Math.min(reset, reset - WEEK_MS + (neededPace / FULL) * WEEK_MS);
 }
 
-const overCeiling = (gate: BucketGate, cost: number) =>
-  gate.percent !== null && gate.percent + cost > gate.ceiling;
+const HOUR_MS = 60 * MINUTE_MS;
+// TIME_ZONE moves by whole hours, so its local hour boundaries fall on UTC hour boundaries.
+const nextHour = (at: number) => (Math.floor(at / HOUR_MS) + 1) * HOUR_MS;
+/** An idle or unknown session stays as it is until something starts, so one day covers every hour. */
+const IDLE_HORIZON_MS = (HOURS_PER_DAY + 1) * HOUR_MS;
+
+type Opens = (at: number) => boolean;
+const always: Opens = () => true;
+const inQuietHours =
+  (quiet: QuietHours): Opens =>
+  (at) =>
+    quiet.startHours?.includes(localParts(at).hour) ?? false;
+
+/** The schedule rules of the task itself: earliest start aside, its preferred window or the quiet-hours-only rule. */
+function scheduleOpens(
+  task: Pick<GateTask, "provider" | "preferredWindowStart">,
+  planning: PlanningSnapshot,
+): Opens {
+  const window = task.preferredWindowStart;
+  if (window !== null) return (at) => insideWindow(window, at);
+  if (task.provider === "claude" && quietHoursOnly(planning.settings))
+    return inQuietHours(planning.quiet);
+  return always;
+}
+
+/** The session cutoff the live gate applies at `at`. */
+function cutoffAt(planning: PlanningSnapshot, now: number) {
+  const { session, settings, quiet } = planning;
+  return (at: number) =>
+    // At `now` the gate reads the snapshot's own ceiling; matching it keeps "ready now" in agreement.
+    at === now
+      ? session.ceiling
+      : FULL -
+        (quietHoursOnly(settings) || inQuietHours(quiet)(at)
+          ? settings.sessionReservePercent
+          : settings.busyHoursReservePercent);
+}
+
+/** The first instant from `from` (itself, then each later hour boundary) before `until` where `opens` holds. */
+function firstInstant(from: number, until: number, opens: Opens) {
+  for (let at = from; at < until; at = nextHour(at)) if (opens(at)) return at;
+  return null;
+}
 
 /**
- * Start of the five-hour window this task lands in once every task queued ahead
- * has taken its share of the session ceiling; null when the reset is unknown.
+ * The session as the estimate walks it: points used, the instant the next task
+ * may start from, and when the open window resets. `end` is null while that is
+ * unknown; an idle session has no open window and opens one at the next start.
  */
-function sessionWindowStart(
-  session: BucketGate,
-  percent: number,
-  resetsAt: string | null,
-  ahead: readonly number[],
-  expected: number,
-  now: Date,
-): number | null {
-  let start = now.getTime();
-  let used = percent + session.reserved;
-  let reset = resetsAt === null ? null : Date.parse(resetsAt);
-  for (const cost of [...ahead, expected].map((each) =>
-    fitCost(each, session),
-  )) {
-    while (used + cost > session.ceiling) {
-      if (reset === null) return null;
-      start = Math.max(reset, now.getTime());
-      reset = start + WINDOW_MS;
-      used = 0;
-    }
-    used += cost;
-  }
-  return start;
+interface SessionState {
+  from: number;
+  used: number;
+  end: number | null;
+  idle: boolean;
 }
 
-/** Expected session cost of each pending Claude task queued ahead of `taskId`, in dispatch order. */
-export function costsAhead(
-  taskId: string,
-  tasks: readonly GateTask[],
-  runs: readonly RunCost[],
-  rates: SessionRates | null,
-): number[] {
-  const costs: number[] = [];
-  for (const task of tasks) {
-    if (task.id === taskId) break;
-    if (task.status !== "pending" || task.provider !== "claude") continue;
-    const cost = expectedSessionCost(task, runs, rates);
-    if (cost !== null) costs.push(cost);
+/** The session once a task costing `cost` starts at the first instant it fits; null when it never does. */
+function startInSession(
+  state: SessionState,
+  cost: number,
+  opens: Opens,
+  cutoff: (at: number) => number,
+): SessionState | null {
+  let { from, used, end, idle } = state;
+  const fits = (at: number) =>
+    opens(at) && used + fitCost(cost, cutoff(at)) <= cutoff(at);
+  const startAt = (at: number): SessionState => ({
+    from: at,
+    used: used + fitCost(cost, cutoff(at)),
+    end: idle ? at + WINDOW_MS : end,
+    idle: false,
+  });
+  if (end !== null) {
+    const at = firstInstant(from, end, fits);
+    if (at !== null) return startAt(at);
+    // Tasks running now are assumed finished by the reset, so the next window starts empty.
+    from = Math.max(from, end);
+    used = 0;
+    end = null;
+    idle = true;
   }
-  return costs;
+  const at = firstInstant(from, from + IDLE_HORIZON_MS, fits);
+  return at === null ? null : startAt(at);
 }
 
-/** Earliest instant the usage buckets this task draws on hold enough headroom; null when unknowable. */
-function usageClearsAt(
-  task: Pick<GateTask, "id" | "provider" | "model" | "tokens">,
+/** Earliest instant every gate — schedule, quiet hours and usage — admits this task; null when unknowable. */
+function startsAt(
+  task: Pick<
+    GateTask,
+    | "id"
+    | "provider"
+    | "model"
+    | "preferredWindowStart"
+    | "earliestStart"
+    | "tokens"
+  >,
   planning: PlanningSnapshot,
+  now: number,
   runs: readonly RunCost[],
-  now: Date,
   ahead: readonly number[],
 ): number | null {
-  const { usage, session, weekly, fable, settings, rates } = planning;
-  if (task.provider !== "claude" || usage === null) return now.getTime();
+  const opens = scheduleOpens(task, planning);
+  const notBefore = Math.max(
+    now,
+    task.earliestStart === null ? 0 : Date.parse(task.earliestStart),
+  );
+  const { usage, session, weekly, fable, settings, rates, quiet } = planning;
+  if (task.provider !== "claude" || usage === null)
+    return firstInstant(notBefore, notBefore + IDLE_HORIZON_MS, opens);
   const expected = expectedSessionCost(task, runs, rates);
-  if (expected === null) return null;
-  const windowStart =
-    session.percent === null
-      ? now.getTime()
-      : sessionWindowStart(
-          session,
-          session.percent,
-          usage.session.resetsAt,
-          ahead,
-          expected,
-          now,
-        );
-  if (windowStart === null) return null;
-  let clears = Math.max(now.getTime(), windowStart);
-  if (overCeiling(weekly, 0)) {
-    const at = weeklyClearsAt(
-      weekly,
-      usage.weekly.resetsAt,
-      settings.weeklyMarginPercent,
-    );
-    if (at === null) return null;
-    clears = Math.max(clears, at);
+  if (expected === null || session.percent === null) return null;
+  const weeklyAt = weekly.ok
+    ? now
+    : weeklyClearsAt(
+        weekly,
+        usage.weekly.resetsAt,
+        settings.weeklyMarginPercent,
+      );
+  if (weeklyAt === null) return null;
+  const fableAt =
+    fable && FABLE_MODEL.test(task.model) && !fable.ok
+      ? weeklyClearsAt(
+          fable,
+          usage.fable?.resetsAt ?? null,
+          settings.weeklyMarginPercent,
+        )
+      : now;
+  if (fableAt === null) return null;
+  const reset =
+    usage.session.resetsAt === null ? null : Date.parse(usage.session.resetsAt);
+  const expired = reset !== null && reset <= now;
+  let state: SessionState = {
+    from: Math.max(now, weeklyAt),
+    used: session.percent + session.reserved,
+    end: expired ? null : reset,
+    idle: expired,
+  };
+  const cutoff = cutoffAt(planning, now);
+  const aheadOpens = quietHoursOnly(settings) ? inQuietHours(quiet) : always;
+  for (const cost of ahead) {
+    // A task ahead that can never start takes nothing from this one.
+    state = startInSession(state, cost, aheadOpens, cutoff) ?? state;
   }
-  if (fable && FABLE_MODEL.test(task.model) && overCeiling(fable, 0)) {
-    const at = weeklyClearsAt(
-      fable,
-      usage.fable?.resetsAt ?? null,
-      settings.weeklyMarginPercent,
-    );
-    if (at === null) return null;
-    clears = Math.max(clears, at);
-  }
-  return clears;
+  const started = startInSession(
+    { ...state, from: Math.max(state.from, notBefore, fableAt) },
+    expected,
+    opens,
+    cutoff,
+  );
+  return started === null ? null : started.from;
 }
 
-/** Earliest instant every gate — schedule, quiet hours and usage — opens; null when unknowable. */
+/** Earliest instant the live gate would admit this task, as an ISO timestamp; null when unknowable. */
 export function eligibleAt(
   task: Pick<
     GateTask,
@@ -480,30 +571,8 @@ export function eligibleAt(
   runs: readonly RunCost[],
   ahead: readonly number[] = [],
 ): string | null {
-  const usageClears = usageClearsAt(task, planning, runs, now, ahead);
-  if (usageClears === null) return null;
-  const base = Math.max(
-    now.getTime(),
-    usageClears,
-    task.earliestStart === null ? 0 : Date.parse(task.earliestStart),
-  );
-  if (task.preferredWindowStart !== null)
-    return new Date(
-      Math.max(base, windowStartAt(task.preferredWindowStart, base)),
-    ).toISOString();
-  const { quiet, settings } = planning;
-  if (task.provider !== "claude" || !quietHoursOnly(settings))
-    return new Date(base).toISOString();
-  const startHours = quiet.startHours;
-  if (startHours === null || startHours.length === 0) return null;
-  const { date, hour } = localParts(base);
-  if (startHours.includes(hour)) return new Date(base).toISOString();
-  const next = startHours.find((start) => start > hour);
-  return new Date(
-    next === undefined
-      ? localStart(shiftDate(date, 1), startHours[0])
-      : localStart(date, next),
-  ).toISOString();
+  const at = startsAt(task, planning, now.getTime(), runs, ahead);
+  return at === null ? null : new Date(at).toISOString();
 }
 
 export function taskGate(
@@ -584,7 +653,7 @@ export function taskGate(
     const expected = expectedSessionCost(task, runs, planning.rates);
     if (
       expected !== null &&
-      session.percent + session.reserved + fitCost(expected, session) >
+      session.percent + session.reserved + fitCost(expected, session.ceiling) >
         session.ceiling
     )
       return {
