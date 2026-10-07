@@ -64,8 +64,8 @@ export async function startDashboard(
     const queue = await QueueStore.open(directory);
     const runner = await Runner.open(queue, directory, {
       autoApply: () => settings.snapshot().autoApply,
-      sessionTokens: (sessionId) =>
-        readSessionTokens(join(homedir(), ".claude"), sessionId),
+      sessionTokens: (sessionId, since) =>
+        readSessionTokens(join(homedir(), ".claude"), sessionId, since),
     });
     const keeper = await SessionKeeper.open(directory, {
       enabled: () => settings.snapshot().keepSessionActive,

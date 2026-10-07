@@ -21,7 +21,7 @@ export type SpawnProvider = (
 ) => ProviderProcess;
 export interface ProviderAdapter {
   command: string;
-  args: (task: Task, sessionId: string | null) => string[];
+  args: (task: Task, sessionId: string | null, resume: boolean) => string[];
 }
 /** Appended to a dispatched prompt while the queue's apply override is on. */
 export const AUTO_APPLY_INSTRUCTION =
@@ -30,12 +30,18 @@ export const withAutoApply = (task: Task): Task => ({
   ...task,
   prompt: `${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`,
 });
+/** The final message Claude Code prints when a usage limit ends a run. */
+const LIMIT_STOP = /^You['’]ve hit your (?:session|weekly) limit\b/;
+export const isLimitStop = (summary: string | null) =>
+  summary !== null && LIMIT_STOP.test(summary);
+export const RESUME_PROMPT =
+  "The Claude usage limit stopped you before you finished. The limit has reset; continue the task from where you left off.";
 export const providerAdapters: Record<Provider, ProviderAdapter> = {
   claude: {
     command: "claude",
-    args: (task, sessionId) => [
+    args: (task, sessionId, resume) => [
       "-p",
-      task.prompt,
+      resume ? RESUME_PROMPT : task.prompt,
       "--model",
       task.model,
       "--output-format",
@@ -44,7 +50,9 @@ export const providerAdapters: Record<Provider, ProviderAdapter> = {
       "--dangerously-skip-permissions",
       "--max-turns",
       String(task.maxTurns),
-      ...(sessionId === null ? [] : ["--session-id", sessionId]),
+      ...(sessionId === null
+        ? []
+        : [resume ? "--resume" : "--session-id", sessionId]),
     ],
   },
   codex: {
@@ -66,11 +74,12 @@ export const providerAdapters: Record<Provider, ProviderAdapter> = {
 export function launchProvider(
   task: Task,
   sessionId: string | null,
+  resume = false,
   spawnProcess: SpawnProvider = spawn,
   adapters = providerAdapters,
 ): ProviderProcess {
   const adapter = adapters[task.provider];
-  return spawnProcess(adapter.command, adapter.args(task, sessionId), {
+  return spawnProcess(adapter.command, adapter.args(task, sessionId, resume), {
     cwd: task.workdir,
     shell: false,
     detached: true,

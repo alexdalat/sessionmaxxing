@@ -6,6 +6,7 @@ import { temporary } from "./helpers";
 
 const DISPATCHED_SESSION = "11111111-2222-4333-8444-555555555555";
 const OTHER_SESSION = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+const BEFORE_RECORDS = "2026-09-06T00:00:00.000Z";
 
 const assistantLine = (record: {
   messageId: string;
@@ -246,12 +247,40 @@ it("sums the output tokens of a session, its subagents, and the last record of e
         outputTokens: 900,
       }),
     ]);
-    expect(await readSessionTokens(root, DISPATCHED_SESSION)).toEqual({
+    expect(
+      await readSessionTokens(root, DISPATCHED_SESSION, BEFORE_RECORDS),
+    ).toEqual({
       fable: 200,
       opus: 150,
       sonnet: 0,
       haiku: 50,
     });
+  });
+});
+
+it("counts only the records a resumed session wrote after the run started", async () => {
+  await withRoot(async (root) => {
+    await transcript(root, `demo/${DISPATCHED_SESSION}.jsonl`, [
+      assistantLine({
+        messageId: "first-run",
+        timestamp: "2026-09-06T15:00:00Z",
+        sessionId: DISPATCHED_SESSION,
+        outputTokens: 700,
+      }),
+      assistantLine({
+        messageId: "resumed-run",
+        timestamp: "2026-09-06T20:30:00Z",
+        sessionId: DISPATCHED_SESSION,
+        outputTokens: 40,
+      }),
+    ]);
+    expect(
+      await readSessionTokens(
+        root,
+        DISPATCHED_SESSION,
+        "2026-09-06T20:29:30.000Z",
+      ),
+    ).toEqual({ fable: 0, opus: 40, sonnet: 0, haiku: 0 });
   });
 });
 
@@ -265,7 +294,9 @@ it("reports no tokens for a session with no transcript", async () => {
         outputTokens: 900,
       }),
     ]);
-    expect(await readSessionTokens(root, DISPATCHED_SESSION)).toEqual({
+    expect(
+      await readSessionTokens(root, DISPATCHED_SESSION, BEFORE_RECORDS),
+    ).toEqual({
       fable: 0,
       opus: 0,
       sonnet: 0,

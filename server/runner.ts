@@ -37,6 +37,7 @@ import {
 } from "./git.js";
 import { OutputPreview } from "./output.js";
 import {
+  isLimitStop,
   launchProvider,
   type ProviderProcess,
   withAutoApply,
@@ -48,9 +49,13 @@ import { validateWorkdir } from "./validation.js";
 
 interface RunnerOptions {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
-  launch?: (task: Task, sessionId: string | null) => ProviderProcess;
+  launch?: (
+    task: Task,
+    sessionId: string | null,
+    resume: boolean,
+  ) => ProviderProcess;
   autoApply?: () => boolean;
-  sessionTokens?: (sessionId: string) => Promise<WeightedTokens>;
+  sessionTokens?: (sessionId: string, since: string) => Promise<WeightedTokens>;
   now?: () => Date;
 }
 export type Planner = (load: DispatchLoad) => PlanningSnapshot;
@@ -100,6 +105,8 @@ export const SLOTS_BUSY_ERROR = "All run slots are busy.";
 export const blockedReason = (title: string) =>
   `Waits for “${title}” · same project`;
 export const deployReason = (title: string) => `Waits for deploy of “${title}”`;
+export const LIMIT_STOP_ERROR =
+  "Stopped at the usage limit · resumes after the reset";
 
 export class Runner {
   private runs: StoredRun[] = [];
@@ -115,10 +122,13 @@ export class Runner {
     this.getPlanning = planning;
     this.refreshUsage = refreshUsage;
   }
-  /** The output tokens a finished Claude run produced; null when its transcript recorded none. */
-  private async readTokens(sessionId: string | null) {
-    if (sessionId === null || !this.options.sessionTokens) return null;
-    const tokens = await this.options.sessionTokens(sessionId);
+  /** The tokens a finished Claude run produced; null when its transcript recorded none. */
+  private async readTokens(run: StoredRun) {
+    if (run.sessionId === null || !this.options.sessionTokens) return null;
+    const tokens = await this.options.sessionTokens(
+      run.sessionId,
+      run.startedAt,
+    );
     // No recorded token means the transcript was not found, not that the run was free.
     return measured(tokens) ? tokens : null;
   }
@@ -203,9 +213,12 @@ export class Runner {
         endedAt: saved.endedAt,
         durationMs: saved.durationMs,
         exitCode: saved.exitCode,
-        error: saved.error
-          ? "Previous run failed. See status or retry the task."
-          : null,
+        error:
+          saved.error === LIMIT_STOP_ERROR
+            ? LIMIT_STOP_ERROR
+            : saved.error
+              ? "Previous run failed. See status or retry the task."
+              : null,
         tokens: savedTokens(saved.tokens),
         sessionId: typeof saved.sessionId === "string" ? saved.sessionId : null,
         summary: saved.summary ?? null,
@@ -223,7 +236,7 @@ export class Runner {
     }
     for (const run of runner.runs) {
       if (run.tokens !== null) continue;
-      const tokens = await runner.readTokens(run.sessionId);
+      const tokens = await runner.readTokens(run);
       if (tokens === null) continue;
       run.tokens = tokens;
       await runner.persist(run);
@@ -390,7 +403,9 @@ export class Runner {
       const gate = taskGate(task, this.planning(), this.now(), this.list());
       if (gate.status !== "ready") throw new DomainError(gate.reason);
     }
-    const sessionId = task.provider === "claude" ? randomUUID() : null;
+    const limited = this.limitStopped(task.id);
+    const sessionId =
+      task.provider !== "claude" ? null : (limited?.sessionId ?? randomUUID());
     const run: StoredRun = {
       id: id(),
       taskId: task.id,
@@ -431,10 +446,27 @@ export class Runner {
     };
     this.active.set(run.id, active);
     this.runs.push(run);
-    await this.launch(active, sessionId);
+    await this.launch(active, sessionId, limited !== undefined);
     return this.list().find((r) => r.id === run.id) as Run;
   }
-  private async launch(active: Active, sessionId: string | null) {
+  /** The task's latest run when a usage limit stopped it, so the next run resumes its session. */
+  private limitStopped(taskId: string): StoredRun | undefined {
+    let latest: StoredRun | undefined;
+    for (const run of this.runs)
+      if (
+        run.taskId === taskId &&
+        (!latest || run.startedAt > latest.startedAt)
+      )
+        latest = run;
+    return latest?.error === LIMIT_STOP_ERROR && latest.sessionId !== null
+      ? latest
+      : undefined;
+  }
+  private async launch(
+    active: Active,
+    sessionId: string | null,
+    resume: boolean,
+  ) {
     const { run } = active;
     try {
       active.task = await this.store.claim(active.task.id);
@@ -459,6 +491,7 @@ export class Runner {
       const child = (this.options.launch ?? launchProvider)(
         active.applied ? withAutoApply(task) : task,
         sessionId,
+        resume,
       );
       active.child = child;
       for (const channel of ["stdout", "stderr"] as const) {
@@ -533,6 +566,11 @@ export class Runner {
     );
     active.run.preview = active.output.lines();
     active.run.summary = active.output.summary();
+    const limitStopped =
+      active.run.status === "failed" &&
+      active.run.sessionId !== null &&
+      isLimitStop(active.run.summary);
+    if (limitStopped) active.run.error = LIMIT_STOP_ERROR;
     try {
       const before = active.gitStart;
       const after = before ? await snapshotWorkdir(active.task.workdir) : null;
@@ -545,7 +583,7 @@ export class Runner {
         "Could not read what the run changed in its work directory.";
     }
     try {
-      active.run.tokens = await this.readTokens(active.run.sessionId);
+      active.run.tokens = await this.readTokens(active.run);
     } catch {
       this.error =
         "Could not read the tokens of the run. Auto-dispatch is paused; check transcript file access.";
@@ -557,7 +595,8 @@ export class Runner {
         "Could not persist the run result. Queue state was finalized; check runtime file access and restart.";
     }
     try {
-      await this.store.finish(active.task.id, active.run.status);
+      if (limitStopped) await this.store.requeue(active.task.id);
+      else await this.store.finish(active.task.id, active.run.status);
     } catch {
       this.error =
         "Could not finalize the queue task. Auto-dispatch is paused; check runtime file access and restart.";

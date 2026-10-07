@@ -125,10 +125,15 @@ async function sessionFiles(root: string, sessionId: string) {
   return files;
 }
 
-/** Weighted tokens one dispatched session consumed, by model family, subagents included. */
+/**
+ * Weighted tokens one dispatched session consumed from `since` on, by model
+ * family, subagents included. A resumed session keeps its id, so each run
+ * counts only the records written after it started.
+ */
 export async function readSessionTokens(
   root: string,
   sessionId: string,
+  since: string,
 ): Promise<WeightedTokens> {
   const tokens = emptyWeightedTokens();
   const latest = new Map<string, ActivityEvent>();
@@ -141,6 +146,7 @@ export async function readSessionTokens(
       else latest.set(messageId, event);
   }
   for (const event of [...latest.values(), ...anonymous]) {
+    if (event.timestamp < since) continue;
     // A record whose model the parser did not recognize has no family to charge.
     const family = modelFamily(event.model);
     if (family !== null) tokens[family] += weightedTokens(event, family);

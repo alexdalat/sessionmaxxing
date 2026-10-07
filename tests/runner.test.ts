@@ -13,7 +13,7 @@ import { planDispatch } from "../server/dispatch.js";
 import { gitIn } from "../server/git.js";
 import { AUTO_APPLY_INSTRUCTION } from "../server/providers.js";
 import { QueueStore } from "../server/queue.js";
-import { Runner } from "../server/runner.js";
+import { LIMIT_STOP_ERROR, Runner } from "../server/runner.js";
 import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchLoad,
@@ -650,6 +650,104 @@ it("appends the apply instruction to a dispatched prompt only while the override
       task.prompt,
     );
     await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+const SESSION_LIMIT_RESULT =
+  '{"type":"result","is_error":true,"num_turns":41,"result":"You\'ve hit your session limit · resets 5:50am (America/New_York)"}\n';
+
+it("puts a task stopped by the session limit back in line and resumes its Claude session on the next run", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    const children = [fakeChild(), fakeChild()];
+    const launch = vi.fn(
+      (_task: Task, _sessionId: string | null, _resume: boolean) =>
+        children[launch.mock.calls.length - 1],
+    );
+    const runner = await Runner.open(store, temp.path, { launch });
+    await runner.start(task.id);
+    children[0].stdout.write(SESSION_LIMIT_RESULT);
+    children[0].emit("close", 1);
+    await runner.waitForIdle();
+    expect(store.snapshot().tasks[0].status).toBe("pending");
+    expect(runner.list()[0]).toMatchObject({
+      status: "failed",
+      error: LIMIT_STOP_ERROR,
+    });
+    await runner.start(task.id);
+    const [first, second] = launch.mock.calls;
+    expect(first[1]).toMatch(UUID);
+    expect(first[2]).toBe(false);
+    expect(second[1]).toBe(first[1]);
+    expect(second[2]).toBe(true);
+    children[1].stdout.write(
+      '{"type":"result","is_error":false,"num_turns":3,"result":"Finished."}\n',
+    );
+    children[1].emit("close", 0);
+    await runner.waitForIdle();
+    expect(store.snapshot().tasks[0].status).toBe("completed");
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("starts a fresh Claude session when a retried task failed for another reason", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    const children = [fakeChild(), fakeChild()];
+    const launch = vi.fn(
+      (_task: Task, _sessionId: string | null, _resume: boolean) =>
+        children[launch.mock.calls.length - 1],
+    );
+    const runner = await Runner.open(store, temp.path, { launch });
+    await runner.start(task.id);
+    children[0].stdout.write(
+      '{"type":"result","is_error":true,"result":"The provider gave up."}\n',
+    );
+    children[0].emit("close", 1);
+    await runner.waitForIdle();
+    expect(store.snapshot().tasks[0].status).toBe("failed");
+    await store.retry(task.id);
+    await runner.start(task.id);
+    const [first, second] = launch.mock.calls;
+    expect(second[1]).toMatch(UUID);
+    expect(second[1]).not.toBe(first[1]);
+    expect(second[2]).toBe(false);
+    children[1].emit("close", 0);
+    await runner.waitForIdle();
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("keeps the usage-limit reason of a stopped run across a restart so its task still resumes", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path);
+    const task = await store.create(taskInput(temp.path));
+    const child = fakeChild();
+    const runner = await Runner.open(store, temp.path, { launch: () => child });
+    await runner.start(task.id);
+    child.stdout.write(SESSION_LIMIT_RESULT);
+    child.emit("close", 1);
+    await runner.waitForIdle();
+    await runner.close();
+    const resumed = fakeChild();
+    const launch = vi.fn(
+      (_task: Task, _sessionId: string | null, _resume: boolean) => resumed,
+    );
+    const restarted = await Runner.open(store, temp.path, { launch });
+    expect(restarted.list()[0].error).toBe(LIMIT_STOP_ERROR);
+    await restarted.start(task.id);
+    expect(launch.mock.calls[0][2]).toBe(true);
+    resumed.emit("close", 0);
+    await restarted.waitForIdle();
+    await restarted.close();
   } finally {
     await temp.cleanup();
   }

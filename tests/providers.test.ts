@@ -1,7 +1,9 @@
 import { expect, it, vi } from "vitest";
 import {
   AUTO_APPLY_INSTRUCTION,
+  isLimitStop,
   launchProvider,
+  RESUME_PROMPT,
   type SpawnProvider,
   withAutoApply,
 } from "../server/providers.js";
@@ -19,7 +21,7 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
     model: "opus",
   };
   const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
-  launchProvider(base, sessionId, spawn);
+  launchProvider(base, sessionId, false, spawn);
   expect(spawn).toHaveBeenLastCalledWith(
     "claude",
     [
@@ -46,6 +48,7 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
   launchProvider(
     { ...base, provider: "codex", model: "gpt-6-astra" },
     sessionId,
+    false,
     spawn,
   );
   expect(spawn).toHaveBeenLastCalledWith(
@@ -82,7 +85,7 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
   expect(
     spawn.mock.calls.map((call) => call[1].includes("--session-id")),
   ).toEqual([true, false]);
-  launchProvider(base, null, spawn);
+  launchProvider(base, null, false, spawn);
   expect(spawn.mock.lastCall?.[1]).not.toContain("--session-id");
 });
 it("bounds previews and redacts arbitrary text, credentials, environment values, IDs, and message contents across chunks", async () => {
@@ -171,4 +174,34 @@ it("tells an auto-apply run to ignore git and still deploy", () => {
   expect(withAutoApply(task).prompt).toBe(
     `${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`,
   );
+});
+it("resumes the stopped Claude session with the resume prompt instead of the task prompt", () => {
+  const child = fakeChild();
+  const spawn = vi.fn<SpawnProvider>(() => child);
+  const task = {
+    ...taskInput("/home/user"),
+    id: "b".repeat(24),
+    status: "pending" as const,
+    createdAt: new Date().toISOString(),
+    finishedAt: null,
+    model: "opus",
+  };
+  const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
+  launchProvider(task, sessionId, true, spawn);
+  const args = spawn.mock.calls[0][1];
+  expect(args.slice(0, 2)).toEqual(["-p", RESUME_PROMPT]);
+  expect(args.slice(-2)).toEqual(["--resume", sessionId]);
+  expect(args).not.toContain("--session-id");
+});
+it("recognizes the session and weekly limit messages Claude Code ends a run with", () => {
+  expect(
+    isLimitStop(
+      "You've hit your session limit · resets 5:50am (America/New_York)",
+    ),
+  ).toBe(true);
+  expect(isLimitStop("You’ve hit your weekly limit · resets Oct 11, 4am")).toBe(
+    true,
+  );
+  expect(isLimitStop("The provider gave up.")).toBe(false);
+  expect(isLimitStop(null)).toBe(false);
 });

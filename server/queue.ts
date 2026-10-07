@@ -304,6 +304,16 @@ export class QueueStore {
       task.finishedAt = new Date().toISOString();
     });
   }
+  /** Puts a running task back in line, as when a usage limit stopped its run. */
+  async requeue(taskId: string) {
+    return this.transact((state) => {
+      const task = this.find(state, taskId);
+      if (task.status !== "running")
+        throw new DomainError("Only a running task can be requeued.");
+      task.status = "pending";
+      task.finishedAt = null;
+    });
+  }
   async retry(taskId: string) {
     return this.transact((state) => {
       const task = this.find(state, taskId);
