@@ -380,7 +380,7 @@ it("leaves every run file identical on a second open after the migration", async
   }
 });
 
-it("removes a codex run json whose log an interrupted migration already deleted", async () => {
+it("removes a codex run whose log is already missing", async () => {
   const temp = await temporary();
   try {
     await writeRun(temp.path, codexRun(), null);

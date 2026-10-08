@@ -256,7 +256,6 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
           url: "/api/tasks",
           payload: {
             ...taskInput(temp.path),
-            provider: "bad",
             extra: "SECRET",
           },
         })

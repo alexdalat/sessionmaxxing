@@ -72,7 +72,7 @@ While any request is unfinished, the runner starts nothing: `admit()` throws, `s
 - Launch the Claude CLI with `child_process.spawn(command, args, { shell: false })`; never build a shell string from a task.
 - Accept only existing absolute work directories under `/home/user`.
 - Dispatched Claude tasks run with `--dangerously-skip-permissions` so a queued run has every tool an interactive session has (shell, web search, MCP servers, skills from `~/.claude`). The container runs unprivileged and only the local queue owner can add tasks, so the prompt is the trust boundary.
-- No silent fallbacks: a failed usage fetch is shown as an error and blocks auto-dispatch; corrupt runtime files fail loudly instead of being reset.
+- No silent fallbacks: a failed usage fetch is shown as an error and blocks auto-dispatch; corrupt runtime files fail loudly instead of being reset. The one load-time rewrite is the provider migration (`server/legacy-provider.ts`): stored Codex tasks and runs are deleted, ids of deleted tasks leave every `dependsOn`, and Claude records lose their `provider` key; any other provider value fails loudly.
 - The only host-side service is the deploy watcher in `deploy/`: a systemd user path unit that runs `docker compose` for finished runs. Nothing else is a cron job or daemon; Docker Compose is otherwise started by hand.
 - Tests mock only true boundaries (network, clock, temp filesystem). Never hit the real usage endpoint from tests.
 - No "view as table" disclosures, estimate badges, or caveat prose in the UI. The chart is the deliverable.
