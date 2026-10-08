@@ -100,14 +100,13 @@ it("truncates a long summary to its tail", async () => {
   expect(summary?.startsWith("…")).toBe(true);
   expect(summary?.endsWith("That is the end.")).toBe(true);
 });
-it("uses the last block of plain provider output as the summary", async () => {
+it("keeps plain stdout out of the summary and the preview", async () => {
   const { OutputPreview } = await import("../server/output.js");
   const preview = new OutputPreview();
-  preview.push("stdout", "[2026-09-08T12:00:00] starting\nreading files\n\n");
   preview.push("stdout", "Updated the parser.\nAll tests pass.\n");
   preview.flush();
-  expect(preview.summary()).toBe("Updated the parser.\nAll tests pass.");
-  expect(preview.lines().join("\n")).not.toContain("Updated the parser");
+  expect(preview.summary()).toBeNull();
+  expect(preview.lines()).toEqual(["[redacted stdout]"]);
 });
 
 it("tells an auto-apply run to ignore git and still deploy", () => {

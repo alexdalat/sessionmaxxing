@@ -21,8 +21,6 @@ export class OutputPreview {
   private dropping: Record<Channel, boolean> = { stdout: false, stderr: false };
   private preview: string[] = [];
   private resultText: string | null = null;
-  private block = "";
-  private lastBlock: string | null = null;
   failed = false;
   constructor(saved: string[] = []) {
     for (const line of saved)
@@ -37,15 +35,8 @@ export class OutputPreview {
     )
       this.preview.shift();
   }
-  private endBlock() {
-    if (this.block) this.lastBlock = this.block;
-    this.block = "";
-  }
   private consume(channel: Channel, line: string) {
-    if (!line.trim()) {
-      if (channel === "stdout") this.endBlock();
-      return;
-    }
+    if (!line.trim()) return;
     if (channel === "stdout") {
       try {
         const event = JSON.parse(line);
@@ -69,7 +60,6 @@ export class OutputPreview {
           return;
         }
       } catch {
-        this.block = capTail(this.block ? `${this.block}\n${line}` : line);
         this.add("[redacted stdout]");
         return;
       }
@@ -99,13 +89,12 @@ export class OutputPreview {
       if (!this.dropping[channel]) this.consume(channel, this.buffers[channel]);
       this.buffers[channel] = "";
     }
-    this.endBlock();
   }
   lines() {
     return [...this.preview];
   }
-  /** Claude's closing message: its result text, or the last block of plain output. */
+  /** Claude's closing message from its result event. */
   summary(): string | null {
-    return this.resultText ?? this.lastBlock;
+    return this.resultText;
   }
 }
