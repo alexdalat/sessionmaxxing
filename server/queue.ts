@@ -10,6 +10,7 @@ import {
   type TaskInput,
   type TaskStatus,
 } from "../shared/types.js";
+import { migrateProvider } from "./legacy-provider.js";
 import { atomicJson, DomainError, id } from "./storage.js";
 import { TASK_ID, validateFields, validateWorkdir } from "./validation.js";
 
@@ -112,6 +113,13 @@ export class QueueStore {
         500,
       );
     let migrated = false;
+    const dropped = new Set<string>();
+    state.tasks = state.tasks.filter((task) => {
+      const migration = migrateProvider(task, "Queue task");
+      if (migration !== "unchanged") migrated = true;
+      if (migration === "drop") dropped.add(task.id);
+      return migration !== "drop";
+    });
     const ids = new Set<string>();
     for (const task of state.tasks as (Task & { budgetEstimate?: number })[]) {
       if ("budgetEstimate" in task) {
@@ -175,6 +183,14 @@ export class QueueStore {
       )
         throw new DomainError("Queue task metadata is invalid.", 500);
       ids.add(task.id);
+    }
+    for (const task of state.tasks) {
+      const kept = task.dependsOn.filter(
+        (dependencyId) => !dropped.has(dependencyId),
+      );
+      if (kept.length === task.dependsOn.length) continue;
+      task.dependsOn = kept;
+      migrated = true;
     }
     const interrupted = state.tasks.some((t) => t.status === "running");
     if (interrupted || migrated) {
