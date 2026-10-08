@@ -37,18 +37,16 @@ it("measures weekly pace as the elapsed share of the seven-day window", () => {
 });
 
 it("waits while official usage is missing or stale and says why", () => {
-  expect(
-    plan(null, "Claude Code credentials not found.").providers.claude,
-  ).toEqual({
+  expect(plan(null, "Claude Code credentials not found.").gate).toEqual({
     status: "waiting",
     reason: "Official usage unavailable: Claude Code credentials not found.",
   });
-  expect(plan(null).providers.claude.reason).toMatch(/not fetched yet/);
+  expect(plan(null).gate.reason).toMatch(/not fetched yet/);
   const stale = plan(
     usageSnapshot({ fetchedAt: "2026-09-06T11:40:00Z" }),
     "Anthropic usage endpoint returned HTTP 503.",
   );
-  expect(stale.providers.claude).toEqual({
+  expect(stale.gate).toEqual({
     status: "waiting",
     reason:
       "Official usage is 20 min old · refresh to retry (Anthropic usage endpoint returned HTTP 503.)",
@@ -69,7 +67,7 @@ it("holds Claude tasks when the session exceeds its ceiling and treats an expire
     reserved: 0,
     ok: false,
   });
-  expect(busy.providers.claude).toEqual({
+  expect(busy.gate).toEqual({
     status: "waiting",
     reason: "Session 80%, over the 75% queue cutoff",
   });
@@ -79,12 +77,12 @@ it("holds Claude tasks when the session exceeds its ceiling and treats an expire
     }),
   );
   expect(expired.session.percent).toBe(0);
-  expect(expired.providers.claude.status).toBe("ready");
+  expect(expired.gate.status).toBe("ready");
   expect(
     plan(usageSnapshot(), null, {
       ...DEFAULT_DISPATCH_SETTINGS,
       sessionReservePercent: 90,
-    }).providers.claude.reason,
+    }).gate.reason,
   ).toMatch(/Session 16%, over the 10% queue cutoff/);
 });
 
@@ -100,13 +98,13 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
     reserved: 0,
     ok: false,
   });
-  expect(ahead.providers.claude.reason).toBe(
+  expect(ahead.gate.reason).toBe(
     "Weekly 61%, over the 60% queue cutoff (pace 50% + 10% margin)",
   );
   const ready = plan(
     usageSnapshot({ weekly: { percent: 59, resetsAt: halfway } }),
   );
-  expect(ready.providers.claude).toEqual({
+  expect(ready.gate).toEqual({
     status: "ready",
     reason: "Session 16% of 75% · Weekly 59% of 60%",
   });
@@ -116,13 +114,13 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
     }),
   );
   expect(lateWeek.weekly.ceiling).toBe(95);
-  expect(lateWeek.providers.claude.status).toBe("waiting");
+  expect(lateWeek.gate.status).toBe("waiting");
   expect(
     plan(usageSnapshot({ weekly: { percent: 0, resetsAt: null } })).weekly,
   ).toEqual({ percent: 0, ceiling: 95, pace: null, reserved: 0, ok: true });
 });
 
-it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirrors task status", () => {
+it("gates Fable-model tasks on the Fable window and mirrors task status", () => {
   const planning = plan(
     usageSnapshot({ fable: { percent: 70, resetsAt: "2026-09-10T00:00:00Z" } }),
   );
@@ -136,7 +134,6 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
   const base = {
     id: "a".repeat(24),
     status: "pending" as const,
-    provider: "claude" as const,
     preferredWindowStart: 8,
     earliestStart: null,
     tokens: 100_000,
@@ -150,18 +147,6 @@ it("gates Fable-model tasks on the Fable window, leaves Codex ungated, and mirro
     status: "waiting",
     reason: "Fable weekly 70%, over the 60% queue cutoff",
     eligibleAt: "2026-09-07T12:00:00.000Z",
-  });
-  expect(
-    taskGate(
-      { ...base, provider: "codex", model: "gpt-6-astra" },
-      planning,
-      now,
-      [],
-    ),
-  ).toEqual({
-    status: "ready",
-    reason: "Codex tasks never wait on Claude usage",
-    eligibleAt: now.toISOString(),
   });
   expect(
     taskGate({ ...base, status: "running", model: "opus" }, planning, now, []),
@@ -200,7 +185,6 @@ it("ranks quiet start hours, marks whether now is inside one, and names the next
   const task = {
     id: "a".repeat(24),
     status: "pending" as const,
-    provider: "claude" as const,
     model: "opus",
     preferredWindowStart: null,
     earliestStart: null,
@@ -213,14 +197,6 @@ it("ranks quiet start hours, marks whether now is inside one, and names the next
   });
   expect(
     taskGate({ ...task, preferredWindowStart: 8 }, eightAm, now, []).status,
-  ).toBe("ready");
-  expect(
-    taskGate(
-      { ...task, provider: "codex", model: "gpt-6-astra" },
-      eightAm,
-      now,
-      [],
-    ).status,
   ).toBe("ready");
   const notComputed = plan(usageSnapshot(), null, DEFAULT_DISPATCH_SETTINGS, {
     ranking: null,
@@ -269,11 +245,10 @@ it("distrusts official usage fetched before the last run ended", () => {
     { ...EMPTY_LOAD, lastRunEndedAt: "2026-09-06T11:56:00Z" },
     calibration,
   );
-  expect(predates.providers.claude).toEqual({
+  expect(predates.gate).toEqual({
     status: "waiting",
     reason: USAGE_PREDATES_RUN_REASON,
   });
-  expect(predates.providers.codex.status).toBe("ready");
   const fresh = planDispatch(
     DEFAULT_DISPATCH_SETTINGS,
     { snapshot, error: null },
@@ -282,7 +257,7 @@ it("distrusts official usage fetched before the last run ended", () => {
     { ...EMPTY_LOAD, lastRunEndedAt: "2026-09-06T11:55:00Z" },
     calibration,
   );
-  expect(fresh.providers.claude.status).toBe("ready");
+  expect(fresh.gate.status).toBe("ready");
 });
 
 it("holds a task until its earliest start time and names that time", () => {
@@ -290,7 +265,6 @@ it("holds a task until its earliest start time and names that time", () => {
   const task = {
     id: "a".repeat(24),
     status: "pending" as const,
-    provider: "claude" as const,
     model: "opus",
     preferredWindowStart: 8,
     earliestStart: "2026-09-08T02:00:00Z",
@@ -314,7 +288,6 @@ it("holds a task until its earliest start time and names that time", () => {
 const pending = {
   id: "a".repeat(24),
   status: "pending" as const,
-  provider: "claude" as const,
   model: "opus",
   preferredWindowStart: null,
   earliestStart: null,
@@ -414,7 +387,7 @@ it("holds the session to the busy-hours reserve outside quiet hours", () => {
     reserved: 0,
     ok: false,
   });
-  expect(planning.providers.claude).toEqual({
+  expect(planning.gate).toEqual({
     status: "waiting",
     reason: "Session 40%, over the 30% queue cutoff (busy hours)",
   });
@@ -449,7 +422,7 @@ it("applies the busy-hours reserve while the quiet ranking is still null", () =>
   const planning = plan(busySession, null, splitReserves);
   expect(planning.quiet.startHours).toBeNull();
   expect(planning.session.ceiling).toBe(30);
-  expect(planning.providers.claude).toEqual({
+  expect(planning.gate).toEqual({
     status: "waiting",
     reason: "Session 40%, over the 30% queue cutoff (busy hours)",
   });
@@ -477,7 +450,7 @@ const anyHour = { ...DEFAULT_DISPATCH_SETTINGS, busyHoursReservePercent: 25 };
 
 it("waits when session percent plus the expected cost of the task exceeds the cutoff", () => {
   const planning = plan(halfSpent, null, anyHour);
-  expect(planning.providers.claude.status).toBe("ready");
+  expect(planning.gate.status).toBe("ready");
   expect(taskGate({ ...pending, tokens: 150_000 }, planning, now, [])).toEqual({
     status: "waiting",
     reason: "Session 60% + 20.7% expected, over the 75% queue cutoff",
@@ -505,7 +478,7 @@ it("counts what running tasks hold on top of the expected cost of the task", () 
     reserved: { session: 10, weekly: 3, fable: 0 },
   };
   const planning = plan(halfSpent, null, anyHour, undefined, load);
-  expect(planning.providers.claude.status).toBe("ready");
+  expect(planning.gate.status).toBe("ready");
   expect(taskGate(pending, planning, now, [])).toMatchObject({
     status: "waiting",
     reason:
@@ -533,13 +506,6 @@ it("reserves the expected session cost of the task that is running", () => {
     weekly: DEFAULT_DISPATCH_SETTINGS.runWeeklyCostPercent,
     fable: DEFAULT_DISPATCH_SETTINGS.runWeeklyCostPercent,
   });
-  expect(
-    runReservation(
-      { ...pending, provider: "codex", model: "gpt-6-astra" },
-      13.8,
-      DEFAULT_DISPATCH_SETTINGS,
-    ),
-  ).toEqual({ session: 0, weekly: 0, fable: 0 });
 });
 
 it("admits no Claude task while the session rates are unknown", () => {
@@ -552,7 +518,7 @@ it("admits no Claude task while the session rates are unknown", () => {
     { rates: null, error: "Local history could not be read." },
   );
   expect(planning.rates).toBeNull();
-  expect(planning.providers.claude).toEqual({
+  expect(planning.gate).toEqual({
     status: "waiting",
     reason:
       "Session cost calibration unavailable: Local history could not be read.",
@@ -561,7 +527,6 @@ it("admits no Claude task while the session rates are unknown", () => {
     status: "waiting",
     eligibleAt: null,
   });
-  expect(planning.providers.codex.status).toBe("ready");
 });
 
 it("predicts the session reset, shifted to the next quiet hour, for a task without headroom", () => {
@@ -613,14 +578,6 @@ it("cannot predict a start for a blocked bucket with no known reset", () => {
     anyHour,
   );
   expect(taskGate(pending, planning, now, []).eligibleAt).toBeNull();
-  expect(
-    taskGate(
-      { ...pending, provider: "codex", model: "gpt-6-astra" },
-      planning,
-      now,
-      [],
-    ).eligibleAt,
-  ).toBe(now.toISOString());
 });
 
 it("uses the largest measured cost from previous runs of the same task", () => {
@@ -719,7 +676,6 @@ it("counts only the pending Claude tasks queued ahead of the task", () => {
   const tasks = [
     { ...pending, id: "b".repeat(24) },
     { ...pending, id: "c".repeat(24), status: "running" as const },
-    { ...pending, id: "d".repeat(24), provider: "codex" as const },
     { ...pending, id: "e".repeat(24), tokens: 150_000 },
     pending,
     { ...pending, id: "f".repeat(24) },

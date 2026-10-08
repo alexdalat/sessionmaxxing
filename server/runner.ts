@@ -708,7 +708,7 @@ export class Runner {
       )
         return;
       if (
-        this.planning().providers.claude.reason === USAGE_PREDATES_RUN_REASON &&
+        this.planning().gate.reason === USAGE_PREDATES_RUN_REASON &&
         this.refreshUsage
       )
         await this.refreshUsage();

@@ -539,7 +539,7 @@ export interface PlanningSnapshot {
   fable: BucketGate | null;
   quiet: QuietHours;
   load: DispatchLoad;
-  providers: Record<Provider, DispatchGate>;
+  gate: DispatchGate;
 }
 
 export const PLAN_SCORE_DAYS = 28;

@@ -188,10 +188,10 @@ if (dryRun) {
 
 const { base, usage } = await connect(values["--url"] ?? DEFAULT_URL);
 const planning = await send(base, "/api/dispatch-settings");
-const claude = planning.providers.claude;
+const gate = planning.gate;
 const percent = (bucket) => (bucket ? `${bucket.percent}%` : "unknown");
 console.log(
-  `${base} · session ${percent(usage.snapshot?.session)} · weekly ${percent(usage.snapshot?.weekly)} · quiet ${quietLabel(planning.quiet)} · claude ${claude.status}: ${claude.reason}${usage.error ? ` · usage error: ${usage.error}` : ""}`,
+  `${base} · session ${percent(usage.snapshot?.session)} · weekly ${percent(usage.snapshot?.weekly)} · quiet ${quietLabel(planning.quiet)} · claude ${gate.status}: ${gate.reason}${usage.error ? ` · usage error: ${usage.error}` : ""}`,
 );
 
 const created = await send(base, "/api/tasks", {

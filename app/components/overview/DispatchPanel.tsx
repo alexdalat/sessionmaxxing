@@ -65,7 +65,7 @@ export function DispatchPanel({
       `${planning.load.running}/${planning.settings.maxConcurrentRuns}`,
     ],
   ] as const;
-  const claude = planning.providers.claude;
+  const gate = planning.gate;
   const queueLabel =
     queueOn === undefined ? "…" : queueOn ? "Queue on" : "Queue off";
   const rows = tasks ? queuePreview(tasks, now) : null;
@@ -87,7 +87,7 @@ export function DispatchPanel({
         </div>
       </div>
       <p className="dispatch-reason">
-        {claude.status === "ready" ? (
+        {gate.status === "ready" ? (
           <>
             <Bucket name="Session" gate={planning.session} />
             {" · "}
@@ -100,7 +100,7 @@ export function DispatchPanel({
             )}
           </>
         ) : (
-          claude.reason
+          gate.reason
         )}
       </p>
       <p className="dispatch-quiet">

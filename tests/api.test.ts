@@ -505,8 +505,9 @@ it("serves official usage with sample history, refreshes on demand, and validate
         sessionReservePercent: 25,
         weeklyMarginPercent: 10,
       },
-      providers: { claude: { status: "ready" } },
+      gate: { status: "ready" },
     });
+    expect(planning.json()).not.toHaveProperty("providers");
     const saved = await app.inject({
       method: "PUT",
       url: "/api/dispatch-settings",
@@ -521,7 +522,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
         runWeeklyCostPercent: 3,
       },
     });
-    expect(saved.json().providers.claude.status).toBe("waiting");
+    expect(saved.json().gate.status).toBe("waiting");
     expect(saved.json().quiet).toMatchObject({
       startHours: [0, 1, 2, 3, 4, 5, 6, 7],
       nowHour: 8,

@@ -104,11 +104,10 @@ const plural = (count: number, noun: string) =>
 
 /** Points one run of `task` holds in each Claude bucket while it is active. */
 export function runReservation(
-  task: Pick<PublicTask, "provider" | "model">,
+  task: Pick<PublicTask, "model">,
   expectedSessionPercent: number,
   settings: DispatchSettings,
 ): Record<ClaudeBucket, number> {
-  if (task.provider !== "claude") return { session: 0, weekly: 0, fable: 0 };
   return {
     session: expectedSessionPercent,
     weekly: settings.runWeeklyCostPercent,
@@ -118,7 +117,7 @@ export function runReservation(
 /** The load after one more run of `task` has started. */
 export function withRun(
   load: DispatchLoad,
-  task: Pick<PublicTask, "provider" | "model">,
+  task: Pick<PublicTask, "model">,
   expectedSessionPercent: number,
   settings: DispatchSettings,
 ): DispatchLoad {
@@ -126,7 +125,7 @@ export function withRun(
   return {
     ...load,
     running: load.running + 1,
-    claudeRuns: load.claudeRuns + (task.provider === "claude" ? 1 : 0),
+    claudeRuns: load.claudeRuns + 1,
     reserved: {
       session: load.reserved.session + cost.session,
       weekly: load.reserved.weekly + cost.weekly,
@@ -218,15 +217,15 @@ export function planDispatch(
     status: "waiting",
     reason: `All ${plural(settings.maxConcurrentRuns, "run slot")} busy`,
   };
-  let claude: DispatchGate;
-  if (slotsFull) claude = slots;
+  let gate: DispatchGate;
+  if (slotsFull) gate = slots;
   else if (!snapshot)
-    claude = {
+    gate = {
       status: "waiting",
       reason: `Official usage unavailable: ${usage.error ?? "not fetched yet"}`,
     };
   else if (ageMs > USAGE_STALE_MS)
-    claude = {
+    gate = {
       status: "waiting",
       reason: `Official usage is ${Math.round(ageMs / MINUTE_MS)} min old · refresh to retry${usage.error ? ` (${usage.error})` : ""}`,
     };
@@ -234,27 +233,27 @@ export function planDispatch(
     lastRunEndedAt !== null &&
     Date.parse(snapshot.fetchedAt) < Date.parse(lastRunEndedAt)
   )
-    claude = {
+    gate = {
       status: "waiting",
       reason: USAGE_PREDATES_RUN_REASON,
     };
   else if (calibration.rates === null)
-    claude = {
+    gate = {
       status: "waiting",
       reason: `Session cost calibration unavailable: ${calibration.error ?? "no five-hour window has been measured yet"}`,
     };
   else if (!session.ok)
-    claude = {
+    gate = {
       status: "waiting",
       reason: `Session ${session.percent}%${held(session)}, over the ${session.ceiling}% queue cutoff${reserveLabel(settings, busyHours)}`,
     };
   else if (!weekly.ok)
-    claude = {
+    gate = {
       status: "waiting",
       reason: `Weekly ${weekly.percent}%${held(weekly)}, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`,
     };
   else
-    claude = {
+    gate = {
       status: "ready",
       reason: `${describe("Session", session)} · ${describe("Weekly", weekly)}`,
     };
@@ -268,15 +267,7 @@ export function planDispatch(
     fable,
     quiet,
     load,
-    providers: {
-      claude,
-      codex: slotsFull
-        ? slots
-        : {
-            status: "ready",
-            reason: "Codex tasks never wait on Claude usage",
-          },
-    },
+    gate,
   };
 }
 
@@ -305,7 +296,6 @@ type GateTask = Pick<
   PublicTask,
   | "id"
   | "status"
-  | "provider"
   | "model"
   | "preferredWindowStart"
   | "earliestStart"
@@ -376,12 +366,7 @@ export function costsAhead(
   const costs: number[] = [];
   for (const task of tasks) {
     if (task.id === taskId) break;
-    if (
-      task.status !== "pending" ||
-      task.provider !== "claude" ||
-      after.has(task.id)
-    )
-      continue;
+    if (task.status !== "pending" || after.has(task.id)) continue;
     const cost = expectedSessionCost(task, runs, rates);
     if (cost !== null) costs.push(cost);
   }
@@ -418,13 +403,12 @@ const inQuietHours =
 
 /** The schedule rules of the task itself: earliest start aside, its preferred window or the quiet-hours-only rule. */
 function scheduleOpens(
-  task: Pick<GateTask, "provider" | "preferredWindowStart">,
+  task: Pick<GateTask, "preferredWindowStart">,
   planning: PlanningSnapshot,
 ): Opens {
   const window = task.preferredWindowStart;
   if (window !== null) return (at) => insideWindow(window, at);
-  if (task.provider === "claude" && quietHoursOnly(planning.settings))
-    return inQuietHours(planning.quiet);
+  if (quietHoursOnly(planning.settings)) return inQuietHours(planning.quiet);
   return always;
 }
 
@@ -492,12 +476,7 @@ function startInSession(
 function startsAt(
   task: Pick<
     GateTask,
-    | "id"
-    | "provider"
-    | "model"
-    | "preferredWindowStart"
-    | "earliestStart"
-    | "tokens"
+    "id" | "model" | "preferredWindowStart" | "earliestStart" | "tokens"
   >,
   planning: PlanningSnapshot,
   now: number,
@@ -510,7 +489,7 @@ function startsAt(
     task.earliestStart === null ? 0 : Date.parse(task.earliestStart),
   );
   const { usage, session, weekly, fable, settings, rates, quiet } = planning;
-  if (task.provider !== "claude" || usage === null)
+  if (usage === null)
     return firstInstant(notBefore, notBefore + IDLE_HORIZON_MS, opens);
   const expected = expectedSessionCost(task, runs, rates);
   if (expected === null || session.percent === null) return null;
@@ -559,12 +538,7 @@ function startsAt(
 export function eligibleAt(
   task: Pick<
     GateTask,
-    | "id"
-    | "provider"
-    | "model"
-    | "preferredWindowStart"
-    | "earliestStart"
-    | "tokens"
+    "id" | "model" | "preferredWindowStart" | "earliestStart" | "tokens"
   >,
   planning: PlanningSnapshot,
   now: Date,
@@ -607,11 +581,9 @@ export function taskGate(
       )}`,
       eligibleAt: eligible,
     };
-  const provider = planning.providers[task.provider];
-  const { quiet, settings } = planning;
+  const { gate, quiet, settings } = planning;
   if (
-    task.provider === "claude" &&
-    provider.status === "ready" &&
+    gate.status === "ready" &&
     quietHoursOnly(settings) &&
     task.preferredWindowStart === null
   ) {
@@ -633,8 +605,7 @@ export function taskGate(
   }
   const fable = planning.fable;
   if (
-    task.provider === "claude" &&
-    provider.status === "ready" &&
+    gate.status === "ready" &&
     fable &&
     FABLE_MODEL.test(task.model) &&
     !fable.ok
@@ -645,11 +616,7 @@ export function taskGate(
       eligibleAt: eligible,
     };
   const { session } = planning;
-  if (
-    task.provider === "claude" &&
-    provider.status === "ready" &&
-    session.percent !== null
-  ) {
+  if (gate.status === "ready" && session.percent !== null) {
     const expected = expectedSessionCost(task, runs, planning.rates);
     if (
       expected !== null &&
@@ -662,5 +629,5 @@ export function taskGate(
         eligibleAt: eligible,
       };
   }
-  return { ...provider, eligibleAt: eligible };
+  return { ...gate, eligibleAt: eligible };
 }

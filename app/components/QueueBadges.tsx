@@ -4,7 +4,7 @@ import type { PlanningSnapshot } from "@/shared/types";
 
 export function QueueBadges({ planning }: { planning?: PlanningSnapshot }) {
   if (!planning) return null;
-  const ready = planning.providers.claude.status === "ready";
+  const ready = planning.gate.status === "ready";
   return (
     <>
       <Badge variant={ready ? "success" : "warning"}>

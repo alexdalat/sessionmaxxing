@@ -14,7 +14,7 @@ import {
   usageSnapshot,
 } from "./helpers";
 
-it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, and promotes Claude tasks once usage drops", async () => {
+it("auto-dispatch holds a Claude task without headroom and promotes it once usage drops", async () => {
   const temp = await temporary();
   let clock = Date.parse("2026-09-06T12:00:00Z");
   const now = () => new Date(clock);
@@ -48,19 +48,9 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
   try {
     await monitor.refresh();
     const claude = await queue.create(taskInput(temp.path));
-    const codex = await queue.create({
-      ...taskInput(temp.path),
-      provider: "codex",
-      priority: 1,
-    });
     await queue.setAutoDispatch(true);
     await Promise.all([runner.tick(), runner.tick()]);
-    expect(runner.list()[0]?.taskId).toBe(codex.id);
-    expect(launch).toHaveBeenCalledTimes(1);
-    child.emit("close", 0);
-    await runner.waitForIdle();
-    await runner.tick();
-    expect(launch).toHaveBeenCalledTimes(1);
+    expect(runner.list()).toEqual([]);
     const waiting = (await app.inject("/api/queue"))
       .json()
       .tasks.find((task: { id: string }) => task.id === claude.id);
@@ -73,8 +63,7 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
     clock += 60_000;
     await monitor.refresh();
     await runner.tick();
-    expect(launch).toHaveBeenCalledTimes(2);
-    expect(runner.list()[0]?.taskId).toBe(claude.id);
+    expect(runner.list().map((run) => run.taskId)).toEqual([claude.id]);
     child.emit("close", 0);
     await runner.waitForIdle();
     await settings.save({
@@ -84,10 +73,8 @@ it("auto-dispatch skips Claude tasks without headroom, still runs Codex tasks, a
     });
     await queue.create(taskInput(temp.path));
     await runner.tick();
-    expect(launch).toHaveBeenCalledTimes(2);
-    expect(
-      (await app.inject("/api/queue")).json().planning.providers.claude,
-    ).toEqual({
+    expect(runner.list().map((run) => run.taskId)).toEqual([claude.id]);
+    expect((await app.inject("/api/queue")).json().planning.gate).toEqual({
       status: "waiting",
       reason: "Session 30%, over the 20% queue cutoff",
     });

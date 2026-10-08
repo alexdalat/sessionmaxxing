@@ -246,10 +246,10 @@ it("refuses Run now for nested, symlinked, and same-repository directories while
   }
 });
 
-it("admits Claude tasks only while the session budget covers every running task's expected cost, and lets Codex fill free slots", async () => {
+it("admits Claude tasks only while the session budget covers every running task's expected cost", async () => {
   const temp = await temporary();
   try {
-    const { a, b, c, d, e } = await repos(temp.path, ["a", "b", "c", "d", "e"]);
+    const { a, b, c } = await repos(temp.path, ["a", "b", "c"]);
     const store = await QueueStore.open(temp.path);
     const first = await store.create({
       ...taskInput(a),
@@ -266,44 +266,29 @@ it("admits Claude tasks only while the session budget covers every running task'
       tokens: 150_000,
       priority: 2,
     });
-    const codex = await store.create({
-      ...taskInput(d),
-      provider: "codex",
-      model: "gpt-6-astra",
-      priority: 3,
-    });
-    const codexLate = await store.create({
-      ...taskInput(e),
-      provider: "codex",
-      model: "gpt-6-astra",
-      priority: 4,
-    });
     const kids = children();
     const runner = await Runner.open(store, temp.path, {
       launch: kids.launch,
       now,
     });
-    const plan = planner(
-      { maxConcurrentRuns: 3 },
-      usageSnapshot({
-        session: { percent: 30, resetsAt: "2026-09-06T16:09:00.000Z" },
-      }),
-    );
+    const thirtyPercent = usageSnapshot({
+      session: { percent: 30, resetsAt: "2026-09-06T16:09:00.000Z" },
+    });
+    const plan = planner({ maxConcurrentRuns: 3 }, thirtyPercent);
     runner.setPlanner(plan);
     await store.setAutoDispatch(true);
     await runner.tick();
     expect(kids.launch.mock.calls.map(([task]) => task.id)).toEqual([
       first.id,
       second.id,
-      codex.id,
     ]);
     const load = runner.load();
     expect(load).toMatchObject({
-      running: 3,
+      running: 2,
       claudeRuns: 2,
       reserved: { session: 41.4, weekly: 6, fable: 0 },
     });
-    const planning = plan({ ...load, running: 2 });
+    const planning = plan(load);
     expect(planning.session).toEqual({
       percent: 30,
       ceiling: 75,
@@ -317,29 +302,30 @@ it("admits Claude tasks only while the session budget covers every running task'
       usageSnapshot({
         session: { percent: 45, resetsAt: "2026-09-06T16:09:00.000Z" },
       }),
-    )({ ...load, running: 2 });
-    expect(polled.providers.claude).toEqual({
+    )(load);
+    expect(polled.gate).toEqual({
       status: "waiting",
       reason:
         "Session 45% + 41.4% held for running tasks, over the 75% queue cutoff",
     });
-    expect(planning.providers.codex.status).toBe("ready");
-    const tasks = store.snapshot().tasks;
-    expect(
-      await runner.gate(
-        tasks.find((task) => task.id === codexLate.id) as PublicTask,
-        plan(runner.load()),
-        at,
+    const thirdTask = store
+      .snapshot()
+      .tasks.find((task) => task.id === third.id) as PublicTask;
+    expect(await runner.gate(thirdTask, planning, at)).toMatchObject({
+      status: "waiting",
+      reason: expect.stringMatching(
+        /^Session 30% \+ 41\.4% held for running tasks \+ 20\.7% expected, over the 75% queue cutoff/,
       ),
-    ).toMatchObject({ status: "waiting", reason: "All 3 run slots busy" });
-    kids.of(codex.id).emit("close", 0, null);
-    await vi.waitFor(() => expect(statusOf(store, codex.id)).toBe("completed"));
+    });
+    const twoSlots = planner({ maxConcurrentRuns: 2 }, thirtyPercent)(load);
+    expect(await runner.gate(thirdTask, twoSlots, at)).toMatchObject({
+      status: "waiting",
+      reason: "All 2 run slots busy",
+    });
     await runner.tick();
-    expect(kids.launch).toHaveBeenCalledTimes(4);
-    expect(kids.launch.mock.calls[3][0].id).toBe(codexLate.id);
+    expect(kids.launch).toHaveBeenCalledTimes(2);
     expect(statusOf(store, third.id)).toBe("pending");
-    for (const id of [first.id, second.id, codexLate.id])
-      kids.of(id).emit("close", 0, null);
+    for (const id of [first.id, second.id]) kids.of(id).emit("close", 0, null);
     await runner.waitForIdle();
     await runner.close();
   } finally {
@@ -364,9 +350,9 @@ it("keeps serial behaviour with one slot: the second independent task waits for 
     await runner.tick();
     expect(kids.launch).toHaveBeenCalledTimes(1);
     const planning = planner({ maxConcurrentRuns: 1 })(runner.load());
-    expect(planning.providers).toEqual({
-      claude: { status: "waiting", reason: "All 1 run slot busy" },
-      codex: { status: "waiting", reason: "All 1 run slot busy" },
+    expect(planning.gate).toEqual({
+      status: "waiting",
+      reason: "All 1 run slot busy",
     });
     expect(planning.session.reserved).toBe(13.8);
     await expect(runner.start(second.id)).rejects.toThrow(SLOTS_BUSY_ERROR);
@@ -601,7 +587,7 @@ it("reports slots, reservations, and the blocking run through the queue route", 
       reserved: 13.8,
       ok: true,
     });
-    expect(snapshot.planning.providers.claude.reason).toBe(
+    expect(snapshot.planning.gate.reason).toBe(
       `Session 16% + 13.8% held for running tasks of 75% · Weekly 2% + 3% held for running tasks of ${snapshot.planning.weekly.ceiling}%`,
     );
     const gates = Object.fromEntries(
@@ -672,7 +658,6 @@ it("gates Fable tasks on Fable reservations and other Claude tasks on the weekly
   const pending = {
     id: "a".repeat(24),
     status: "pending" as const,
-    provider: "claude" as const,
     model: "fable",
     preferredWindowStart: null,
     earliestStart: null,
