@@ -49,11 +49,7 @@ import { validateWorkdir } from "./validation.js";
 
 interface RunnerOptions {
   signal?: (pid: number, signal: NodeJS.Signals) => void;
-  launch?: (
-    task: Task,
-    sessionId: string | null,
-    resume: boolean,
-  ) => ProviderProcess;
+  launch?: (task: Task, sessionId: string, resume: boolean) => ProviderProcess;
   autoApply?: () => boolean;
   sessionTokens?: (sessionId: string, since: string) => Promise<WeightedTokens>;
   now?: () => Date;
@@ -404,8 +400,7 @@ export class Runner {
       if (gate.status !== "ready") throw new DomainError(gate.reason);
     }
     const limited = this.limitStopped(task.id);
-    const sessionId =
-      task.provider !== "claude" ? null : (limited?.sessionId ?? randomUUID());
+    const sessionId = limited?.sessionId ?? randomUUID();
     const run: StoredRun = {
       id: id(),
       taskId: task.id,
@@ -462,11 +457,7 @@ export class Runner {
       ? latest
       : undefined;
   }
-  private async launch(
-    active: Active,
-    sessionId: string | null,
-    resume: boolean,
-  ) {
+  private async launch(active: Active, sessionId: string, resume: boolean) {
     const { run } = active;
     try {
       active.task = await this.store.claim(active.task.id);

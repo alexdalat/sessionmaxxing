@@ -222,7 +222,7 @@ it("sums the output tokens of a session, its subagents, and the last record of e
         messageId: "m3",
         timestamp: "2026-09-06T15:03:00Z",
         sessionId: DISPATCHED_SESSION,
-        model: "gpt-6-astra",
+        model: "unknown-model-1",
         outputTokens: 400,
       }),
     ]);

@@ -9,7 +9,7 @@ import {
 } from "../server/providers.js";
 import { fakeChild, taskInput } from "./helpers";
 
-it("launches exact provider argv with top-level Codex flags, no shell, and the whole prompt as one argument", () => {
+it("launches the exact claude argv with no shell and the whole prompt as one argument", () => {
   const child = fakeChild();
   const spawn = vi.fn<SpawnProvider>(() => child);
   const base = {
@@ -45,48 +45,9 @@ it("launches exact provider argv with top-level Codex flags, no shell, and the w
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  launchProvider(
-    { ...base, provider: "codex", model: "gpt-6-astra" },
-    sessionId,
-    false,
-    spawn,
+  expect(spawn.mock.lastCall?.[1].filter((arg) => arg === base.prompt)).toEqual(
+    [base.prompt],
   );
-  expect(spawn).toHaveBeenLastCalledWith(
-    "codex",
-    [
-      "-m",
-      "gpt-6-astra",
-      "-s",
-      "workspace-write",
-      "-a",
-      "never",
-      "exec",
-      "--skip-git-repo-check",
-      "--",
-      base.prompt,
-    ],
-    {
-      cwd: "/home/user",
-      shell: false,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-  expect(
-    spawn.mock.calls.every(
-      (call) => call[1].filter((arg) => arg === base.prompt).length === 1,
-    ),
-  ).toBe(true);
-  expect(
-    spawn.mock.calls.map((call) =>
-      call[1].includes("--dangerously-skip-permissions"),
-    ),
-  ).toEqual([true, false]);
-  expect(
-    spawn.mock.calls.map((call) => call[1].includes("--session-id")),
-  ).toEqual([true, false]);
-  launchProvider(base, null, false, spawn);
-  expect(spawn.mock.lastCall?.[1]).not.toContain("--session-id");
 });
 it("bounds previews and redacts arbitrary text, credentials, environment values, IDs, and message contents across chunks", async () => {
   const { OutputPreview } = await import("../server/output.js");
@@ -142,7 +103,7 @@ it("truncates a long summary to its tail", async () => {
 it("uses the last block of plain provider output as the summary", async () => {
   const { OutputPreview } = await import("../server/output.js");
   const preview = new OutputPreview();
-  preview.push("stdout", "[2026-09-08T12:00:00] codex\nreading files\n\n");
+  preview.push("stdout", "[2026-09-08T12:00:00] starting\nreading files\n\n");
   preview.push("stdout", "Updated the parser.\nAll tests pass.\n");
   preview.flush();
   expect(preview.summary()).toBe("Updated the parser.\nAll tests pass.");

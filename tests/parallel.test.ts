@@ -475,11 +475,7 @@ it("marks every run interrupted by a restart failed and keeps the rest of its me
     const { a, b } = await repos(temp.path, ["a", "b"]);
     const store = await QueueStore.open(temp.path);
     const first = await store.create(taskInput(a));
-    const second = await store.create({
-      ...taskInput(b),
-      provider: "codex",
-      model: "gpt-6-astra",
-    });
+    const second = await store.create(taskInput(b));
     const kids = children();
     const runner = await Runner.open(store, temp.path, {
       launch: kids.launch,
@@ -520,7 +516,9 @@ it("marks every run interrupted by a restart failed and keeps the rest of its me
         error: "Server stopped before the run finished.",
       });
     }
-    expect([...reopened.dispatchedSessions()]).toEqual([before[0].sessionId]);
+    expect([...reopened.dispatchedSessions()].sort()).toEqual(
+      [before[0].sessionId, before[1].sessionId].sort(),
+    );
     expect(reopened.load()).toMatchObject({ running: 0 });
     for (const task of [first, second]) kids.of(task.id).emit("close", 0);
     await runner.waitForIdle();

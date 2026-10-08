@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import type { Readable } from "node:stream";
-import type { Provider, Task } from "../shared/types.js";
+import type { Task } from "../shared/types.js";
 export interface ProviderProcess extends EventEmitter {
   stdout: Readable | null;
   stderr: Readable | null;
@@ -19,10 +19,7 @@ export type SpawnProvider = (
   args: string[],
   options: LaunchOptions,
 ) => ProviderProcess;
-export interface ProviderAdapter {
-  command: string;
-  args: (task: Task, sessionId: string | null, resume: boolean) => string[];
-}
+const CLAUDE_COMMAND = "claude";
 /** Appended to a dispatched prompt while the queue's apply override is on. */
 export const AUTO_APPLY_INSTRUCTION =
   "Apply this work yourself instead of leaving it for review. Edit the files directly in this work directory and ignore git entirely: do not check git status, commit, stash, branch, or create a worktree, and never skip or refuse a change because of uncommitted changes. This run has no docker. When the work directory has a Compose file, the dashboard redeploys it on the host after the run ends, so do not attempt `docker compose` yourself. Run any other deploy (a Coolify deploy, the project's own deploy command) before you finish. If that tooling is unavailable, report the blocker and the command.";
@@ -36,10 +33,15 @@ export const isLimitStop = (summary: string | null) =>
   summary !== null && LIMIT_STOP.test(summary);
 export const RESUME_PROMPT =
   "The Claude usage limit stopped you before you finished. The limit has reset; continue the task from where you left off.";
-export const providerAdapters: Record<Provider, ProviderAdapter> = {
-  claude: {
-    command: "claude",
-    args: (task, sessionId, resume) => [
+export function launchProvider(
+  task: Task,
+  sessionId: string,
+  resume = false,
+  spawnProcess: SpawnProvider = spawn,
+): ProviderProcess {
+  return spawnProcess(
+    CLAUDE_COMMAND,
+    [
       "-p",
       resume ? RESUME_PROMPT : task.prompt,
       "--model",
@@ -50,39 +52,14 @@ export const providerAdapters: Record<Provider, ProviderAdapter> = {
       "--dangerously-skip-permissions",
       "--max-turns",
       String(task.maxTurns),
-      ...(sessionId === null
-        ? []
-        : [resume ? "--resume" : "--session-id", sessionId]),
+      resume ? "--resume" : "--session-id",
+      sessionId,
     ],
-  },
-  codex: {
-    command: "codex",
-    args: (task) => [
-      "-m",
-      task.model,
-      "-s",
-      "workspace-write",
-      "-a",
-      "never",
-      "exec",
-      "--skip-git-repo-check",
-      "--",
-      task.prompt,
-    ],
-  },
-};
-export function launchProvider(
-  task: Task,
-  sessionId: string | null,
-  resume = false,
-  spawnProcess: SpawnProvider = spawn,
-  adapters = providerAdapters,
-): ProviderProcess {
-  const adapter = adapters[task.provider];
-  return spawnProcess(adapter.command, adapter.args(task, sessionId, resume), {
-    cwd: task.workdir,
-    shell: false,
-    detached: true,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
+    {
+      cwd: task.workdir,
+      shell: false,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
 }

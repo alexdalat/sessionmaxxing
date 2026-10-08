@@ -349,7 +349,10 @@ it("details each heatmap cell: source split, top models and projects by owned mi
       project: "delta",
       model: "claude-haiku-4-5-20251001",
     }),
-    event("2026-09-05T14:13:00Z", { project: "alpha", model: "gpt-5.3-codex" }),
+    event("2026-09-05T14:13:00Z", {
+      project: "alpha",
+      model: "unknown-model-1",
+    }),
   ];
   const now = new Date("2026-09-06T12:00:00Z");
   const cell = aggregate(history(events), 14, now).heatmap.find(
@@ -372,7 +375,7 @@ it("details each heatmap cell: source split, top models and projects by owned mi
     ],
   });
   // Every event carries 2 input, 3 output, 5 cache-read and 1 cache-write tokens:
-  // 3.75 weighted on Opus, Sonnet and Haiku, 3.675 on Fable, nothing for Codex.
+  // 3.75 weighted on Opus, Sonnet and Haiku, 3.675 on Fable, nothing for an unknown model.
   expect(cell?.tokens).toBeCloseTo(6 * 3.75 + 3.675, 10);
   expect(
     aggregate(history(events), 7, now).heatmap.find(

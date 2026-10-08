@@ -104,7 +104,7 @@ export class OutputPreview {
   lines() {
     return [...this.preview];
   }
-  /** The provider's closing message: Claude's result text, or the last block Codex printed. */
+  /** Claude's closing message: its result text, or the last block of plain output. */
   summary(): string | null {
     return this.resultText ?? this.lastBlock;
   }

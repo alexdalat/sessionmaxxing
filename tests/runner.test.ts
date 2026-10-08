@@ -338,35 +338,6 @@ it("launches a Claude run under a generated session id it persists but never lis
   }
 });
 
-it("launches a Codex run without a session id and keeps it out of the dispatched sessions", async () => {
-  const temp = await temporary();
-  try {
-    const store = await QueueStore.open(temp.path);
-    const task = await store.create({
-      ...taskInput(temp.path),
-      provider: "codex",
-      model: "gpt-6-astra",
-    });
-    const child = fakeChild();
-    const launch = vi.fn<
-      (task: Task, sessionId: string | null) => typeof child
-    >(() => child);
-    const runner = await Runner.open(store, temp.path, { launch });
-    const run = await runner.start(task.id);
-    expect(launch.mock.calls[0][1]).toBeNull();
-    expect(
-      JSON.parse(await readFile(`${temp.path}/runs/${run.id}.json`, "utf8"))
-        .sessionId,
-    ).toBeNull();
-    expect([...runner.dispatchedSessions()]).toEqual([]);
-    child.emit("close", 0, null);
-    await runner.waitForIdle();
-    await runner.close();
-  } finally {
-    await temp.cleanup();
-  }
-});
-
 it("loads a run recorded before session ids were tracked and reports no dispatched session", async () => {
   const temp = await temporary();
   try {
