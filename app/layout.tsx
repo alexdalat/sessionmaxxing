@@ -7,9 +7,10 @@ import "@fontsource/jetbrains-mono/400.css";
 import "./styles.css";
 import { Sidebar } from "@/app/components/Sidebar";
 import { TooltipProvider } from "@/app/components/ui/tooltip";
+import { PRODUCT_NAME } from "@/shared/product";
 
 export const metadata: Metadata = {
-  title: "Claude capacity · Local dashboard",
+  title: PRODUCT_NAME,
 };
 
 export const viewport: Viewport = {

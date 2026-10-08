@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { FastifyInstance } from "fastify";
+import { PRODUCT_NAME } from "../shared/product.js";
 import type { HistoryData } from "../shared/types.js";
 import { createApp } from "./app.js";
 import { type FetchUsage, officialUsageFetcher } from "./claude-usage.js";
@@ -107,7 +108,7 @@ if (
     const address = app.server.address();
     if (address && typeof address !== "string")
       console.info(
-        `Claude capacity dashboard: http://${address.address}:${address.port}`,
+        `${PRODUCT_NAME}: http://${address.address}:${address.port}`,
       );
     let stopping = false;
     const stop = async () => {

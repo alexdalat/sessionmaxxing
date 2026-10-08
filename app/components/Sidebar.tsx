@@ -4,6 +4,7 @@ import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { usePolling } from "@/app/hooks/usePolling";
 import { QUEUE_CHANGED } from "@/app/lib/api";
+import { PRODUCT_NAME } from "@/shared/product";
 import type { PendingReview, QueueSnapshot } from "@/shared/types";
 
 const NAV_POLL_MS = 10_000;
@@ -43,9 +44,9 @@ export function Sidebar() {
     <aside className="sidebar">
       <div className="brand">
         <span className="brand-mark" aria-hidden="true">
-          C
+          {PRODUCT_NAME[0]}
         </span>{" "}
-        Capacity
+        {PRODUCT_NAME}
       </div>
       <p className="sidebar-caption">CLAUDE · LOCAL</p>
       <nav aria-label="Main navigation">
