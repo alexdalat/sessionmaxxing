@@ -370,7 +370,6 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         title: "Legacy run",
         prompt: null,
         estimatedTokens: null,
-        provider: "claude",
         model: "opus",
         status: "completed",
         startedAt: "2026-09-01T10:00:00.000Z",
@@ -437,6 +436,20 @@ async function runWithTokens(
   await runner.close();
   return { run, persisted, error };
 }
+
+it("records no provider on a new run", async () => {
+  const temp = await temporary();
+  try {
+    const { run, persisted } = await runWithTokens(
+      temp.path,
+      async () => SESSION_TOKENS,
+    );
+    expect(persisted).not.toHaveProperty("provider");
+    expect(run).not.toHaveProperty("provider");
+  } finally {
+    await temp.cleanup();
+  }
+});
 
 it("stores the tokens of a finished run and prices them at the current rates", async () => {
   const temp = await temporary();

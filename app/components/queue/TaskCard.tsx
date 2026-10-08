@@ -11,7 +11,6 @@ import {
   formatTokens,
   hourLabel,
   localTimestamp,
-  PROVIDER_LABELS,
   type PublicTask,
 } from "@/shared/types";
 
@@ -49,9 +48,7 @@ export function TaskCard({
             <Badge variant="warning">Needs review</Badge>
           )}
         </div>
-        <p>
-          {PROVIDER_LABELS[task.provider]} · {task.model}
-        </p>
+        <p>{task.model}</p>
         <p className="muted task-workdir">{task.workdir}</p>
         <details>
           <summary>Prompt</summary>

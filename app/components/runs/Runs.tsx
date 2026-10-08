@@ -15,7 +15,6 @@ import {
   MODEL_FAMILIES,
   needsCommit,
   needsReview,
-  PROVIDER_LABELS,
   type Run,
   type WeightedTokens,
 } from "@/shared/types";
@@ -226,9 +225,7 @@ export function Runs() {
           <dl className="facts">
             <div>
               <dt>Model</dt>
-              <dd>
-                {PROVIDER_LABELS[run.provider]} · {run.model}
-              </dd>
+              <dd>{run.model}</dd>
             </div>
             <div>
               <dt>Started</dt>

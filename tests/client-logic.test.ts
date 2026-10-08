@@ -695,7 +695,6 @@ const finishedRun = (
   title: "Fix a test",
   prompt: "Rename the parser.",
   estimatedTokens: 120_000,
-  provider: "claude",
   model: "opus",
   status: "completed",
   startedAt: "2026-09-06T12:00:00.000Z",

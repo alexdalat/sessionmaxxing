@@ -274,10 +274,6 @@ export interface CurrentBlock extends ActivityCount {
   estimated: true;
 }
 export type Provider = "claude" | "codex";
-export const PROVIDER_LABELS = {
-  claude: "Claude",
-  codex: "Codex",
-} as const;
 export const PROVIDER_MODELS: Record<
   Provider,
   readonly { value: string; label: string }[]
@@ -397,7 +393,6 @@ export interface Run {
   prompt: string | null;
   /** Weighted tokens the task was estimated to consume when it started; null for runs recorded before weighted estimates were tracked. */
   estimatedTokens: number | null;
-  provider: Provider;
   model: string;
   status: Exclude<TaskStatus, "pending">;
   startedAt: string;
@@ -405,7 +400,7 @@ export interface Run {
   durationMs: number;
   exitCode: number | null;
   error: string | null;
-  /** Weighted tokens the run's session consumed; null for Codex runs and runs whose transcript held none. */
+  /** Weighted tokens the run's session consumed; null for runs whose transcript held none. */
   tokens: WeightedTokens | null;
   /** `tokens` priced at the current session rates; null when unmeasured or before calibration. */
   sessionCostPercent: number | null;
