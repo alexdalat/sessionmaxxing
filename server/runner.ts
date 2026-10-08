@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readdir, readFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   DEFAULT_DISPATCH_SETTINGS,
@@ -35,6 +35,7 @@ import {
   gitIn,
   snapshotWorkdir,
 } from "./git.js";
+import { migrateProvider } from "./legacy-provider.js";
 import { OutputPreview } from "./output.js";
 import {
   isLimitStop,
@@ -185,14 +186,24 @@ export class Runner {
     await mkdir(runner.directory, { recursive: true, mode: 0o700 });
     for (const name of await readdir(runner.directory)) {
       if (!/^[a-f0-9]{24}\.json$/.test(name)) continue;
+      const file = join(runner.directory, name);
       const saved: Run & { sessionId?: unknown } = JSON.parse(
-        await readFile(join(runner.directory, name), "utf8"),
+        await readFile(file, "utf8"),
       );
       if (
         saved.id !== name.slice(0, -5) ||
         !["running", "completed", "failed", "cancelled"].includes(saved.status)
       )
         throw new DomainError("Run metadata is invalid.", 500);
+      const migration = migrateProvider(saved, "Run");
+      if (migration === "drop") {
+        await rm(file);
+        await rm(join(runner.directory, `${name.slice(0, -5)}.log`), {
+          force: true,
+        });
+        continue;
+      }
+      if (migration === "stripped") await atomicJson(file, saved);
       const preview = JSON.parse(
         await readFile(join(runner.directory, `${saved.id}.log`), "utf8"),
       );

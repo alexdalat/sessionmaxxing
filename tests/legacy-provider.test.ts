@@ -1,7 +1,9 @@
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { DispatchSettingsStore } from "../server/dispatch-settings.js";
 import { migrateProvider } from "../server/legacy-provider.js";
 import { QueueStore } from "../server/queue.js";
+import { Runner } from "../server/runner.js";
 import { DomainError } from "../server/storage.js";
 import { temporary } from "./helpers.js";
 
@@ -234,6 +236,236 @@ it("fails loudly on an unsupported task provider and leaves the file untouched",
     await expect(QueueStore.open(temp.path)).rejects.toThrow(
       UNSUPPORTED_TASK_PROVIDER,
     );
+    expect(await readFile(path, "utf8")).toBe(text);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+const RUN_FULL = "1".repeat(24);
+const RUN_MINIMAL = "2".repeat(24);
+const RUN_CODEX = "3".repeat(24);
+const RUN_CODEX_RUNNING = "4".repeat(24);
+const RUN_GEMINI = "5".repeat(24);
+const UNSUPPORTED_RUN_PROVIDER = "Run has an unsupported provider.";
+const SESSION_ID = "6f1c2f0e-4d6a-4b7e-9d0a-2b8f3c1a7e55";
+const STARTED_AT = "2026-09-01T10:00:00.000Z";
+const ENDED_AT = "2026-09-01T10:05:00.000Z";
+const SAFE_PREVIEW = ["Provider initialized", "Result: completed · turns: 3"];
+const REDACTED_PREVIEW = ["[redacted stderr]", "[redacted stdout]"];
+
+const minimalRun = (patch: Record<string, unknown> = {}) => ({
+  id: RUN_MINIMAL,
+  taskId: ID_A,
+  title: "Rename the parser",
+  provider: "claude",
+  model: "opus",
+  status: "completed",
+  startedAt: STARTED_AT,
+  endedAt: ENDED_AT,
+  durationMs: 300_000,
+  exitCode: 0,
+  error: null,
+  ...patch,
+});
+const fullRun = () => ({
+  id: RUN_FULL,
+  taskId: ID_B,
+  title: "Fix a test",
+  prompt: "Rename the parser",
+  estimatedTokens: 100_000,
+  provider: "claude",
+  model: "opus",
+  status: "completed",
+  startedAt: STARTED_AT,
+  endedAt: ENDED_AT,
+  durationMs: 300_000,
+  exitCode: 0,
+  error: null,
+  tokens: { fable: 0, opus: 52_000, sonnet: 0, haiku: 0 },
+  sessionId: SESSION_ID,
+  summary: "Renamed the parser.",
+  changes: {
+    branch: "main",
+    commits: 1,
+    files: [{ path: "src/parser.ts", added: 4, removed: 2 }],
+  },
+  reviewedAt: null,
+});
+const codexRun = (patch: Record<string, unknown> = {}) =>
+  minimalRun({
+    id: RUN_CODEX,
+    provider: "codex",
+    model: CODEX_MODEL,
+    ...patch,
+  });
+const runText = (run: unknown) => JSON.stringify(run, null, 2);
+
+async function writeRun(
+  directory: string,
+  run: { id: string },
+  preview: string[] | null,
+) {
+  const runs = `${directory}/runs`;
+  await mkdir(runs, { recursive: true });
+  await writeFile(`${runs}/${run.id}.json`, runText(run));
+  if (preview !== null)
+    await writeFile(`${runs}/${run.id}.log`, JSON.stringify(preview, null, 2));
+}
+const readRuns = async (directory: string) => {
+  const runs = `${directory}/runs`;
+  const texts: Record<string, string> = {};
+  for (const name of (await readdir(runs)).sort())
+    texts[name] = await readFile(`${runs}/${name}`, "utf8");
+  return texts;
+};
+async function openRunner(directory: string) {
+  const store = await QueueStore.open(directory);
+  return Runner.open(store, directory);
+}
+
+it("deletes codex run files and strips the provider from Claude run json leaving logs untouched", async () => {
+  const temp = await temporary();
+  try {
+    const full = fullRun();
+    const minimal = minimalRun();
+    await writeRun(temp.path, full, SAFE_PREVIEW);
+    await writeRun(temp.path, minimal, []);
+    await writeRun(temp.path, codexRun(), REDACTED_PREVIEW);
+    const logs = {
+      [`${RUN_FULL}.log`]: JSON.stringify(SAFE_PREVIEW, null, 2),
+      [`${RUN_MINIMAL}.log`]: JSON.stringify([], null, 2),
+    };
+
+    const runner = await openRunner(temp.path);
+
+    expect(
+      runner
+        .list()
+        .map((run) => run.id)
+        .sort(),
+    ).toEqual([RUN_FULL, RUN_MINIMAL]);
+    expect(await readRuns(temp.path)).toEqual({
+      [`${RUN_FULL}.json`]: runText(withoutProvider(full)),
+      [`${RUN_MINIMAL}.json`]: runText(withoutProvider(minimal)),
+      ...logs,
+    });
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("leaves every run file identical on a second open after the migration", async () => {
+  const temp = await temporary();
+  try {
+    await writeRun(temp.path, fullRun(), SAFE_PREVIEW);
+    await writeRun(temp.path, minimalRun(), []);
+    await writeRun(temp.path, codexRun(), REDACTED_PREVIEW);
+    await (await openRunner(temp.path)).close();
+    const afterFirst = await readRuns(temp.path);
+
+    const second = await openRunner(temp.path);
+
+    expect(
+      second
+        .list()
+        .map((run) => run.id)
+        .sort(),
+    ).toEqual([RUN_FULL, RUN_MINIMAL]);
+    expect(await readRuns(temp.path)).toEqual(afterFirst);
+    await second.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("removes a codex run json whose log an interrupted migration already deleted", async () => {
+  const temp = await temporary();
+  try {
+    await writeRun(temp.path, codexRun(), null);
+    const runner = await openRunner(temp.path);
+    expect(runner.list()).toEqual([]);
+    expect(await readdir(`${temp.path}/runs`)).toEqual([]);
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("drops a running codex run instead of marking it failed", async () => {
+  const temp = await temporary();
+  try {
+    await writeRun(
+      temp.path,
+      codexRun({ id: RUN_CODEX_RUNNING, status: "running", endedAt: null }),
+      REDACTED_PREVIEW,
+    );
+    const runner = await openRunner(temp.path);
+    expect(runner.list()).toEqual([]);
+    expect(await readdir(`${temp.path}/runs`)).toEqual([]);
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("does not rewrite a run without a provider key", async () => {
+  const temp = await temporary();
+  try {
+    const run = withoutProvider(minimalRun());
+    const runs = `${temp.path}/runs`;
+    await mkdir(runs, { recursive: true });
+    await writeFile(`${runs}/${RUN_MINIMAL}.json`, JSON.stringify(run));
+    await writeFile(`${runs}/${RUN_MINIMAL}.log`, "[]");
+    const runner = await openRunner(temp.path);
+    expect(runner.list().map((listed) => listed.id)).toEqual([RUN_MINIMAL]);
+    expect(await readRuns(temp.path)).toEqual({
+      [`${RUN_MINIMAL}.json`]: JSON.stringify(run),
+      [`${RUN_MINIMAL}.log`]: "[]",
+    });
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails loudly on an unsupported run provider and leaves its files untouched", async () => {
+  const temp = await temporary();
+  try {
+    await writeRun(
+      temp.path,
+      minimalRun({ id: RUN_GEMINI, provider: "gemini" }),
+      SAFE_PREVIEW,
+    );
+    const before = await readRuns(temp.path);
+    await expect(openRunner(temp.path)).rejects.toThrow(
+      UNSUPPORTED_RUN_PROVIDER,
+    );
+    expect(await readRuns(temp.path)).toEqual(before);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("loads the live dispatch settings unchanged without rewriting the file", async () => {
+  const temp = await temporary();
+  try {
+    const settings = {
+      autoApply: false,
+      keepSessionActive: true,
+      sessionReservePercent: 10,
+      busyHoursReservePercent: 50,
+      weeklyMarginPercent: 5,
+      quietStartHours: 8,
+      maxConcurrentRuns: 1,
+      runWeeklyCostPercent: 3,
+    };
+    const path = `${temp.path}/dispatch-settings.json`;
+    const text = JSON.stringify(settings, null, 2);
+    await writeFile(path, text);
+    const store = await DispatchSettingsStore.open(temp.path);
+    expect(store.snapshot()).toEqual(settings);
     expect(await readFile(path, "utf8")).toBe(text);
   } finally {
     await temp.cleanup();
