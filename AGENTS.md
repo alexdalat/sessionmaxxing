@@ -1,4 +1,4 @@
-# Claude capacity dashboard
+# SessionMaxxing
 
 Local-only dashboard whose single goal is to get the most out of a Claude Max subscription: fill five-hour session windows that would otherwise go unused with queued Claude Code tasks, while keeping the weekly limit on pace so interactive work never gets cut off.
 
@@ -46,7 +46,7 @@ With the session keeper on (`keepSessionActive`, off by default), `server/sessio
 
 A Claude run that ends with Claude Code's usage-limit message (`You've hit your session limit` or `… weekly limit`) is not a failure of the task: the run is stored as failed with the reason "Stopped at the usage limit", the task goes back to pending with no retry cap, and the normal gates hold it until the window resets. Its next run resumes the same Claude session (`--resume <session id>` with a continue prompt instead of the task prompt), so the session id and its *Dispatched tasks* attribution carry over; each run's tokens count only the transcript records written after that run started.
 
-Codex tasks are never gated by Claude usage but take a slot and hold locks like any other run. **Run now** overrides the usage gate and the schedule, never the slot bound or the locks. Settings persist in `data/dispatch-settings.json`.
+**Run now** overrides the usage gate and the schedule, never the slot bound or the locks. Settings persist in `data/dispatch-settings.json`.
 
 A task can **depend on** other queued tasks (`dependsOn`, up to 20 ids). It waits until every one of them has completed, ahead of every other gate, and Run now refuses while one is unfinished. A dependency that failed or was cancelled keeps the task blocked with that reason until it is retried; deleting a task drops it from the tasks that depended on it, and a cycle is rejected when the task is saved.
 
@@ -69,7 +69,7 @@ While any request is unfinished, the runner starts nothing: `admit()` throws, `s
 ## Rules
 
 - Task prompts and work directories are shown in the browser (local-only dashboard). A run's final assistant message is stored as its summary and shown on the run card; everything else — intermediate assistant text, credentials, tokens, UUIDs, raw transcript records, run output — never reaches the browser.
-- Launch providers with `child_process.spawn(command, args, { shell: false })`; never build a shell string from a task.
+- Launch the Claude CLI with `child_process.spawn(command, args, { shell: false })`; never build a shell string from a task.
 - Accept only existing absolute work directories under `/home/user`.
 - Dispatched Claude tasks run with `--dangerously-skip-permissions` so a queued run has every tool an interactive session has (shell, web search, MCP servers, skills from `~/.claude`). The container runs unprivileged and only the local queue owner can add tasks, so the prompt is the trust boundary.
 - No silent fallbacks: a failed usage fetch is shown as an error and blocks auto-dispatch; corrupt runtime files fail loudly instead of being reset.

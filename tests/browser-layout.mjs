@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 
 const result = execFileSync(
   "agent-browser",
-  ["--session", "capacity-dashboard", "eval", "--stdin"],
+  ["--session", "sessionmaxxing", "eval", "--stdin"],
   {
     encoding: "utf8",
     input: `JSON.stringify({ viewport: document.documentElement.clientWidth, width: document.documentElement.scrollWidth, metricsFit: [...document.querySelectorAll('.stat')].every(element => element.scrollWidth <= element.clientWidth) })`,
