@@ -13,7 +13,6 @@ export const taskInput = (workdir: string) => ({
   title: "Fix a test",
   prompt: "PRIVATE PROMPT $(echo unsafe) `whoami`\nKeep as one argument",
   workdir,
-  provider: "claude" as const,
   priority: 0,
   earliestStart: null,
   preferredWindowStart: null,

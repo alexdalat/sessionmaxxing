@@ -13,15 +13,16 @@ import {
 import { Textarea } from "@/app/components/ui/textarea";
 import { useNotice } from "@/app/hooks/useNotice";
 import { api, QUEUE_CHANGED } from "@/app/lib/api";
-import { DEFAULT_MODEL, modelOptions } from "@/app/lib/models";
+import { modelOptions } from "@/app/lib/models";
 import { quickTask } from "@/app/lib/quickTask";
+import { DEFAULT_MODEL } from "@/shared/types";
 
 export function QuickAdd({ onQueued }: { onQueued: () => void }) {
   const fieldId = useId();
   const formRef = useRef<HTMLFormElement>(null);
   const [prompt, setPrompt] = useState("");
   const [workdir, setWorkdir] = useState("");
-  const [model, setModel] = useState(DEFAULT_MODEL.claude);
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useNotice();
@@ -91,7 +92,7 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {modelOptions("claude", model).map((option) => (
+              {modelOptions(model).map((option) => (
                 <SelectItem key={option.value} value={option.value}>
                   {option.label}
                 </SelectItem>

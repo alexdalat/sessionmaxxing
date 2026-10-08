@@ -280,6 +280,37 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
     await temp.cleanup();
   }
 });
+it("rejects a task body that still names a provider", async () => {
+  const { temporary, taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({ queue, runner });
+  try {
+    const created = await app.inject({
+      method: "POST",
+      url: "/api/tasks",
+      payload: { ...taskInput(temp.path), provider: "claude" },
+    });
+    expect(created.statusCode).toBe(400);
+    expect(queue.snapshot().tasks).toEqual([]);
+
+    const task = await queue.create(taskInput(temp.path));
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${task.id}`,
+      payload: { provider: "claude" },
+    });
+    expect(patched.statusCode).toBe(400);
+    expect(queue.snapshot().tasks).toEqual([task]);
+  } finally {
+    await app.close();
+    await runner.close();
+    await temp.cleanup();
+  }
+});
 it("serves the production client locally, protects API errors, and does not fall back to HTML for unknown API routes", async () => {
   const { temporary } = await import("./helpers");
   const { writeFile } = await import("node:fs/promises");

@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import {
   AUTO_TOKENS,
   COMMIT_MESSAGE_MAX,
+  DEFAULT_MODEL,
   MAX_DEPENDENCIES,
   MAX_TOKENS,
   MIN_TOKENS,
@@ -18,11 +19,7 @@ import { modelSessionPercent } from "./calibration.js";
 import type { CommitMessageSuggester } from "./commit-message.js";
 import { emptyQuerySchema } from "./dispatch-settings.js";
 import type { EstimateRun, EstimateTask, TokensEstimator } from "./estimate.js";
-import {
-  defaultModel,
-  type QueueStore,
-  type StoredTaskInput,
-} from "./queue.js";
+import type { QueueStore, StoredTaskInput } from "./queue.js";
 import type { Runner } from "./runner.js";
 import type { SessionKeeper } from "./session-keeper.js";
 import { DomainError } from "./storage.js";
@@ -39,7 +36,6 @@ const properties = {
   title: { type: "string", minLength: 1, maxLength: 120 },
   prompt: { type: "string", minLength: 1, maxLength: 50_000 },
   workdir: { type: "string", minLength: 1, maxLength: 4096 },
-  provider: { type: "string", enum: ["claude", "codex"] },
   model: { type: "string", pattern: "^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,79}$" },
   priority: { type: "integer", minimum: 0, maximum: 1_000_000 },
   earliestStart: {
@@ -104,7 +100,7 @@ export function registerQueueRoutes(
       ...task,
       review: latest && needsReview(latest) ? "needed" : null,
       sessionCostPercent:
-        task.provider !== "claude" || rates === null
+        rates === null
           ? null
           : modelSessionPercent(task.tokens, task.model, rates),
     };
@@ -182,14 +178,10 @@ export function registerQueueRoutes(
       .snapshot()
       .tasks.find((candidate) => candidate.id === taskId);
     if (task === undefined) throw new DomainError("Task not found.", 404);
-    const provider = patch.provider ?? task.provider;
     return {
       title: patch.title ?? task.title,
       prompt: patch.prompt ?? task.prompt,
-      model:
-        patch.model ||
-        (provider === task.provider ? task.model : defaultModel(provider)),
-      provider,
+      model: patch.model || task.model,
     };
   };
   app.get<{ Querystring: { q?: string } }>(
@@ -265,7 +257,6 @@ export function registerQueueRoutes(
             "title",
             "prompt",
             "workdir",
-            "provider",
             "priority",
             "earliestStart",
             "preferredWindowStart",
@@ -284,8 +275,7 @@ export function registerQueueRoutes(
         tokens: await storedTokens(input.tokens, () => ({
           title: input.title,
           prompt: input.prompt,
-          model: input.model || defaultModel(input.provider),
-          provider: input.provider,
+          model: input.model || DEFAULT_MODEL,
         })),
       });
       return reply.code(201).send(await plannedTask(created));

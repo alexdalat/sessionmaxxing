@@ -1,9 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
+  DEFAULT_MODEL,
   type ModelFamily,
   modelFamily,
-  type Provider,
   type PublicTask,
   type QueueSnapshot,
   type Task,
@@ -15,13 +15,11 @@ import { TASK_ID, validateFields, validateWorkdir } from "./validation.js";
 
 /** A task input whose "auto" tokens have already been resolved to a number. */
 export type StoredTaskInput = Omit<TaskInput, "tokens"> & Pick<Task, "tokens">;
-export const defaultModel = (provider: Provider) =>
-  provider === "claude" ? "opus" : "gpt-6-astra";
 /**
  * Session rates fitted on 2026-09-15 (data/usage-samples.jsonl against the
  * transcripts in ~/.claude/projects), used once to convert tasks stored as a
  * session percent into the output tokens the queue keeps now. Sonnet had too
- * little data to fit and takes the Opus rate, as Codex and unknown models do.
+ * little data to fit and takes the Opus rate, as unknown models do.
  */
 const MIGRATION_RATES: Record<ModelFamily, number> = {
   fable: 357,
@@ -50,7 +48,6 @@ export function publicTask(task: Task): PublicTask {
     title: task.title,
     prompt: task.prompt,
     workdir: task.workdir,
-    provider: task.provider,
     model: task.model,
     priority: task.priority,
     status: task.status,
@@ -224,7 +221,7 @@ export class QueueStore {
         ...input,
         workdir,
         id: taskId,
-        model: input.model || defaultModel(input.provider),
+        model: input.model || DEFAULT_MODEL,
         status: "pending",
         createdAt: new Date().toISOString(),
         finishedAt: null,
@@ -245,12 +242,6 @@ export class QueueStore {
       if (task.status !== "pending")
         throw new DomainError("Only pending tasks can be edited.");
       const updated = { ...task, ...patch };
-      if (
-        patch.provider &&
-        patch.provider !== task.provider &&
-        patch.model === undefined
-      )
-        updated.model = defaultModel(patch.provider);
       validateFields(updated);
       validateDependencies(state, task.id, updated.dependsOn);
       updated.workdir = await validateWorkdir(updated.workdir);

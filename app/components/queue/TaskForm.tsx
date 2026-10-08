@@ -18,11 +18,12 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
-import { DEFAULT_MODEL, modelOptions } from "@/app/lib/models";
-import type { Provider, PublicTask, TaskInput } from "@/shared/types";
+import { modelOptions } from "@/app/lib/models";
+import type { PublicTask, TaskInput } from "@/shared/types";
 import {
   AUTO_TOKENS,
   DEFAULT_MAX_TURNS,
+  DEFAULT_MODEL,
   formatTokens,
   HOURS,
   hourLabel,
@@ -48,10 +49,7 @@ export function TaskFormDialog({
   onClose: () => void;
 }) {
   const fieldId = useId();
-  const [provider, setProvider] = useState<Provider>(
-    task?.provider ?? "claude",
-  );
-  const [model, setModel] = useState(task?.model ?? DEFAULT_MODEL.claude);
+  const [model, setModel] = useState(task?.model ?? DEFAULT_MODEL);
   const [windowStart, setWindowStart] = useState(
     String(task?.preferredWindowStart ?? ANY_WINDOW),
   );
@@ -104,7 +102,6 @@ export function TaskFormDialog({
             const input: TaskInput = {
               title: String(fields.get("title")),
               prompt: String(fields.get("prompt")),
-              provider,
               model,
               workdir: String(fields.get("workdir")).trim(),
               priority: Number(fields.get("priority")),
@@ -154,26 +151,6 @@ export function TaskFormDialog({
               />
             </div>
             <div className="grid gap-1.5">
-              <Label htmlFor={`${fieldId}-provider`}>Provider</Label>
-              <Select
-                name="provider"
-                value={provider}
-                onValueChange={(value) => {
-                  const next = value as Provider;
-                  setProvider(next);
-                  setModel(DEFAULT_MODEL[next]);
-                }}
-              >
-                <SelectTrigger id={`${fieldId}-provider`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="claude">Claude</SelectItem>
-                  <SelectItem value="codex">Codex</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-model`}>Model</Label>
               <Select
                 name="model"
@@ -185,7 +162,7 @@ export function TaskFormDialog({
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {modelOptions(provider, model).map((option) => (
+                  {modelOptions(model).map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>

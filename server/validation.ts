@@ -51,8 +51,6 @@ export function validateFields(input: TaskInput) {
       "Prompt must contain 1–50000 characters without NUL bytes.",
       400,
     );
-  if (!["claude", "codex"].includes(input.provider))
-    throw new DomainError("Select a supported provider.", 400);
   if (
     input.model !== undefined &&
     !/^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,79}$/.test(input.model)

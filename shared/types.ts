@@ -181,7 +181,7 @@ export const formatTokens = (tokens: number) =>
     : `${Math.round(tokens / THOUSAND)}k`;
 /** Session percent one million weighted tokens of a family costs on the current plan. */
 export type SessionRates = Record<ModelFamily, number>;
-/** The family behind a model alias (`opus`) or identifier (`claude-fable-5-1`); null for Codex and unknown models. */
+/** The family behind a model alias (`opus`) or identifier (`claude-fable-5-1`); null for unknown models. */
 export function modelFamily(model: string): ModelFamily | null {
   const name = model.toLowerCase();
   return MODEL_FAMILIES.find((family) => name.includes(family)) ?? null;
@@ -273,25 +273,13 @@ export interface CurrentBlock extends ActivityCount {
   remainingMinutes: number;
   estimated: true;
 }
-export type Provider = "claude" | "codex";
-export const PROVIDER_MODELS: Record<
-  Provider,
-  readonly { value: string; label: string }[]
-> = {
-  claude: [
-    { value: "fable", label: "Fable 5.1" },
-    { value: "opus", label: "Opus" },
-    { value: "sonnet", label: "Sonnet" },
-    { value: "haiku", label: "Haiku" },
-  ],
-  codex: [
-    { value: "gpt-6-astra", label: "GPT-6 Astra" },
-    { value: "gpt-5.6-sol", label: "GPT-5.6 Sol" },
-    { value: "gpt-5.6-terra", label: "GPT-5.6 Terra" },
-    { value: "gpt-5.6-luna", label: "GPT-5.6 Luna" },
-    { value: "gpt-5.3-codex", label: "GPT-5.3 Codex" },
-  ],
-};
+export const CLAUDE_MODELS: readonly { value: string; label: string }[] = [
+  { value: "fable", label: "Fable 5.1" },
+  { value: "opus", label: "Opus" },
+  { value: "sonnet", label: "Sonnet" },
+  { value: "haiku", label: "Haiku" },
+];
+export const DEFAULT_MODEL = "opus";
 export type TaskStatus =
   | "pending"
   | "running"
@@ -309,7 +297,6 @@ export interface TaskInput {
   title: string;
   prompt: string;
   workdir: string;
-  provider: Provider;
   model?: string;
   priority: number;
   earliestStart: string | null;
@@ -341,7 +328,7 @@ export interface TaskGate {
 export type PublicTask = Task & {
   gate?: TaskGate;
   review: "needed" | null;
-  /** `tokens` priced at the current session rates; null for Codex tasks and before calibration. */
+  /** `tokens` priced at the current session rates; null before calibration. */
   sessionCostPercent: number | null;
 };
 export interface WorkdirSuggestions {

@@ -30,11 +30,11 @@ import type {
 } from "../shared/types.js";
 import {
   ACTIVITY_SOURCES,
+  CLAUDE_MODELS,
   DEFAULT_DISPATCH_SETTINGS,
   FABLE_MODEL,
   formatTokens,
   needsReview,
-  PROVIDER_MODELS,
   planLabel,
 } from "../shared/types.js";
 import { usageSnapshot } from "./helpers";
@@ -167,14 +167,14 @@ it("clock of a day fraction reads to the minute with 12-hour labels", () => {
   expect(clockOfFraction(-0.2)).toBe("12:00 AM");
 });
 
-it("keeps the provider list when the current model is one of its options", () => {
-  expect(modelOptions("claude", "sonnet")).toEqual(PROVIDER_MODELS.claude);
+it("keeps the model list when the current model is one of its options", () => {
+  expect(modelOptions("sonnet")).toEqual(CLAUDE_MODELS);
 });
 
 it("appends an unknown current model as its own option", () => {
-  const options = modelOptions("claude", "claude-3-5-sonnet-20241022");
+  const options = modelOptions("claude-3-5-sonnet-20241022");
   expect(options).toEqual([
-    ...PROVIDER_MODELS.claude,
+    ...CLAUDE_MODELS,
     {
       value: "claude-3-5-sonnet-20241022",
       label: "claude-3-5-sonnet-20241022",
@@ -182,15 +182,8 @@ it("appends an unknown current model as its own option", () => {
   ]);
 });
 
-it("offers no Claude models for the codex provider", () => {
-  const values = modelOptions("codex").map((option) => option.value);
-  expect(values).not.toContain("opus");
-  expect(values).not.toContain("fable");
-  expect(values).toContain("gpt-6-astra");
-});
-
 it("dispatches the Fable weekly rule for the Fable option value", () => {
-  const fable = PROVIDER_MODELS.claude[0];
+  const fable = CLAUDE_MODELS[0];
   expect(fable.label).toBe("Fable 5.1");
   expect(FABLE_MODEL.test(fable.value)).toBe(true);
 });
@@ -242,7 +235,6 @@ const queued = (
   title: id,
   prompt: "do the thing",
   workdir: "/home/user/workspace/claude-capacity-dashboard",
-  provider: "claude",
   model: "opus",
   priority: 0,
   status,

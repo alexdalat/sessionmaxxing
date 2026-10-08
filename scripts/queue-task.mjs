@@ -27,7 +27,7 @@ const CONNECTION_CODES = new Set([
 ]);
 const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." | --prompt-file PATH)
   [--workdir /abs/path]  default: the current directory
-  [--model NAME] [--provider claude|codex] [--priority N]
+  [--model NAME] [--priority N]
   [--max-turns N]        default: 500
   [--tokens N|auto]      expected weighted tokens; auto lets the server estimate them
   [--window HH]          0-23; omit for any hour
@@ -39,7 +39,6 @@ const VALUE_FLAGS = new Set([
   "--prompt-file",
   "--workdir",
   "--model",
-  "--provider",
   "--priority",
   "--window",
   "--after",
@@ -120,14 +119,10 @@ function buildBody(values) {
       : readFileSync(values["--prompt-file"], "utf8");
   if (!prompt) fail(`--prompt or --prompt-file is required.\n${USAGE}`);
   const workdir = dashboardPath(values["--workdir"] ?? process.cwd());
-  const provider = values["--provider"] ?? "claude";
-  if (provider !== "claude" && provider !== "codex")
-    fail("--provider must be claude or codex.");
   const body = {
     title: values["--title"],
     prompt,
     workdir,
-    provider,
     priority:
       values["--priority"] === undefined
         ? 0

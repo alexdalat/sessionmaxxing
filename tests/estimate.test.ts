@@ -12,7 +12,6 @@ const TASK = {
   title: "Rename the parser",
   prompt: "Rename parseEvent and update every caller, then run pnpm test.",
   model: "opus",
-  provider: "claude" as const,
 };
 const HISTORY: EstimateRun[] = [
   {

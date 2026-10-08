@@ -4,7 +4,6 @@ import {
   MIN_TOKENS,
   MODEL_FAMILIES,
   modelFamily,
-  type Provider,
   type WeightedTokens,
 } from "../shared/types.js";
 import type { ProviderProcess } from "./providers.js";
@@ -29,7 +28,6 @@ export interface EstimateTask {
   title: string;
   prompt: string;
   model: string;
-  provider: Provider;
 }
 /** One finished run, as calibration for the estimate. */
 export interface EstimateRun {
@@ -119,7 +117,7 @@ function estimatorPrompt(task: EstimateTask, history: EstimateRun[]): string {
 
 Tokens are weighted: output tokens count once, and uncached input, cache writes and cache reads count at their price relative to output. A run's total is usually four to six times its output tokens.
 
-The task runs as \`claude -p --dangerously-skip-permissions\` on the ${task.provider} provider with model ${task.model}.
+The task runs as \`claude -p --dangerously-skip-permissions\` with model ${task.model}.
 
 Rules of thumb, from runs on this machine:
 - One-file fix or wording change: 25000-75000.

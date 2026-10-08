@@ -30,7 +30,6 @@ export function quickTask(
     title: quickTitle(prompt),
     prompt,
     workdir,
-    provider: "claude",
     model,
     priority: 0,
     earliestStart: null,

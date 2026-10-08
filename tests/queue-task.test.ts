@@ -37,7 +37,6 @@ it("builds the task body from flags without posting when asked for a dry run", a
     title: "Rename the parser",
     prompt: PROMPT,
     workdir: process.cwd(),
-    provider: "claude",
     priority: 2,
     earliestStart: null,
     preferredWindowStart: 3,
@@ -45,6 +44,23 @@ it("builds the task body from flags without posting when asked for a dry run", a
     tokens: 40000,
     dependsOn: [],
     model: "claude-fable-5-1",
+  });
+});
+
+it("rejects the removed --provider flag", async () => {
+  await expect(
+    run(process.execPath, [
+      SCRIPT,
+      "--title",
+      "Rename the parser",
+      "--prompt",
+      PROMPT,
+      "--provider",
+      "claude",
+      "--dry-run",
+    ]),
+  ).rejects.toMatchObject({
+    stderr: expect.stringContaining("Unknown argument --provider"),
   });
 });
 
@@ -95,7 +111,6 @@ it("queues an unscheduled task against the running dashboard and keeps the promp
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({
       title: "Rename the parser",
-      provider: "claude",
       preferredWindowStart: null,
       maxTurns: 500,
       tokens: 75_000,

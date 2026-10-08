@@ -70,9 +70,9 @@ it("edits pending tasks, preserves omitted prompts, claims independently, retrie
     const store = await QueueStore.open(temp.path);
     const [a, b] = await Promise.all([
       store.create(taskInput(temp.path)),
-      store.create({ ...taskInput(temp.path), provider: "codex" }),
+      store.create(taskInput(temp.path)),
     ]);
-    expect(b.model).toBe("gpt-6-astra");
+    expect(b.model).toBe("opus");
     await store.update(a.id, { title: "Updated title" });
     await store.reorder([b.id, a.id]);
     expect(store.snapshot().tasks.map((t) => t.id)).toEqual([b.id, a.id]);
@@ -153,7 +153,7 @@ it("drops legacy budget estimates from saved tasks atomically without losing the
   try {
     const queue = await QueueStore.open(temp.path);
     await queue.create(taskInput(temp.path));
-    await queue.create({ ...taskInput(temp.path), provider: "codex" });
+    await queue.create(taskInput(temp.path));
     const path = `${temp.path}/queue.json`;
     const current = JSON.parse(await readFile(path, "utf8"));
     await writeFile(
@@ -189,8 +189,7 @@ it("converts tasks saved as a session percent or as output tokens into weighted 
     });
     await queue.create({
       ...taskInput(temp.path),
-      provider: "codex",
-      model: "gpt-6-astra",
+      model: "claude-unknown-1",
     });
     const path = `${temp.path}/queue.json`;
     const current = JSON.parse(await readFile(path, "utf8"));
