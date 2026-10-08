@@ -1,9 +1,9 @@
 ---
 name: queue-task
-description: Queue a coding task on the local Claude capacity dashboard so it runs automatically in a quiet hour / next session instead of now. Use when the user says "queue this", "run this later", "schedule for tonight", or when Claude Max session usage is above ~75%.
+description: Queue a coding task on the local SessionMaxxing dashboard so it runs automatically in a quiet hour / next session instead of now. Use when the user says "queue this", "run this later", "schedule for tonight", or when Claude Max session usage is above ~75%.
 ---
 
-# Queue a task on the capacity dashboard
+# Queue a task on SessionMaxxing
 
 On claude.ai the dashboard is unreachable: it is a loopback/tailnet service and no
 `curl` or `node` runs there. In that setting, skip the capacity check and instead write
@@ -29,7 +29,7 @@ curl -s http://127.0.0.1:4317/api/dispatch-settings
 
 Fall back to `http://192.0.2.10:4317` (tailnet) if the loopback call fails. Read
 `snapshot.session.percent`, `snapshot.weekly.percent`, `quiet.startHours`, and
-`providers.claude.reason`. If neither host answers, the container is down — say so
+`gate.reason`. If neither host answers, the container is down — say so
 and stop.
 
 ## 2. Gather the task
@@ -62,9 +62,9 @@ node /home/user/workspace/claude-capacity-dashboard/scripts/queue-task.mjs \
   --max-turns 100
 ```
 
-Other flags: `--provider claude|codex`, `--priority N` (lower runs first),
+Other flags: `--priority N` (lower runs first),
 `--tokens N|auto` (expected weighted tokens, `auto` by default),
-`--window HH` (0-23; omit for any hour), `--after ISO`, `--url`, `--dry-run`.
+`--window HH` (0-23; omit for any hour), `--after ISO`, `--url` (or `SESSIONMAXXING_URL`), `--dry-run`.
 The script prints the usage summary, then the created task id, title, and window.
 
 ## 4. Report back
