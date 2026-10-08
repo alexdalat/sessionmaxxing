@@ -64,7 +64,7 @@ it("rejects the removed --provider flag", async () => {
   });
 });
 
-it("queues an unscheduled task against the running dashboard and keeps the prompt off stdout", async () => {
+async function startServer() {
   const temp = await temporary();
   const now = new Date("2026-09-06T12:00:00Z");
   const queue = await QueueStore.open(temp.path);
@@ -87,27 +87,44 @@ it("queues an unscheduled task against the running dashboard and keeps the promp
       health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
     }),
   });
+  await app.listen({ port: 0, host: "127.0.0.1" });
+  const address = app.server.address();
+  if (address === null || typeof address === "string")
+    throw new Error("The test server did not report a port.");
+  return {
+    base: `http://127.0.0.1:${address.port}`,
+    workdir: temp.path,
+    queue,
+    close: async () => {
+      await app.close();
+      await temp.cleanup();
+    },
+  };
+}
+
+const queueArgs = (workdir: string, ...extra: string[]) => [
+  SCRIPT,
+  "--title",
+  "Rename the parser",
+  "--prompt",
+  PROMPT,
+  "--workdir",
+  workdir,
+  ...extra,
+];
+
+it("queues an unscheduled task against the running dashboard and keeps the prompt off stdout", async () => {
+  const server = await startServer();
   try {
-    await app.listen({ port: 0, host: "127.0.0.1" });
-    const address = app.server.address();
-    if (address === null || typeof address === "string")
-      throw new Error("The test server did not report a port.");
-    const { stdout } = await run(process.execPath, [
-      SCRIPT,
-      "--title",
-      "Rename the parser",
-      "--prompt",
-      PROMPT,
-      "--workdir",
-      temp.path,
-      "--url",
-      `http://127.0.0.1:${address.port}`,
-    ]);
+    const { stdout } = await run(
+      process.execPath,
+      queueArgs(server.workdir, "--url", server.base),
+    );
     expect(stdout).toContain("session 16%");
     expect(stdout).toContain("weekly 2%");
     expect(stdout).toContain("Any hour");
     expect(stdout).not.toMatch(/PRIVATE|parser and run/);
-    const tasks = queue.snapshot().tasks;
+    const tasks = server.queue.snapshot().tasks;
     expect(tasks).toHaveLength(1);
     expect(tasks[0]).toMatchObject({
       title: "Rename the parser",
@@ -117,8 +134,47 @@ it("queues an unscheduled task against the running dashboard and keeps the promp
     });
     expect(stdout).toContain(`Queued ${tasks[0].id}`);
   } finally {
-    await app.close();
-    await temp.cleanup();
+    await server.close();
+  }
+});
+
+it("queues on the server named by SESSIONMAXXING_URL, not the old variable", async () => {
+  const named = await startServer();
+  const old = await startServer();
+  try {
+    const { stdout } = await run(process.execPath, queueArgs(named.workdir), {
+      env: {
+        ...process.env,
+        SESSIONMAXXING_URL: named.base,
+        CAPACITY_DASHBOARD_URL: old.base,
+      },
+    });
+    expect(stdout.startsWith(`${named.base} ·`)).toBe(true);
+    expect(named.queue.snapshot().tasks.map((task) => task.title)).toEqual([
+      "Rename the parser",
+    ]);
+    expect(old.queue.snapshot().tasks).toHaveLength(0);
+  } finally {
+    await named.close();
+    await old.close();
+  }
+});
+
+it("lets --url override SESSIONMAXXING_URL", async () => {
+  const flagged = await startServer();
+  const fromEnv = await startServer();
+  try {
+    const { stdout } = await run(
+      process.execPath,
+      queueArgs(flagged.workdir, "--url", flagged.base),
+      { env: { ...process.env, SESSIONMAXXING_URL: fromEnv.base } },
+    );
+    expect(stdout.startsWith(`${flagged.base} ·`)).toBe(true);
+    expect(flagged.queue.snapshot().tasks).toHaveLength(1);
+    expect(fromEnv.queue.snapshot().tasks).toHaveLength(0);
+  } finally {
+    await flagged.close();
+    await fromEnv.close();
   }
 });
 

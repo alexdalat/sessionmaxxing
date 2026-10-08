@@ -2,8 +2,7 @@
 import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-const DEFAULT_URL =
-  process.env.CAPACITY_DASHBOARD_URL ?? "http://127.0.0.1:4317";
+const DEFAULT_URL = process.env.SESSIONMAXXING_URL ?? "http://127.0.0.1:4317";
 const TAILNET_URL = "http://192.0.2.10:4317";
 const MAC_HOME = "/Users/me";
 // Syncthing folder pairs between the Mac and deltabeta. Runs execute on deltabeta,
@@ -32,7 +31,8 @@ const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." 
   [--tokens N|auto]      expected weighted tokens; auto lets the server estimate them
   [--window HH]          0-23; omit for any hour
   [--depends-on ID[,ID]] run only after these queued task ids finish
-  [--after ISO] [--url URL] [--dry-run]`;
+  [--after ISO] [--dry-run]
+  [--url URL]            default: $SESSIONMAXXING_URL, else http://127.0.0.1:4317`;
 const VALUE_FLAGS = new Set([
   "--title",
   "--prompt",
