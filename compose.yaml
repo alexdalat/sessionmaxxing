@@ -1,5 +1,7 @@
+name: sessionmaxxing
 services:
-  dashboard:
+  sessionmaxxing:
+    container_name: sessionmaxxing
     build: .
     user: "1000:1000"
     init: true
@@ -7,8 +9,8 @@ services:
     stop_grace_period: 30s
     environment:
       HOME: /home/user
-      HOST: 0.0.0.0
-      PORT: "4317"
+      SESSIONMAXXING_HOST: 0.0.0.0
+      SESSIONMAXXING_PORT: "4317"
       TZ: America/New_York
     ports:
       - target: 4317
@@ -20,7 +22,7 @@ services:
         host_ip: 127.0.0.1
         protocol: tcp
     volumes:
-      # The identical HOME path supplies both Claude and Codex session history.
+      # The identical HOME path supplies Claude session history and credentials.
       - type: bind
         source: /home/user
         target: /home/user

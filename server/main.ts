@@ -16,6 +16,9 @@ import { DomainError } from "./storage.js";
 import { UsageHistoryStore } from "./usage-history.js";
 import { UsageMonitor } from "./usage-monitor.js";
 
+const HOST_VARIABLE = "SESSIONMAXXING_HOST";
+const PORT_VARIABLE = "SESSIONMAXXING_PORT";
+
 interface StartOptions {
   port?: number;
   dataDirectory?: string;
@@ -26,12 +29,18 @@ interface StartOptions {
 export async function startDashboard(
   options: StartOptions = {},
 ): Promise<FastifyInstance> {
-  const host = process.env.HOST ?? "127.0.0.1";
+  const host = process.env[HOST_VARIABLE] ?? "127.0.0.1";
   if (host !== "127.0.0.1" && host !== "0.0.0.0")
-    throw new DomainError("HOST must be 127.0.0.1 or 0.0.0.0.", 400);
-  const port = options.port ?? Number(process.env.PORT ?? 4317);
+    throw new DomainError(
+      `${HOST_VARIABLE} must be 127.0.0.1 or 0.0.0.0.`,
+      400,
+    );
+  const port = options.port ?? Number(process.env[PORT_VARIABLE] ?? 4317);
   if (!Number.isInteger(port) || port < 0 || port > 65535)
-    throw new DomainError("PORT must be an integer from 1 to 65535.", 400);
+    throw new DomainError(
+      `${PORT_VARIABLE} must be an integer from 1 to 65535.`,
+      400,
+    );
   const directory = options.dataDirectory ?? resolve("data");
   await mkdir(directory, { recursive: true, mode: 0o700 });
   const lockPath = join(directory, "server.lock");

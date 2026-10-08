@@ -11,7 +11,11 @@ vi.mock("../server/history.js", () => ({
   }),
 }));
 
-beforeEach(() => vi.stubEnv("HOST", undefined));
+beforeEach(() => {
+  vi.stubEnv("SESSIONMAXXING_HOST", undefined);
+  vi.stubEnv("SESSIONMAXXING_PORT", undefined);
+  vi.stubEnv("HOST", undefined);
+});
 afterEach(() => vi.unstubAllEnvs());
 
 const fetchUsage = async (at: Date) =>
@@ -69,9 +73,9 @@ it("uses the persistent runtime data directory for dispatch settings and usage s
 });
 
 it.each([undefined, "127.0.0.1"])(
-  "binds loopback with HOST=%s, owns an exclusive runtime lock, and releases it on server shutdown",
+  "binds loopback with SESSIONMAXXING_HOST=%s, owns an exclusive runtime lock, and releases it on server shutdown",
   async (host) => {
-    vi.stubEnv("HOST", host);
+    vi.stubEnv("SESSIONMAXXING_HOST", host);
     const temp = await temporary();
     const options = {
       port: 0,
@@ -103,8 +107,8 @@ it.each([undefined, "127.0.0.1"])(
   },
 );
 
-it("binds all container interfaces when HOST is explicitly 0.0.0.0 and still validates requests", async () => {
-  vi.stubEnv("HOST", "0.0.0.0");
+it("binds all container interfaces when SESSIONMAXXING_HOST is explicitly 0.0.0.0 and still validates requests", async () => {
+  vi.stubEnv("SESSIONMAXXING_HOST", "0.0.0.0");
   const temp = await temporary();
   try {
     const app = await startDashboard({
@@ -144,12 +148,52 @@ it("binds all container interfaces when HOST is explicitly 0.0.0.0 and still val
   }
 });
 
-it("rejects unsupported HOST values before touching runtime state", async () => {
+it("ignores the shell's HOST and binds loopback", async () => {
+  vi.stubEnv("HOST", "0.0.0.0");
+  const temp = await temporary();
+  try {
+    const app = await startDashboard({
+      port: 0,
+      dataDirectory: temp.path,
+      development: true,
+      fetchUsage,
+    });
+    try {
+      expect(app.server.address()).toMatchObject({ address: "127.0.0.1" });
+    } finally {
+      await app.close();
+    }
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("rejects an out-of-range SESSIONMAXXING_PORT before touching runtime state", async () => {
+  vi.stubEnv("SESSIONMAXXING_PORT", "70000");
+  const temp = await temporary();
+  const dataDirectory = join(temp.path, "runtime");
+  try {
+    await expect(
+      startDashboard({ dataDirectory, development: true, fetchUsage }).then(
+        (app) => app.close(),
+      ),
+    ).rejects.toThrow(
+      "SESSIONMAXXING_PORT must be an integer from 1 to 65535.",
+    );
+    await expect(access(dataDirectory)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("rejects unsupported SESSIONMAXXING_HOST values before touching runtime state", async () => {
   const temp = await temporary();
   const dataDirectory = join(temp.path, "runtime");
   try {
     for (const host of ["", "localhost", "192.168.1.10", "::", "0.0.0.0 "]) {
-      vi.stubEnv("HOST", host);
+      vi.stubEnv("SESSIONMAXXING_HOST", host);
       await expect(
         startDashboard({
           port: 0,
@@ -157,7 +201,7 @@ it("rejects unsupported HOST values before touching runtime state", async () => 
           development: true,
           fetchUsage,
         }).then((app) => app.close()),
-      ).rejects.toThrow("HOST must be 127.0.0.1 or 0.0.0.0.");
+      ).rejects.toThrow("SESSIONMAXXING_HOST must be 127.0.0.1 or 0.0.0.0.");
       await expect(access(dataDirectory)).rejects.toMatchObject({
         code: "ENOENT",
       });
