@@ -79,6 +79,11 @@ const workdirQuerySchema = {
   additionalProperties: false,
   properties: { q: { type: "string", maxLength: 4096 } },
 };
+const runsQuerySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: { limit: { type: "string", pattern: "^[1-9][0-9]{0,5}$" } },
+};
 export function registerQueueRoutes(
   app: FastifyInstance,
   queue: QueueStore,
@@ -195,10 +200,22 @@ export function registerQueueRoutes(
           .map((task) => task.workdir),
       ),
   );
-  app.get("/api/runs", async () => ({
-    runs: runner.list(),
-    runnerError: runner.error,
-  }));
+  app.get<{ Querystring: { limit?: string } }>(
+    "/api/runs",
+    { schema: { querystring: runsQuerySchema } },
+    async (request) => {
+      const runs = runner.list();
+      return {
+        runs:
+          request.query.limit === undefined
+            ? runs
+            : runs.slice(0, Number(request.query.limit)),
+        total: runs.length,
+        pending: runs.filter(needsReview).length,
+        runnerError: runner.error,
+      };
+    },
+  );
   app.get("/api/runs/pending-review", async () => ({
     pending: runner.list().filter(needsReview).length,
   }));

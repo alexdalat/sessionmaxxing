@@ -765,6 +765,47 @@ it("computes quiet start hours from local history for the planning snapshot and 
   }
 });
 
+it("returns only the newest runs up to the limit with the full count", async () => {
+  const { taskInput, fakeChild } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  let clock = Date.parse("2026-10-27T12:00:00Z");
+  let child = fakeChild();
+  const runner = await Runner.open(queue, temp.path, {
+    launch: () => child,
+    now: () => new Date(clock),
+  });
+  const app = await createApp({ queue, runner });
+  try {
+    for (const title of ["Older", "Newer"]) {
+      const created = await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { ...taskInput(temp.path), title },
+      });
+      await app.inject({
+        method: "POST",
+        url: `/api/tasks/${created.json().id}/run`,
+      });
+      child.emit("close", 0, null);
+      await runner.waitForIdle();
+      child = fakeChild();
+      clock += 60_000;
+    }
+    const page = (await app.inject("/api/runs?limit=1")).json();
+    expect(page.runs.map((run: { title: string }) => run.title)).toEqual([
+      "Newer",
+    ]);
+    expect(page.total).toBe(2);
+    expect((await app.inject("/api/runs?limit=0")).statusCode).toBe(400);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
 it("never exposes the session id of a dispatched run through the runs route", async () => {
   const { taskInput, fakeChild } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");

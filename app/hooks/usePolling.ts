@@ -7,6 +7,7 @@ export function usePolling<T>(path: string, intervalMs = DEFAULT_INTERVAL_MS) {
   const [data, setData] = useState<T>();
   const [error, setError] = useState("");
   const [request, setRequest] = useState({ path });
+  if (request.path !== path) setRequest({ path });
   const reload = useCallback(() => setRequest({ path }), [path]);
   useEffect(() => {
     const controller = new AbortController();

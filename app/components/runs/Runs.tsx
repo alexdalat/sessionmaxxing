@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ListSkeleton } from "@/app/components/Skeletons";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
@@ -25,6 +25,9 @@ const tokenTotal = (tokens: WeightedTokens | null) =>
     : formatTokens(
         MODEL_FAMILIES.reduce((sum, family) => sum + tokens[family], 0),
       );
+
+const PAGE_SIZE = 20;
+const SCROLL_MARGIN = "600px";
 
 type BadgeVariant = "success" | "warning" | "info";
 const statusVariants: Record<Run["status"], BadgeVariant> = {
@@ -95,10 +98,31 @@ function CommitForm({
   );
 }
 export function Runs() {
+  const [limit, setLimit] = useState(PAGE_SIZE);
   const { data, error, reload } = usePolling<{
     runs: Run[];
+    total: number;
+    pending: number;
     runnerError?: string;
-  }>("/api/runs");
+  }>(`/api/runs?limit=${limit}`);
+  const sentinel = useRef<HTMLDivElement>(null);
+  const loaded = data?.runs.length ?? 0;
+  const hasMore = data !== undefined && loaded < data.total;
+  useEffect(() => {
+    const node = sentinel.current;
+    if (!hasMore || !node) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting)
+          setLimit((current) =>
+            loaded >= current ? current + PAGE_SIZE : current,
+          );
+      },
+      { rootMargin: SCROLL_MARGIN },
+    );
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [hasMore, loaded]);
   const [busyRun, setBusyRun] = useState("");
   const [actionError, setActionError] = useState("");
   const [notice, setNotice] = useNotice();
@@ -138,7 +162,7 @@ export function Runs() {
     setNotice(`Queued ${run.title} again.`);
     window.dispatchEvent(new Event(QUEUE_CHANGED));
   }
-  const pending = data?.runs.filter(needsReview).length ?? 0;
+  const pending = data?.pending ?? 0;
   return (
     <>
       {pending > 0 && (
@@ -288,6 +312,7 @@ export function Runs() {
           )}
         </article>
       ))}
+      {hasMore && <div ref={sentinel} />}
     </>
   );
 }
