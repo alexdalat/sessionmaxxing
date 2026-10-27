@@ -4,11 +4,12 @@ import { OverviewSkeleton } from "@/app/components/Skeletons";
 import { Button } from "@/app/components/ui/button";
 import { useAnalytics } from "@/app/hooks/useAnalytics";
 import { usePolling } from "@/app/hooks/usePolling";
+import { ACTIVE_QUEUE_PATH } from "@/app/lib/api";
 import type { QueueSnapshot } from "@/shared/types";
 
 export default function OverviewPage() {
   const { analytics, error, loading, refresh } = useAnalytics();
-  const queue = usePolling<QueueSnapshot>("/api/queue");
+  const queue = usePolling<QueueSnapshot>(ACTIVE_QUEUE_PATH);
   return (
     <>
       <header className="page-header">

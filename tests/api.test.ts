@@ -765,6 +765,41 @@ it("computes quiet start hours from local history for the planning snapshot and 
   }
 });
 
+it("leaves finished tasks out of the active queue", async () => {
+  const { taskInput, fakeChild } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path);
+  const child = fakeChild();
+  const runner = await Runner.open(queue, temp.path, { launch: () => child });
+  const app = await createApp({ queue, runner });
+  try {
+    const titles = ["Finished", "Waiting"];
+    for (const title of titles)
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: { ...taskInput(temp.path), title },
+      });
+    const [finished] = (await app.inject("/api/queue")).json().tasks;
+    await app.inject({ method: "POST", url: `/api/tasks/${finished.id}/run` });
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    const title = (task: { title: string }) => task.title;
+    expect((await app.inject("/api/queue")).json().tasks.map(title)).toEqual(
+      titles,
+    );
+    expect(
+      (await app.inject("/api/queue?active=true")).json().tasks.map(title),
+    ).toEqual(["Waiting"]);
+    expect((await app.inject("/api/queue?active=false")).statusCode).toBe(400);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
 it("returns only the newest runs up to the limit with the full count", async () => {
   const { taskInput, fakeChild } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");

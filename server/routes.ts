@@ -17,7 +17,6 @@ import {
 } from "../shared/types.js";
 import { modelSessionPercent } from "./calibration.js";
 import type { CommitMessageSuggester } from "./commit-message.js";
-import { emptyQuerySchema } from "./dispatch-settings.js";
 import type { EstimateRun, EstimateTask, TokensEstimator } from "./estimate.js";
 import type { QueueStore, StoredTaskInput } from "./queue.js";
 import type { Runner } from "./runner.js";
@@ -79,6 +78,13 @@ const workdirQuerySchema = {
   additionalProperties: false,
   properties: { q: { type: "string", maxLength: 4096 } },
 };
+const queueQuerySchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: { active: { const: "true" } },
+};
+const isActive = (task: PublicTask) =>
+  task.status === "pending" || task.status === "running";
 const runsQuerySchema = {
   type: "object",
   additionalProperties: false,
@@ -117,18 +123,21 @@ export function registerQueueRoutes(
       ? { ...withReview, gate: await runner.gate(task, planning, now()) }
       : withReview;
   };
-  app.get(
+  app.get<{ Querystring: { active?: "true" } }>(
     "/api/queue",
-    { schema: { querystring: emptyQuerySchema } },
-    async () => {
+    { schema: { querystring: queueQuerySchema } },
+    async (request) => {
       const planning = getPlanning?.();
       const snapshot = queue.snapshot();
       const at = now();
       const runs = runner.list();
+      const tasks = request.query.active
+        ? snapshot.tasks.filter(isActive)
+        : snapshot.tasks;
       return {
         ...snapshot,
         tasks: await Promise.all(
-          snapshot.tasks.map(async (task) => {
+          tasks.map(async (task) => {
             const withReview = shown(task, runs, planning?.rates ?? null);
             return planning
               ? { ...withReview, gate: await runner.gate(task, planning, at) }

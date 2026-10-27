@@ -17,3 +17,5 @@ export async function api<T>(
 }
 /** Window event fired after a mutation outside the queue page changes the task queue. */
 export const QUEUE_CHANGED = "queue-changed";
+/** Queue snapshot without finished tasks, which no page renders. */
+export const ACTIVE_QUEUE_PATH = "/api/queue?active=true";

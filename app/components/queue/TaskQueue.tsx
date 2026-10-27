@@ -15,7 +15,7 @@ import {
 import { useClock } from "@/app/hooks/useClock";
 import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
-import { api } from "@/app/lib/api";
+import { ACTIVE_QUEUE_PATH, api } from "@/app/lib/api";
 import { displayOrder, movedPast, moveTarget } from "@/app/lib/queueOrder";
 import type { PublicTask, QueueSnapshot, TaskInput } from "@/shared/types";
 import { TaskCard } from "./TaskCard";
@@ -28,7 +28,7 @@ export function TaskQueue() {
     data,
     error: loadError,
     reload,
-  } = usePolling<QueueSnapshot & { runnerError?: string }>("/api/queue");
+  } = usePolling<QueueSnapshot & { runnerError?: string }>(ACTIVE_QUEUE_PATH);
   const [filter, setFilter] = useState("all");
   const [error, setError] = useState("");
   const [notice, setNotice] = useNotice();

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { usePolling } from "@/app/hooks/usePolling";
-import { QUEUE_CHANGED } from "@/app/lib/api";
+import { ACTIVE_QUEUE_PATH, QUEUE_CHANGED } from "@/app/lib/api";
 import { PRODUCT_NAME } from "@/shared/product";
 import type { PendingReview, QueueSnapshot } from "@/shared/types";
 
@@ -30,7 +30,7 @@ export function Sidebar() {
     NAV_POLL_MS,
   );
   const { data: queue, reload: reloadQueue } = usePolling<QueueSnapshot>(
-    "/api/queue",
+    ACTIVE_QUEUE_PATH,
     NAV_POLL_MS,
   );
   useEffect(() => {
