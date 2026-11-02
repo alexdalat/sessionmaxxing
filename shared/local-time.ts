@@ -3,31 +3,41 @@ const DAY_MS = 86_400_000;
 const MS_PER_SECOND = 1000;
 const NOON_SUFFIX = "T12:00:00Z";
 const DATE_LENGTH = "YYYY-MM-DD".length;
+const LOCAL_INPUT = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2})$/;
+
+const pad = (value: number) => String(value).padStart(2, "0");
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
 
-function formatter(timeZone: string) {
-  let found = formatters.get(timeZone);
+function cachedFormatter(
+  kind: string,
+  timeZone: string,
+  options: Intl.DateTimeFormatOptions,
+) {
+  const key = `${kind}|${timeZone}`;
+  let found = formatters.get(key);
   if (!found) {
-    found = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-      hourCycle: "h23",
-    });
-    formatters.set(timeZone, found);
+    found = new Intl.DateTimeFormat("en-US", { ...options, timeZone });
+    formatters.set(key, found);
   }
   return found;
 }
 
+const partsFormatter = (timeZone: string) =>
+  cachedFormatter("parts", timeZone, {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  });
+
 export function localParts(time: Date | string | number, timeZone: string) {
   const instant = new Date(time).getTime();
   const parts = Object.fromEntries(
-    formatter(timeZone)
+    partsFormatter(timeZone)
       .formatToParts(instant)
       .map((part) => [part.type, part.value]),
   );
@@ -57,9 +67,7 @@ export function localStart(
   timeZone: string,
   minute = 0,
 ): number {
-  const wall = Date.parse(
-    `${date}T${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}:00Z`,
-  );
+  const wall = Date.parse(`${date}T${pad(hour)}:${pad(minute)}:00Z`);
   // The matching instant lies within [wall - 14 h, wall + 12 h]; sampling a day either side sees the offset before and after any transition that can matter.
   const offsets = new Set(
     [-DAY_MS, DAY_MS].map(
@@ -93,3 +101,46 @@ export const shiftDate = (date: string, days: number) =>
 
 export const weekdayIndex = (date: string) =>
   new Date(`${date}${NOON_SUFFIX}`).getUTCDay();
+
+export const localTimestamp = (time: string | number, timeZone: string) =>
+  cachedFormatter("timestamp", timeZone, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(time));
+
+export const localClock = (time: string | number, timeZone: string) =>
+  cachedFormatter("clock", timeZone, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date(time));
+
+export function zoneName(timeZone: string, at: number): string {
+  const name = cachedFormatter("zone", timeZone, {
+    timeZoneName: "shortGeneric",
+  })
+    .formatToParts(at)
+    .find((part) => part.type === "timeZoneName");
+  if (!name) throw new Error(`No zone name for ${timeZone}.`);
+  return name.value;
+}
+
+export function toLocalInput(time: string | number, timeZone: string) {
+  const { date, hour, minute } = localParts(time, timeZone);
+  return `${date}T${pad(hour)}:${pad(minute)}`;
+}
+
+export function fromLocalInput(value: string, timeZone: string): string {
+  const match = LOCAL_INPUT.exec(value);
+  if (!match) {
+    throw new RangeError(
+      `Expected a local date and time as YYYY-MM-DDTHH:mm, got "${value}".`,
+    );
+  }
+  const [, date, hour, minute] = match;
+  return new Date(
+    localStart(date, Number(hour), timeZone, Number(minute)),
+  ).toISOString();
+}

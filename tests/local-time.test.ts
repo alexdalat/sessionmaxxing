@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  fromLocalInput,
+  localClock,
   localParts,
   localStart,
+  localTimestamp,
   nextLocalHour,
   shiftDate,
+  toLocalInput,
   weekdayIndex,
+  zoneName,
 } from "../shared/local-time.js";
 import { TEST_TIME_ZONE } from "./helpers.js";
 
@@ -150,5 +155,95 @@ describe("date arithmetic", () => {
   it("numbers weekdays from Sunday", () => {
     expect(weekdayIndex("2026-09-06")).toBe(0);
     expect(weekdayIndex("2026-09-07")).toBe(1);
+  });
+});
+
+describe("localTimestamp", () => {
+  it("formats an EDT instant with its short zone name", () => {
+    expect(localTimestamp("2026-09-08T02:00:00Z", TEST_TIME_ZONE)).toBe(
+      "Sep 7, 10:00 PM EDT",
+    );
+  });
+
+  it("formats a winter instant with EST", () => {
+    expect(localTimestamp("2026-01-15T12:00:00Z", TEST_TIME_ZONE)).toBe(
+      "Jan 15, 7:00 AM EST",
+    );
+  });
+
+  it("names a zone without an abbreviation by its offset", () => {
+    expect(localTimestamp("2026-09-06T12:00:00Z", KOLKATA)).toBe(
+      "Sep 6, 5:30 PM GMT+5:30",
+    );
+  });
+
+  it("accepts epoch milliseconds", () => {
+    expect(localTimestamp(at("2026-09-08T02:00:00Z"), TEST_TIME_ZONE)).toBe(
+      "Sep 7, 10:00 PM EDT",
+    );
+  });
+});
+
+describe("localClock", () => {
+  it("formats a +05:45 zone to the minute", () => {
+    expect(localClock("2026-09-06T12:00:00Z", KATHMANDU)).toBe("5:45 PM");
+  });
+
+  it("accepts epoch milliseconds", () => {
+    expect(localClock(at("2026-09-06T12:00:00Z"), KATHMANDU)).toBe("5:45 PM");
+  });
+});
+
+describe("zoneName", () => {
+  const noon = at("2026-09-06T12:00:00Z");
+
+  it("uses the generic abbreviation for a North American zone", () => {
+    expect(zoneName(TEST_TIME_ZONE, noon)).toBe("ET");
+  });
+
+  it("uses the generic name for India", () => {
+    expect(zoneName(KOLKATA, noon)).toBe("India Time");
+  });
+});
+
+describe("toLocalInput", () => {
+  it("writes a datetime-local value in the given zone", () => {
+    expect(toLocalInput("2026-09-08T02:00:00Z", TEST_TIME_ZONE)).toBe(
+      "2026-09-07T22:00",
+    );
+  });
+
+  it("writes a half-hour zone value", () => {
+    expect(toLocalInput("2026-09-06T12:30:00Z", KOLKATA)).toBe(
+      "2026-09-06T18:00",
+    );
+  });
+});
+
+describe("fromLocalInput", () => {
+  it("reads a datetime-local value in the given zone", () => {
+    expect(fromLocalInput("2026-09-07T22:00", TEST_TIME_ZONE)).toBe(
+      "2026-09-08T02:00:00.000Z",
+    );
+  });
+
+  it("reads a half-hour zone value", () => {
+    expect(fromLocalInput("2026-09-06T18:00", KOLKATA)).toBe(
+      "2026-09-06T12:30:00.000Z",
+    );
+  });
+
+  it("moves a nonexistent wall time forward by the gap", () => {
+    expect(fromLocalInput("2026-03-08T02:30", TEST_TIME_ZONE)).toBe(
+      "2026-03-08T07:30:00.000Z",
+    );
+  });
+
+  it.each([
+    ["a date without a time", "2026-09-07"],
+    ["an empty string", ""],
+    ["a value with seconds", "2026-09-07T22:00:00"],
+  ])("rejects %s", (_name, value) => {
+    expect(() => fromLocalInput(value, TEST_TIME_ZONE)).toThrow(RangeError);
   });
 });
