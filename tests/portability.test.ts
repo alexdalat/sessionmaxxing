@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { FORBIDDEN_VALUES } from "./forbidden-values";
 
@@ -14,7 +16,13 @@ const ENV_KEYS = [
   "SESSIONMAXXING_ALLOWED_HOSTS",
 ];
 const OPTIONAL_KEY = "SESSIONMAXXING_ALLOWED_HOSTS";
-const PORTABLE_FILES = ["compose.yaml", ".env.example", "Dockerfile"];
+const PORTABLE_FILES = [
+  "compose.yaml",
+  ".env.example",
+  "Dockerfile",
+  "deploy/host-deploy.sh",
+  "deploy/claude-dashboard-deploy.path",
+];
 const INTERPOLATION = /\$\{([A-Z][A-Z0-9_]*)(:[?-][^}]*)?\}/g;
 
 const read = (path: string) => readFile(resolve(path), "utf8");
@@ -194,5 +202,85 @@ describe("Dockerfile", () => {
     const user = text.search(/USER \$\{RUNTIME_UID\}:\$\{RUNTIME_GID\}/);
     expect(user).toBeGreaterThan(-1);
     expect(user).toBeLessThan(text.indexOf("RUN claude --version"));
+  });
+});
+
+describe("host watcher", () => {
+  const execFileAsync = promisify(execFile);
+  const SCRIPT = "deploy/host-deploy.sh";
+
+  async function resolvedPaths(env: Record<string, string>) {
+    const script = await read(SCRIPT);
+    const start = script.indexOf("case ");
+    const end = script.indexOf('results="', start);
+    const block = script.slice(start, script.indexOf("\n", end));
+    const assignments = Object.entries(env).map(
+      ([key, value]) => `${key}=${value}`,
+    );
+    const { stdout } = await execFileAsync("env", [
+      "-i",
+      ...assignments,
+      "bash",
+      "-c",
+      `set -eu\n${block}\nprintf '%s\\n%s' "$requests" "$results"`,
+    ]);
+    const [requests, results] = stdout.split("\n");
+    return { requests, results };
+  }
+
+  it("is valid bash", async () => {
+    await execFileAsync("bash", ["-n", resolve(SCRIPT)]);
+  });
+
+  it("uses SESSIONMAXXING_DATA_DIR over everything else", async () => {
+    expect(
+      await resolvedPaths({
+        HOME: "/home/user",
+        XDG_DATA_HOME: "/xdg",
+        SESSIONMAXXING_DATA_DIR: "/srv/state",
+      }),
+    ).toEqual({
+      requests: "/srv/state/deploy/requests",
+      results: "/srv/state/deploy/results",
+    });
+  });
+
+  it("uses an absolute XDG_DATA_HOME next", async () => {
+    expect(
+      await resolvedPaths({ HOME: "/home/user", XDG_DATA_HOME: "/xdg" }),
+    ).toEqual({
+      requests: "/xdg/sessionmaxxing/deploy/requests",
+      results: "/xdg/sessionmaxxing/deploy/results",
+    });
+  });
+
+  it.each(["", "relative/data"])(
+    "falls back to the home default when XDG_DATA_HOME is %j",
+    async (xdg) => {
+      expect(
+        await resolvedPaths({ HOME: "/home/user", XDG_DATA_HOME: xdg }),
+      ).toEqual({
+        requests: "/home/user/.local/share/sessionmaxxing/deploy/requests",
+        results: "/home/user/.local/share/sessionmaxxing/deploy/results",
+      });
+    },
+  );
+
+  it("keeps the repository path for the self-redeploy check and the loopback dashboard URL", async () => {
+    const script = await read(SCRIPT);
+    expect(script).toMatch(/^repo=".*"$/m);
+    expect(script).toContain('= "$repo" ]');
+    expect(script).toMatch(/\$\{DASHBOARD_URL:-http:\/\/127\.0\.0\.1:4317\}/);
+    expect(script).not.toContain("$repo/data");
+  });
+
+  it("watches the default data directory and leaves ExecStart alone", async () => {
+    const path = await read("deploy/claude-dashboard-deploy.path");
+    expect(path).toContain(
+      "PathExistsGlob=%h/.local/share/sessionmaxxing/deploy/requests/*.json",
+    );
+    expect(await read("deploy/claude-dashboard-deploy.service")).toContain(
+      "ExecStart=%h/workspace/claude-capacity-dashboard/deploy/host-deploy.sh",
+    );
   });
 });

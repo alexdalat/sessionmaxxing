@@ -3,8 +3,14 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
-requests="$repo/data/deploy/requests"
-results="$repo/data/deploy/results"
+# The server resolves its data directory with this precedence, and the watcher must read the same one.
+case "${XDG_DATA_HOME:-}" in
+  /*) xdg_data_home="$XDG_DATA_HOME" ;;
+  *) xdg_data_home="$HOME/.local/share" ;;
+esac
+data_dir="${SESSIONMAXXING_DATA_DIR:-$xdg_data_home/sessionmaxxing}"
+requests="$data_dir/deploy/requests"
+results="$data_dir/deploy/results"
 queue_url="${DASHBOARD_URL:-http://127.0.0.1:4317}/api/queue"
 poll_seconds=15
 curl_connection_refused=7
