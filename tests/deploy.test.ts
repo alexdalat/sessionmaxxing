@@ -11,7 +11,7 @@ import { expect, it } from "vitest";
 import { gitIn } from "../server/git.js";
 import { QueueStore } from "../server/queue.js";
 import { deployReason, Runner } from "../server/runner.js";
-import { fakeChild, taskInput, temporary } from "./helpers";
+import { fakeChild, TEST_WORKDIR_ROOT, taskInput, temporary } from "./helpers";
 
 const COMPOSE = "services:\n  app:\n    image: node\n";
 const IDENTITY = ["-c", "user.name=Test", "-c", "user.email=test@example.com"];
@@ -37,7 +37,7 @@ async function dashboard(temp: string, conditions: Conditions) {
   const data = join(temp, "data");
   const project = join(temp, "project");
   await repository(project, conditions.compose);
-  const store = await QueueStore.open(data);
+  const store = await QueueStore.open(data, TEST_WORKDIR_ROOT);
   let child = fakeChild();
   const runner = await Runner.open(store, data, {
     launch: () => {
@@ -170,7 +170,7 @@ it("refuses to open with a malformed deploy result", async () => {
   const temp = await temporary();
   try {
     const data = join(temp.path, "data");
-    const store = await QueueStore.open(data);
+    const store = await QueueStore.open(data, TEST_WORKDIR_ROOT);
     await mkdir(join(data, "deploy", "results"), { recursive: true });
     await writeFile(
       join(data, "deploy", "results", `${"a".repeat(24)}.json`),

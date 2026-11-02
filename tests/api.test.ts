@@ -7,7 +7,12 @@ import { DispatchSettingsStore } from "../server/dispatch-settings.js";
 import type { EstimateRun } from "../server/estimate.js";
 import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
-import { sessionRates, temporary, usageSnapshot } from "./helpers";
+import {
+  sessionRates,
+  TEST_WORKDIR_ROOT,
+  temporary,
+  usageSnapshot,
+} from "./helpers";
 
 const APPROVED_ADDRESS = "192.0.2.10";
 const APPROVED_NAME = "dashboard.example.test";
@@ -23,7 +28,7 @@ it("returns task prompts and working directories to the browser while edits pres
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({ queue, runner });
   const submitted = taskInput(temp.path);
@@ -232,7 +237,7 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const app = await createApp({
@@ -349,7 +354,7 @@ it("rejects a task body that still names a provider", async () => {
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({ queue, runner });
   try {
@@ -464,7 +469,7 @@ it("preserves an unscheduled null window and rejects coerced body values", async
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({ queue, runner });
   try {
@@ -836,7 +841,7 @@ it("leaves finished tasks out of the active queue", async () => {
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const app = await createApp({ queue, runner });
@@ -871,7 +876,7 @@ it("returns only the newest runs up to the limit with the full count", async () 
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   let clock = Date.parse("2026-10-27T12:00:00Z");
   let child = fakeChild();
   const runner = await Runner.open(queue, temp.path, {
@@ -912,7 +917,7 @@ it("never exposes the session id of a dispatched run through the runs route", as
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const app = await createApp({ queue, runner });
@@ -1026,7 +1031,7 @@ it("rejects tokens outside the allowed range and requires them on create", async
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({ queue, runner });
   const post = (payload: object) =>
@@ -1083,7 +1088,7 @@ it("stamps a run as reviewed and clears the needs-review flag on its task", asyn
     "-m",
     "first",
   ]);
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const app = await createApp({ queue, runner });
@@ -1142,7 +1147,7 @@ it("stores the estimated tokens when a task is created or edited with auto", asy
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const estimated: string[] = [];
   const app = await createApp({
@@ -1180,7 +1185,7 @@ it("hands the estimator what earlier runs were estimated to produce", async () =
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const histories: EstimateRun[][] = [];
@@ -1231,7 +1236,7 @@ it("refuses to queue an auto-token task when the estimate fails", async () => {
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({
     queue,
@@ -1260,7 +1265,7 @@ it("suggests recent and prefix-matched work directories", async () => {
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
   const temp = await temporary();
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({ queue, runner });
   try {
@@ -1328,7 +1333,7 @@ it("fits the session rates from official samples and local transcripts, and pric
     await UsageHistoryStore.open(temp.path, now),
     () => now,
   );
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({
     queue,
@@ -1385,7 +1390,7 @@ async function finishedRun(suggestCommit: (run: CommitRun) => Promise<string>) {
   await git(["add", "."]);
   await git(["commit", "-m", "first"]);
   await writeFile(`${workdir}/other.md`, "base\nwip\n");
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const app = await createApp({ queue, runner, suggestCommit });

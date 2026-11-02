@@ -10,7 +10,7 @@ import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
 import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
-import { temporary, usageSnapshot } from "./helpers";
+import { TEST_WORKDIR_ROOT, temporary, usageSnapshot } from "./helpers";
 
 const run = promisify(execFile);
 const SCRIPT = resolve("scripts/queue-task.mjs");
@@ -69,7 +69,7 @@ it("rejects the removed --provider flag", async () => {
 async function startServer() {
   const temp = await temporary();
   const now = new Date("2026-09-06T12:00:00Z");
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const usage = new UsageMonitor(
     async (at) => usageSnapshot({ fetchedAt: at.toISOString() }),

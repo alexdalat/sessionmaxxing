@@ -1,5 +1,5 @@
 import { realpath, stat } from "node:fs/promises";
-import { isAbsolute, relative } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import {
   AUTO_TOKENS,
   MAX_DEPENDENCIES,
@@ -9,28 +9,24 @@ import {
 } from "../shared/types.js";
 import { DomainError } from "./storage.js";
 
-export const ALLOWED_HOME = "/home/user";
 export const TASK_ID = /^[a-f0-9]{24}$/;
-export function underHome(path: string, home = ALLOWED_HOME) {
-  const rel = relative(home, path);
-  return !rel.startsWith("..") && !isAbsolute(rel);
+export function underRoot(path: string, root: string) {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
-export async function validateWorkdir(path: string) {
-  if (typeof path !== "string" || !isAbsolute(path))
-    throw new DomainError(
-      "Work directory must be an existing absolute directory under /home/user.",
-      400,
-    );
+export async function validateWorkdir(path: string, root: string) {
+  const rejection = new DomainError(
+    `Work directory must be an existing absolute directory under ${root}.`,
+    400,
+  );
+  if (typeof path !== "string" || !isAbsolute(path)) throw rejection;
   let canonical: string;
   try {
     canonical = await realpath(path);
-    if (!underHome(canonical) || !(await stat(canonical)).isDirectory())
-      throw new Error("Invalid directory");
+    if (!underRoot(canonical, root) || !(await stat(canonical)).isDirectory())
+      throw rejection;
   } catch {
-    throw new DomainError(
-      "Work directory must be an existing absolute directory under /home/user.",
-      400,
-    );
+    throw rejection;
   }
   return canonical;
 }

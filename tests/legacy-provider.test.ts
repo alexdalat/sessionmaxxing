@@ -5,7 +5,7 @@ import { migrateProvider } from "../server/legacy-provider.js";
 import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
 import { DomainError } from "../server/storage.js";
-import { temporary } from "./helpers.js";
+import { TEST_WORKDIR_ROOT, temporary } from "./helpers.js";
 
 const ID_A = "a".repeat(24);
 const ID_B = "b".repeat(24);
@@ -113,7 +113,7 @@ it("drops codex tasks and strips the provider from many Claude tasks in one rewr
     const path = `${temp.path}/queue.json`;
     await writeFile(path, queueText([first, codex, second, third]));
 
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
 
     const expected = [
       withoutProvider(first),
@@ -137,9 +137,9 @@ it("leaves queue.json identical on a second open after the migration", async () 
       path,
       queueText([storedTask(temp.path), codexTask(temp.path)]),
     );
-    await QueueStore.open(temp.path);
+    await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const afterFirst = await readFile(path, "utf8");
-    const reopened = await QueueStore.open(temp.path);
+    const reopened = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(await readFile(path, "utf8")).toBe(afterFirst);
     expect(reopened.snapshot().tasks).toHaveLength(1);
   } finally {
@@ -152,7 +152,7 @@ it("loads a queue whose only task is a codex task as empty", async () => {
   try {
     const path = `${temp.path}/queue.json`;
     await writeFile(path, queueText([codexTask(temp.path)], false));
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(queue.snapshot().tasks).toEqual([]);
     expect(await readFile(path, "utf8")).toBe(queueText([], false));
   } finally {
@@ -180,7 +180,7 @@ it("drops running and pending codex tasks without marking anything failed", asyn
         }),
       ]),
     );
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(queue.snapshot().tasks).toEqual([listed(kept)]);
   } finally {
     await temp.cleanup();
@@ -198,7 +198,7 @@ it("does not rewrite a task without a provider key", async () => {
       tasks: [task],
     });
     await writeFile(path, compact);
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(queue.snapshot().tasks).toEqual([listed(task)]);
     expect(await readFile(path, "utf8")).toBe(compact);
   } finally {
@@ -216,7 +216,7 @@ it("does not rewrite an empty queue", async () => {
       tasks: [],
     });
     await writeFile(path, compact);
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(queue.snapshot().tasks).toEqual([]);
     expect(await readFile(path, "utf8")).toBe(compact);
   } finally {
@@ -233,7 +233,7 @@ it("fails loudly on an unsupported task provider and leaves the file untouched",
       storedTask(temp.path, { provider: "gemini", id: ID_B }),
     ]);
     await writeFile(path, text);
-    await expect(QueueStore.open(temp.path)).rejects.toThrow(
+    await expect(QueueStore.open(temp.path, TEST_WORKDIR_ROOT)).rejects.toThrow(
       UNSUPPORTED_TASK_PROVIDER,
     );
     expect(await readFile(path, "utf8")).toBe(text);
@@ -320,7 +320,7 @@ const readRuns = async (directory: string) => {
   return texts;
 };
 async function openRunner(directory: string) {
-  const store = await QueueStore.open(directory);
+  const store = await QueueStore.open(directory, TEST_WORKDIR_ROOT);
   return Runner.open(store, directory);
 }
 

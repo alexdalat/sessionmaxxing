@@ -9,6 +9,7 @@ import { USAGE_MIN_REFRESH_MS, UsageMonitor } from "../server/usage-monitor.js";
 import {
   fakeChild,
   sessionRates,
+  TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
   usageSnapshot,
@@ -28,7 +29,7 @@ it("auto-dispatch holds a Claude task without headroom and promotes it once usag
     await UsageHistoryStore.open(temp.path, now()),
     now,
   );
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const settings = await DispatchSettingsStore.open(temp.path);
   await settings.save({
     ...settings.snapshot(),
@@ -102,7 +103,7 @@ it("refreshes official usage after a run ends before dispatching the next Claude
     await UsageHistoryStore.open(temp.path, now()),
     now,
   );
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const settings = await DispatchSettingsStore.open(temp.path);
   await settings.save({
     ...settings.snapshot(),
@@ -176,7 +177,7 @@ it("lets a small task start when a larger one ahead of it lacks headroom", async
     await UsageHistoryStore.open(temp.path, now()),
     now,
   );
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const settings = await DispatchSettingsStore.open(temp.path);
   await settings.save({ ...settings.snapshot(), busyHoursReservePercent: 25 });
   const child = fakeChild();

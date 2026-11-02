@@ -12,6 +12,7 @@ import {
 import {
   fakeChild,
   SESSION_RATES,
+  TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
   usageSnapshot,
@@ -77,7 +78,7 @@ it("holds a dependent task until the task it waits for completes", async () => {
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create({
       ...taskInput(a),
       title: "Parse transcripts",
@@ -128,7 +129,7 @@ it("keeps a dependent task blocked when the task it waits for fails", async () =
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create({
       ...taskInput(a),
       title: "Parse transcripts",
@@ -169,7 +170,7 @@ it("dispatches a task whose dependency already completed", async () => {
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create({ ...taskInput(a), priority: 0 });
     await store.claim(first.id);
     await store.finish(first.id, "completed");
@@ -202,7 +203,7 @@ it("dispatches a task whose dependency already completed", async () => {
 it("rejects a dependency on a task that is not queued", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     await expect(
       store.create({
         ...taskInput(temp.path),
@@ -217,7 +218,7 @@ it("rejects a dependency on a task that is not queued", async () => {
 it("rejects a dependency that closes a cycle", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create(taskInput(temp.path));
     const second = await store.create({
       ...taskInput(temp.path),
@@ -242,7 +243,7 @@ it("rejects a dependency that closes a cycle", async () => {
 it("drops a deleted task from the tasks that depended on it", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create(taskInput(temp.path));
     const second = await store.create({
       ...taskInput(temp.path),
@@ -250,7 +251,7 @@ it("drops a deleted task from the tasks that depended on it", async () => {
     });
     await store.delete(first.id);
     expect(taskOf(store, second.id).dependsOn).toEqual([]);
-    const reopened = await QueueStore.open(temp.path);
+    const reopened = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(taskOf(reopened, second.id).dependsOn).toEqual([]);
   } finally {
     await temp.cleanup();
@@ -260,13 +261,13 @@ it("drops a deleted task from the tasks that depended on it", async () => {
 it("keeps the dependencies of tasks stored before the feature existed empty", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const created = await store.create(taskInput(temp.path));
     const path = join(temp.path, "queue.json");
     const state = JSON.parse(await readFile(path, "utf8"));
     for (const task of state.tasks) delete task.dependsOn;
     await writeFile(path, JSON.stringify(state));
-    const reopened = await QueueStore.open(temp.path);
+    const reopened = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(taskOf(reopened, created.id).dependsOn).toEqual([]);
   } finally {
     await temp.cleanup();

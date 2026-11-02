@@ -102,6 +102,8 @@ export const SLOTS_BUSY_ERROR = "All run slots are busy.";
 export const blockedReason = (title: string) =>
   `Waits for “${title}” · same project`;
 export const deployReason = (title: string) => `Waits for deploy of “${title}”`;
+const START_ERROR =
+  "Run could not start. Check the work directory, CLI, and runtime file access.";
 export const LIMIT_STOP_ERROR =
   "Stopped at the usage limit · resumes after the reset";
 
@@ -295,7 +297,7 @@ export class Runner {
       .snapshot()
       .tasks.find((candidate) => candidate.id === run.taskId);
     if (!task) throw new DomainError("Task not found.", 404);
-    const workdir = await validateWorkdir(task.workdir);
+    const workdir = await validateWorkdir(task.workdir, this.store.workdirRoot);
     const busy = this.holder(await resolveResources(workdir));
     if (busy) throw new DomainError(blockedReason(busy.title), 409);
     try {
@@ -478,7 +480,19 @@ export class Runner {
     }
     const { task } = active;
     try {
-      task.workdir = await validateWorkdir(task.workdir);
+      task.workdir = await validateWorkdir(
+        task.workdir,
+        this.store.workdirRoot,
+      );
+    } catch (error) {
+      await this.finish(
+        active,
+        null,
+        error instanceof DomainError ? error.message : START_ERROR,
+      );
+      return;
+    }
+    try {
       await ensureRepository(task.workdir);
       active.gitStart = await snapshotWorkdir(task.workdir);
       await this.persist(run);
@@ -511,11 +525,7 @@ export class Runner {
         void this.finish(active, code);
       });
     } catch {
-      await this.finish(
-        active,
-        null,
-        "Run could not start. Check the work directory, CLI, and runtime file access.",
-      );
+      await this.finish(active, null, START_ERROR);
     }
   }
   private schedulePreview(active: Active) {

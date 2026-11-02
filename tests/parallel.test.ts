@@ -26,6 +26,7 @@ import {
   fakeChild,
   SESSION_RATES,
   sessionRates,
+  TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
   usageSnapshot,
@@ -83,7 +84,7 @@ it("starts independent repositories together in queue order up to the slot limit
   const temp = await temporary();
   try {
     const { a, b, c } = await repos(temp.path, ["a", "b", "c"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const third = await store.create({ ...taskInput(c), priority: 2 });
     const first = await store.create({ ...taskInput(a), priority: 0 });
     const second = await store.create({ ...taskInput(b), priority: 1 });
@@ -144,7 +145,7 @@ it("holds a task whose repository is busy while a later independent task starts,
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
     await mkdir(join(a, "sub"));
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const busy = await store.create({
       ...taskInput(a),
       title: "First in a",
@@ -215,7 +216,7 @@ it("refuses Run now for nested, symlinked, and same-repository directories while
     const { a, b } = await repos(temp.path, ["a", "b"]);
     await mkdir(join(a, "nested", "deeper"), { recursive: true });
     await symlink(a, join(b, "..", "alias"));
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const holder = await store.create({ ...taskInput(a), title: "Holder" });
     const nested = await store.create(taskInput(join(a, "nested", "deeper")));
     const aliased = await store.create(taskInput(join(b, "..", "alias")));
@@ -250,7 +251,7 @@ it("admits Claude tasks only while the session budget covers every running task'
   const temp = await temporary();
   try {
     const { a, b, c } = await repos(temp.path, ["a", "b", "c"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create({
       ...taskInput(a),
       tokens: 150_000,
@@ -337,7 +338,7 @@ it("keeps serial behaviour with one slot: the second independent task waits for 
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create({ ...taskInput(a), priority: 0 });
     const second = await store.create({ ...taskInput(b), priority: 1 });
     const kids = children();
@@ -374,7 +375,7 @@ it("cancels one run without touching the other", async () => {
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const doomed = await store.create(taskInput(a));
     const survivor = await store.create(taskInput(b));
     const signal = vi.fn();
@@ -425,7 +426,7 @@ it("records two runs that finish in the same tick without mixing their results",
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const ok = await store.create({ ...taskInput(a), title: "Passes" });
     const bad = await store.create({ ...taskInput(b), title: "Fails" });
     const kids = children();
@@ -473,7 +474,7 @@ it("marks every run interrupted by a restart failed and keeps the rest of its me
   const temp = await temporary();
   try {
     const { a, b } = await repos(temp.path, ["a", "b"]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const first = await store.create(taskInput(a));
     const second = await store.create(taskInput(b));
     const kids = children();
@@ -490,7 +491,7 @@ it("marks every run interrupted by a restart failed and keeps the rest of its me
       ),
     );
     const later = new Date("2026-09-06T13:00:00Z");
-    const reopenedStore = await QueueStore.open(temp.path);
+    const reopenedStore = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const reopened = await Runner.open(reopenedStore, temp.path, {
       now: () => later,
     });
@@ -538,7 +539,7 @@ it("reports slots, reservations, and the blocking run through the queue route", 
     await UsageHistoryStore.open(temp.path, at),
     now,
   );
-  const queue = await QueueStore.open(temp.path);
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const settings = await DispatchSettingsStore.open(temp.path);
   await settings.save({ ...anyHour, maxConcurrentRuns: 2 });
   const kids = children();

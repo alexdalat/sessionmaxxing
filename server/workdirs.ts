@@ -3,7 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import type { WorkdirSuggestions } from "../shared/types.js";
 import { DomainError } from "./storage.js";
-import { ALLOWED_HOME, underHome } from "./validation.js";
+import { underRoot } from "./validation.js";
 
 const MAX_RECENT = 12;
 const MAX_MATCHES = 20;
@@ -57,7 +57,7 @@ async function recentWorkdirs(queueWorkdirs: string[], home: string) {
   for (const path of [...(await claudeProjects(home)), ...queueWorkdirs]) {
     if (recent.length === MAX_RECENT) break;
     if (recent.includes(path)) continue;
-    if (!underHome(path, home) || !(await isDirectory(path))) continue;
+    if (!underRoot(path, home) || !(await isDirectory(path))) continue;
     recent.push(path);
   }
   return recent;
@@ -68,7 +68,7 @@ async function matchingWorkdirs(query: string, home: string) {
   const listing = query.endsWith("/");
   const directory = listing ? query : dirname(query);
   const prefix = listing ? "" : basename(query);
-  if (!underHome(directory, home)) return [];
+  if (!underRoot(directory, home)) return [];
   let entries: Dirent[];
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -96,7 +96,7 @@ async function matchingWorkdirs(query: string, home: string) {
 export async function suggestWorkdirs(
   query: string,
   queueWorkdirs: string[],
-  home: string = ALLOWED_HOME,
+  home: string,
 ): Promise<WorkdirSuggestions> {
   return {
     recent: await recentWorkdirs(queueWorkdirs, home),

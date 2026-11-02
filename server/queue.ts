@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import {
   DEFAULT_MODEL,
   type ModelFamily,
@@ -17,8 +17,8 @@ import { TASK_ID, validateFields, validateWorkdir } from "./validation.js";
 /** A task input whose "auto" tokens have already been resolved to a number. */
 export type StoredTaskInput = Omit<TaskInput, "tokens"> & Pick<Task, "tokens">;
 /**
- * Session rates fitted on 2026-09-15 (data/usage-samples.jsonl against the
- * transcripts in ~/.claude/projects), used once to convert tasks stored as a
+ * Session rates fitted on 2026-09-15 (usage-samples.jsonl in the data directory
+ * against the transcripts in ~/.claude/projects), used once to convert tasks stored as a
  * session percent into the output tokens the queue keeps now. Sonnet had too
  * little data to fit and takes the Opus rate, as unknown models do.
  */
@@ -92,8 +92,9 @@ export class QueueStore {
   private constructor(
     private path: string,
     private state: QueueState,
+    readonly workdirRoot: string,
   ) {}
-  static async open(directory: string) {
+  static async open(directory: string, workdirRoot: string) {
     const path = join(directory, "queue.json");
     let state: QueueState;
     try {
@@ -172,10 +173,7 @@ export class QueueStore {
         !TASK_ID.test(task.id) ||
         ids.has(task.id) ||
         typeof task.workdir !== "string" ||
-        !(
-          task.workdir === "/home/user" ||
-          task.workdir.startsWith("/home/user/")
-        ) ||
+        !isAbsolute(task.workdir) ||
         !Number.isFinite(Date.parse(task.createdAt)) ||
         !["pending", "running", "completed", "failed", "cancelled"].includes(
           task.status,
@@ -198,7 +196,7 @@ export class QueueStore {
         if (task.status === "running") task.status = "failed";
       await atomicJson(path, state);
     }
-    return new QueueStore(path, state);
+    return new QueueStore(path, state, workdirRoot);
   }
   snapshot(): QueueSnapshot {
     return {
@@ -229,7 +227,7 @@ export class QueueStore {
   }
   async create(input: StoredTaskInput) {
     validateFields(input);
-    const workdir = await validateWorkdir(input.workdir);
+    const workdir = await validateWorkdir(input.workdir, this.workdirRoot);
     return this.transact((state) => {
       const taskId = id();
       validateDependencies(state, taskId, input.dependsOn);
@@ -260,7 +258,10 @@ export class QueueStore {
       const updated = { ...task, ...patch };
       validateFields(updated);
       validateDependencies(state, task.id, updated.dependsOn);
-      updated.workdir = await validateWorkdir(updated.workdir);
+      updated.workdir = await validateWorkdir(
+        updated.workdir,
+        this.workdirRoot,
+      );
       Object.assign(task, updated);
       return publicTask(task);
     });

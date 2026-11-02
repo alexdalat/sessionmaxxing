@@ -14,6 +14,7 @@ import {
   resolveAllowedHosts,
   resolveEdition,
   resolveHost,
+  resolveWorkdirRoot,
 } from "./environment.js";
 import { readSessionTokens } from "./history.js";
 import { QueueStore } from "./queue.js";
@@ -31,6 +32,7 @@ interface StartOptions {
   development?: boolean;
   loadHistory?: () => Promise<HistoryData>;
   fetchUsage?: FetchUsage;
+  workdirRoot?: string;
 }
 export async function startDashboard(
   options: StartOptions = {},
@@ -45,6 +47,8 @@ export async function startDashboard(
   // Phase 4 reads the edition; until then an unsupported value must fail instead of silently running full.
   resolveEdition(process.env);
   const allowedHosts = resolveAllowedHosts(process.env, host);
+  const workdirRoot =
+    options.workdirRoot ?? (await resolveWorkdirRoot(process.env, homedir()));
   const directory = await prepareDataDirectory({
     explicit: options.dataDirectory,
     env: process.env,
@@ -80,7 +84,7 @@ export async function startDashboard(
       options.fetchUsage ?? officialUsageFetcher(join(homedir(), ".claude")),
       await UsageHistoryStore.open(directory),
     );
-    const queue = await QueueStore.open(directory);
+    const queue = await QueueStore.open(directory, workdirRoot);
     const runner = await Runner.open(queue, directory, {
       autoApply: () => settings.snapshot().autoApply,
       sessionTokens: (sessionId, since) =>

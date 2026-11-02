@@ -24,6 +24,7 @@ import {
 import {
   fakeChild,
   SESSION_RATES,
+  TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
   usageSnapshot,
@@ -45,7 +46,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 it("runs one task at a time with a single slot and persists safe run metadata and redacted logs on completion", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const a = await store.create(taskInput(temp.path));
     const b = await store.create(taskInput(temp.path));
     const child = fakeChild();
@@ -87,7 +88,7 @@ it("runs one task at a time with a single slot and persists safe run metadata an
 it("keeps the queue recoverable when final run metadata persistence fails", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const child = fakeChild();
     const runner = await Runner.open(store, temp.path, { launch: () => child });
@@ -107,7 +108,7 @@ it("keeps the queue recoverable when final run metadata persistence fails", asyn
 it("cancels the process group, holds the execution slot until close, and records cancellation", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const child = fakeChild();
     child.pid = 12345;
@@ -133,7 +134,7 @@ it("cancels the process group, holds the execution slot until close, and records
 it("kills processes the provider left running in its group when it exits", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const pidFile = join(temp.path, "straggler.pid");
     const runner = await Runner.open(store, temp.path, {
@@ -158,7 +159,7 @@ it("kills processes the provider left running in its group when it exits", async
 it("auto-dispatches only eligible preferred windows across midnight, respects earliest start and priority, and stops with the server", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const future = await store.create({
       ...taskInput(temp.path),
       earliestStart: "2026-09-08T00:00:00Z",
@@ -223,7 +224,7 @@ it("auto-dispatches only eligible preferred windows across midnight, respects ea
 it("treats provider result errors as failure and returns a safe error when a launch fails", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const child = fakeChild();
     const runner = await Runner.open(store, temp.path, { launch: () => child });
@@ -253,7 +254,7 @@ it("treats provider result errors as failure and returns a safe error when a lau
 it("does not launch a provider if shutdown begins while a task claim is being persisted", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const claim = store.claim.bind(store);
     let release = () => {};
@@ -283,7 +284,7 @@ it("does not launch a provider if shutdown begins while a task claim is being pe
 it("persists bounded redacted previews while a provider is still running", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const child = fakeChild();
     const runner = await Runner.open(store, temp.path, { launch: () => child });
@@ -313,7 +314,7 @@ it("persists bounded redacted previews while a provider is still running", async
 it("launches a Claude run under a generated session id it persists but never lists", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const child = fakeChild();
     const launch = vi.fn<
@@ -341,7 +342,7 @@ it("launches a Claude run under a generated session id it persists but never lis
 it("loads a run recorded before session ids were tracked and reports no dispatched session", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const id = "b".repeat(24);
     await mkdir(`${temp.path}/runs`, { recursive: true });
     await writeFile(
@@ -404,7 +405,7 @@ async function runWithTokens(
   temp: string,
   sessionTokens: (sessionId: string) => Promise<WeightedTokens>,
 ) {
-  const store = await QueueStore.open(temp);
+  const store = await QueueStore.open(temp, TEST_WORKDIR_ROOT);
   const task = await store.create(taskInput(temp));
   const child = fakeChild();
   const runner = await Runner.open(store, temp, {
@@ -502,7 +503,7 @@ it("pauses auto-dispatch when the tokens of a run cannot be read", async () => {
 it("backfills the tokens of a saved run that has only output tokens", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const id = "b".repeat(24);
     const sessionId = "11111111-2222-3333-4444-555555555555";
     await mkdir(join(temp.path, "runs"), { recursive: true });
@@ -566,7 +567,7 @@ it("stores the summary and changed files of a finished run", async () => {
       "-m",
       "first",
     ]);
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(workdir));
     const child = fakeChild();
     const runner = await Runner.open(store, temp.path, { launch: () => child });
@@ -603,7 +604,7 @@ it("stores the summary and changed files of a finished run", async () => {
 it("appends the apply instruction to a dispatched prompt only while the override is on", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     let autoApply = false;
     const launched: string[] = [];
@@ -644,7 +645,7 @@ const SESSION_LIMIT_RESULT =
 it("puts a task stopped by the session limit back in line and resumes its Claude session on the next run", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const children = [fakeChild(), fakeChild()];
     const launch = vi.fn(
@@ -681,7 +682,7 @@ it("puts a task stopped by the session limit back in line and resumes its Claude
 it("starts a fresh Claude session when a retried task failed for another reason", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const children = [fakeChild(), fakeChild()];
     const launch = vi.fn(
@@ -712,7 +713,7 @@ it("starts a fresh Claude session when a retried task failed for another reason"
 it("keeps the usage-limit reason of a stopped run across a restart so its task still resumes", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     const child = fakeChild();
     const runner = await Runner.open(store, temp.path, { launch: () => child });

@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { realpathSync } from "node:fs";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { PassThrough } from "node:stream";
@@ -20,6 +21,8 @@ export const taskInput = (workdir: string) => ({
   tokens: 100_000,
   dependsOn: [] as string[],
 });
+// Every temp directory lives under tests/.tmp inside the repository.
+export const TEST_WORKDIR_ROOT = realpathSync(resolve("."));
 // Same offsets and abbreviations as the author's zone, so expectations derived for the old fixed zone still hold.
 export const TEST_TIME_ZONE = "America/Toronto";
 /** The rates fitted from tests/fixtures/session-windows.json, so 100k Opus tokens cost 13.8%. */

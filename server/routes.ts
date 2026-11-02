@@ -207,6 +207,7 @@ export function registerQueueRoutes(
         [...queue.snapshot().tasks]
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map((task) => task.workdir),
+        queue.workdirRoot,
       ),
   );
   app.get<{ Querystring: { limit?: string } }>(

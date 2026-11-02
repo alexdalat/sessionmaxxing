@@ -1,10 +1,13 @@
+import { realpath, stat } from "node:fs/promises";
 import { isIP, isIPv6 } from "node:net";
+import { isAbsolute } from "node:path";
 import type { Env } from "./data-directory.js";
 import { DomainError } from "./storage.js";
 
 export const HOST_VARIABLE = "SESSIONMAXXING_HOST";
 export const EDITION_VARIABLE = "SESSIONMAXXING_EDITION";
 export const ALLOWED_HOSTS_VARIABLE = "SESSIONMAXXING_ALLOWED_HOSTS";
+export const WORKDIR_ROOT_VARIABLE = "SESSIONMAXXING_WORKDIR_ROOT";
 
 const LOOPBACK = "127.0.0.1";
 export const UNSPECIFIED_ADDRESSES = new Set(["0.0.0.0", "::"]);
@@ -59,4 +62,36 @@ export function formatListenUrl(address: {
   const host =
     address.family === "IPv6" ? `[${address.address}]` : address.address;
   return `http://${host}:${address.port}`;
+}
+
+async function existingDirectory(path: string) {
+  try {
+    const canonical = await realpath(path);
+    return (await stat(canonical)).isDirectory() ? canonical : undefined;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    throw error;
+  }
+}
+
+export async function resolveWorkdirRoot(env: Env, home: string) {
+  const explicit = env[WORKDIR_ROOT_VARIABLE];
+  if (explicit === undefined) {
+    const root = await existingDirectory(home);
+    if (root === undefined)
+      throw new DomainError(
+        `The home directory ${home} does not exist; set ${WORKDIR_ROOT_VARIABLE} to the directory work directories must be under.`,
+        400,
+      );
+    return root;
+  }
+  const root = isAbsolute(explicit)
+    ? await existingDirectory(explicit)
+    : undefined;
+  if (root === undefined)
+    throw new DomainError(
+      `${WORKDIR_ROOT_VARIABLE} must be an absolute path to an existing directory.`,
+      400,
+    );
+  return root;
 }

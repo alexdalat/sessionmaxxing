@@ -1,13 +1,14 @@
 import { readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { expect, it } from "vitest";
 import { QueueStore } from "../server/queue.js";
 import type { Task } from "../shared/types.js";
-import { taskInput, temporary } from "./helpers";
+import { TEST_WORKDIR_ROOT, taskInput, temporary } from "./helpers";
 
 it("atomically creates private queue state and persists tasks while including prompts and workdirs in public views", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     expect(task).toMatchObject({
       title: "Fix a test",
@@ -20,25 +21,25 @@ it("atomically creates private queue state and persists tasks while including pr
     expect(snapshot.tasks[0].workdir).toBe(temp.path);
     const disk = JSON.parse(await readFile(`${temp.path}/queue.json`, "utf8"));
     expect(disk.tasks[0].prompt).toContain("PRIVATE PROMPT");
-    expect((await QueueStore.open(temp.path)).snapshot().tasks).toEqual(
-      store.snapshot().tasks,
-    );
+    expect(
+      (await QueueStore.open(temp.path, TEST_WORKDIR_ROOT)).snapshot().tasks,
+    ).toEqual(store.snapshot().tasks);
     expect(await readdir(temp.path)).toEqual(["queue.json"]);
     expect((await stat(`${temp.path}/queue.json`)).mode & 0o777).toBe(0o600);
   } finally {
     await temp.cleanup();
   }
 });
-it("rejects missing, relative, outside-home and symlink-escaped workdirs and malformed task fields", async () => {
+it("rejects missing, relative, outside-root and symlink-escaped workdirs and malformed task fields", async () => {
   const { symlink } = await import("node:fs/promises");
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     await symlink("/etc", `${temp.path}/escape`);
     for (const workdir of [
       "relative",
       "/etc",
-      "/home/userander",
+      dirname(TEST_WORKDIR_ROOT),
       `${temp.path}/missing`,
       `${temp.path}/escape`,
     ]) {
@@ -67,7 +68,7 @@ it("rejects missing, relative, outside-home and symlink-escaped workdirs and mal
 it("edits pending tasks, preserves omitted prompts, claims independently, retries failure and reorders priorities", async () => {
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const [a, b] = await Promise.all([
       store.create(taskInput(temp.path)),
       store.create(taskInput(temp.path)),
@@ -104,7 +105,9 @@ it("edits pending tasks, preserves omitted prompts, claims independently, retrie
     await store.delete(a.id);
     await store.delete(b.id);
     expect(store.snapshot().tasks).toHaveLength(0);
-    expect((await QueueStore.open(temp.path)).snapshot().tasks).toHaveLength(0);
+    expect(
+      (await QueueStore.open(temp.path, TEST_WORKDIR_ROOT)).snapshot().tasks,
+    ).toHaveLength(0);
   } finally {
     await temp.cleanup();
   }
@@ -113,36 +116,42 @@ it("keeps auto-dispatch on and recovers interrupted tasks on restart without ove
   const { writeFile } = await import("node:fs/promises");
   const temp = await temporary();
   try {
-    const store = await QueueStore.open(temp.path);
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = await store.create(taskInput(temp.path));
     await store.setAutoDispatch(true);
     await store.claim(task.id);
-    const restarted = await QueueStore.open(temp.path);
+    const restarted = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(restarted.snapshot()).toMatchObject({
       autoDispatch: true,
       tasks: [{ status: "failed" }],
     });
     await writeFile(`${temp.path}/queue.json`, "{broken");
-    await expect(QueueStore.open(temp.path)).rejects.toThrow();
+    await expect(
+      QueueStore.open(temp.path, TEST_WORKDIR_ROOT),
+    ).rejects.toThrow();
     expect(await readFile(`${temp.path}/queue.json`, "utf8")).toBe("{broken");
     await writeFile(
       `${temp.path}/queue.json`,
       '{"version":1,"tasks":[{"status":"pending"}]}',
     );
-    await expect(QueueStore.open(temp.path)).rejects.toThrow();
+    await expect(
+      QueueStore.open(temp.path, TEST_WORKDIR_ROOT),
+    ).rejects.toThrow();
   } finally {
     await temp.cleanup();
   }
 });
-it("can reopen a task whose accepted working directory is the allowed home itself", async () => {
+it("can reopen a task whose workdir is the root itself, and under a different root", async () => {
   const temp = await temporary();
   try {
-    const queue = await QueueStore.open(temp.path);
-    await queue.create(taskInput("/home/user"));
-    const reopened = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    await queue.create(taskInput(TEST_WORKDIR_ROOT));
+    const reopened = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     const task = reopened.snapshot().tasks[0];
-    expect(task.workdir).toBe("/home/user");
-    expect((await reopened.claim(task.id)).workdir).toBe("/home/user");
+    expect(task.workdir).toBe(TEST_WORKDIR_ROOT);
+    expect((await reopened.claim(task.id)).workdir).toBe(TEST_WORKDIR_ROOT);
+    const elsewhere = await QueueStore.open(temp.path, temp.path);
+    expect(elsewhere.snapshot().tasks[0].workdir).toBe(TEST_WORKDIR_ROOT);
   } finally {
     await temp.cleanup();
   }
@@ -151,7 +160,7 @@ it("can reopen a task whose accepted working directory is the allowed home itsel
 it("drops legacy budget estimates from saved tasks atomically without losing them", async () => {
   const temp = await temporary();
   try {
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     await queue.create(taskInput(temp.path));
     await queue.create(taskInput(temp.path));
     const path = `${temp.path}/queue.json`;
@@ -166,7 +175,7 @@ it("drops legacy budget estimates from saved tasks atomically without losing the
         })),
       }),
     );
-    const migrated = await QueueStore.open(temp.path);
+    const migrated = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     expect(migrated.snapshot().tasks).toHaveLength(2);
     for (const task of migrated.snapshot().tasks)
       expect(task).not.toHaveProperty("budgetEstimate");
@@ -181,7 +190,7 @@ it("drops legacy budget estimates from saved tasks atomically without losing the
 it("converts tasks saved as a session percent or as output tokens into weighted tokens", async () => {
   const temp = await temporary();
   try {
-    const queue = await QueueStore.open(temp.path);
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
     await queue.create(taskInput(temp.path));
     await queue.create({
       ...taskInput(temp.path),
@@ -205,7 +214,9 @@ it("converts tasks saved as a session percent or as output tokens into weighted 
         ),
       }),
     );
-    const migrated = (await QueueStore.open(temp.path)).snapshot().tasks;
+    const migrated = (
+      await QueueStore.open(temp.path, TEST_WORKDIR_ROOT)
+    ).snapshot().tasks;
     // Output tokens count 4.8 times over; 40% of a session at the Fable rate of 357
     // points per million output tokens is 112,045 of them, and 289,855 at the Opus rate of 138.
     expect(migrated[0].tokens).toBe(480_000);

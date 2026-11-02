@@ -27,6 +27,7 @@ import {
 import {
   fakeChild,
   SESSION_RATES,
+  TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
   usageSnapshot,
@@ -79,7 +80,7 @@ async function exists(path: string) {
   );
 }
 async function readStores(directory: string) {
-  const queue = await QueueStore.open(directory);
+  const queue = await QueueStore.open(directory, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, directory);
   const settings = await DispatchSettingsStore.open(directory);
   const usage = await UsageHistoryStore.open(directory, SAMPLE_TIME);
@@ -408,7 +409,7 @@ it("lets the real stores report the same queue, runs, settings and samples after
     const home = join(temp.path, "home");
     const legacy = join(cwd, "data");
     await mkdir(legacy, { recursive: true });
-    const store = await QueueStore.open(legacy);
+    const store = await QueueStore.open(legacy, TEST_WORKDIR_ROOT);
     const finished = await store.create(taskInput(temp.path));
     await store.create({ ...taskInput(temp.path), title: "Still waiting" });
     const child = fakeChild();
