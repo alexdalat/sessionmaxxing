@@ -1,4 +1,4 @@
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startDashboard } from "../server/main.js";
@@ -91,7 +91,9 @@ it.each([undefined, "127.0.0.1"])(
       const app = await startDashboard(options);
       try {
         expect(app.server.address()).toMatchObject({ address: "127.0.0.1" });
-        await expect(startDashboard(options)).rejects.toThrow(/already|lock/);
+        await expect(startDashboard(options)).rejects.toThrow(
+          join(temp.path, "server.lock"),
+        );
         expect((await app.inject("/api/queue")).json()).toMatchObject({
           autoDispatch: false,
           tasks: [],
@@ -106,6 +108,28 @@ it.each([undefined, "127.0.0.1"])(
     }
   },
 );
+
+it("creates the data directory and every missing parent with mode 0700", async () => {
+  const temp = await temporary();
+  const levels = [join(temp.path, "a"), join(temp.path, "a", "b")];
+  const dataDirectory = join(levels[1], "c");
+  try {
+    const app = await startDashboard({
+      port: 0,
+      dataDirectory,
+      development: true,
+      fetchUsage,
+    });
+    try {
+      for (const level of [...levels, dataDirectory])
+        expect((await stat(level)).mode & 0o777).toBe(0o700);
+    } finally {
+      await app.close();
+    }
+  } finally {
+    await temp.cleanup();
+  }
+});
 
 it("binds all container interfaces when SESSIONMAXXING_HOST is explicitly 0.0.0.0 and still validates requests", async () => {
   vi.stubEnv("SESSIONMAXXING_HOST", "0.0.0.0");
