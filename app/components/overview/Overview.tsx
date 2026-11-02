@@ -6,7 +6,6 @@ import { usePolling } from "@/app/hooks/usePolling";
 import { api } from "@/app/lib/api";
 import type { Analytics, QueueSnapshot, UsageReport } from "@/shared/types";
 import { DispatchPanel } from "./DispatchPanel";
-import { PlanScore } from "./PlanScore";
 import { QuickAdd } from "./QuickAdd";
 import { SessionWindows } from "./SessionWindows";
 import { UsagePanel } from "./UsagePanel";
@@ -69,7 +68,6 @@ export function Overview({
         snapshot={usage.data?.snapshot ?? null}
         marginPercent={planning?.settings.weeklyMarginPercent ?? 0}
       />
-      <PlanScore />
     </>
   );
 }
