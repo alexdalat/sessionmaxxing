@@ -2,35 +2,31 @@ name: sessionmaxxing
 services:
   sessionmaxxing:
     container_name: sessionmaxxing
-    build: .
-    user: "1000:1000"
+    build:
+      context: .
+      args:
+        RUNTIME_UID: "${SESSIONMAXXING_UID:?Set SESSIONMAXXING_UID in .env}"
+        RUNTIME_GID: "${SESSIONMAXXING_GID:?Set SESSIONMAXXING_GID in .env}"
+        RUNTIME_HOME: "${SESSIONMAXXING_HOME:?Set SESSIONMAXXING_HOME in .env}"
+    user: "${SESSIONMAXXING_UID:?Set SESSIONMAXXING_UID in .env}:${SESSIONMAXXING_GID:?Set SESSIONMAXXING_GID in .env}"
     init: true
     restart: unless-stopped
     stop_grace_period: 30s
     environment:
-      HOME: /home/user
-      SESSIONMAXXING_HOST: 0.0.0.0
-      SESSIONMAXXING_PORT: "4317"
-      TZ: America/New_York
+      HOME: "${SESSIONMAXXING_HOME:?Set SESSIONMAXXING_HOME in .env}"
+      TZ: "${TZ:?Set TZ in .env to an IANA zone name}"
+      SESSIONMAXXING_EDITION: "${SESSIONMAXXING_EDITION:?Set SESSIONMAXXING_EDITION in .env}"
+      SESSIONMAXXING_ALLOWED_HOSTS: "${SESSIONMAXXING_BIND_ADDRESS:?Set SESSIONMAXXING_BIND_ADDRESS in .env},${SESSIONMAXXING_ALLOWED_HOSTS:-}"
     ports:
       - target: 4317
-        published: "4317"
-        host_ip: 192.0.2.10
-        protocol: tcp
-      - target: 4317
-        published: "4317"
-        host_ip: 127.0.0.1
+        published: "${SESSIONMAXXING_PORT:?Set SESSIONMAXXING_PORT in .env}"
+        host_ip: "${SESSIONMAXXING_BIND_ADDRESS:?Set SESSIONMAXXING_BIND_ADDRESS in .env}"
         protocol: tcp
     volumes:
       # The identical HOME path supplies Claude session history and credentials.
+      # The data directory lives under this mount, so no data volume exists.
       - type: bind
-        source: /home/user
-        target: /home/user
-        bind:
-          create_host_path: false
-      - type: bind
-        source: ./data
-        # Queue, runs, dispatch settings, and usage samples persist across image updates.
-        target: /app/data
+        source: "${SESSIONMAXXING_HOME:?Set SESSIONMAXXING_HOME in .env}"
+        target: "${SESSIONMAXXING_HOME:?Set SESSIONMAXXING_HOME in .env}"
         bind:
           create_host_path: false

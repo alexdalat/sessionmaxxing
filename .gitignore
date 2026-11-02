@@ -9,3 +9,5 @@ artifacts/
 out/
 next-env.d.ts
 *.tsbuildinfo
+.env
+compose.override.yaml
