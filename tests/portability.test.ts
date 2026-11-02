@@ -14,7 +14,7 @@ const ENV_KEYS = [
   "SESSIONMAXXING_ALLOWED_HOSTS",
 ];
 const OPTIONAL_KEY = "SESSIONMAXXING_ALLOWED_HOSTS";
-const PORTABLE_FILES = ["compose.yaml", ".env.example"];
+const PORTABLE_FILES = ["compose.yaml", ".env.example", "Dockerfile"];
 const INTERPOLATION = /\$\{([A-Z][A-Z0-9_]*)(:[?-][^}]*)?\}/g;
 
 const read = (path: string) => readFile(resolve(path), "utf8");
@@ -131,5 +131,68 @@ describe("personal values", () => {
     const text = await read(path);
     for (const pattern of FORBIDDEN_VALUES)
       expect(text, `${path} matches ${pattern}`).not.toMatch(pattern);
+  });
+});
+
+describe("Dockerfile", () => {
+  const runtimeStage = async () => {
+    const text = await read("Dockerfile");
+    return text.slice(text.lastIndexOf("FROM "));
+  };
+
+  it("declares the runtime ids and home as build args after the apt-get layer", async () => {
+    const text = await runtimeStage();
+    for (const arg of ["RUNTIME_UID", "RUNTIME_GID", "RUNTIME_HOME"])
+      expect(text.indexOf(`ARG ${arg}`), arg).toBeGreaterThan(
+        text.indexOf("apt-get install"),
+      );
+  });
+
+  it("replaces existing owners of the ids and refuses root", async () => {
+    const text = await runtimeStage();
+    expect(text).toContain('getent passwd "$RUNTIME_UID"');
+    expect(text).toContain("userdel");
+    expect(text).toContain('getent group "$RUNTIME_GID"');
+    expect(text).toContain("groupdel");
+    expect(text.indexOf("groupdel")).toBeLessThan(text.indexOf("groupadd"));
+    expect(text).toContain("for id in RUNTIME_UID RUNTIME_GID");
+    expect(text).toContain('case "$(printenv "$id")" in \'\'|*[!0-9]*|0*)');
+  });
+
+  it("creates the user sessionmaxxing without a home and owns the home directory", async () => {
+    const text = await runtimeStage();
+    expect(text).toMatch(/useradd[^;]*--no-create-home/);
+    expect(text).toMatch(/useradd[^;]*--home-dir "\$RUNTIME_HOME"/);
+    expect(text).toMatch(/useradd[^;]*sessionmaxxing;/);
+    expect(text).toMatch(/groupadd --gid "\$RUNTIME_GID" sessionmaxxing/);
+    expect(text).toMatch(
+      /install -d -m 0755 -o "\$RUNTIME_UID" -g "\$RUNTIME_GID" "\$RUNTIME_HOME"/,
+    );
+  });
+
+  it("hardcodes no id, home path or data directory", async () => {
+    const text = await runtimeStage();
+    expect(text).not.toMatch(/(useradd|groupadd)[^\n]*--(uid|gid) [0-9]/);
+    expect(text).not.toContain("/app/data");
+    expect(text).not.toMatch(/HOME=\//);
+  });
+
+  it("keeps the image host and port and takes HOME from the build arg", async () => {
+    const text = await runtimeStage();
+    for (const entry of [
+      "NODE_ENV=production",
+      "SESSIONMAXXING_HOST=0.0.0.0",
+      "SESSIONMAXXING_PORT=4317",
+      "DISABLE_AUTOUPDATER=1",
+    ])
+      expect(text, entry).toContain(entry);
+    expect(text).toMatch(/HOME=\$\{RUNTIME_HOME\}/);
+  });
+
+  it("switches to the runtime user before running claude", async () => {
+    const text = await runtimeStage();
+    const user = text.search(/USER \$\{RUNTIME_UID\}:\$\{RUNTIME_GID\}/);
+    expect(user).toBeGreaterThan(-1);
+    expect(user).toBeLessThan(text.indexOf("RUN claude --version"));
   });
 });

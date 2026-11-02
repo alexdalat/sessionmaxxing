@@ -24,12 +24,25 @@ RUN apt-get update \
         @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
     && npm cache clean --force
 
-RUN groupadd --gid 1000 user \
-    && useradd --uid 1000 --gid 1000 --create-home --shell /bin/bash user \
-    && install -d -m 0700 -o 1000 -g 1000 /app/data
+ARG RUNTIME_UID
+ARG RUNTIME_GID
+ARG RUNTIME_HOME
+RUN set -eux; \
+    for id in RUNTIME_UID RUNTIME_GID; do \
+        case "$(printenv "$id")" in ''|*[!0-9]*|0*) echo "$id must be a non-zero numeric id" >&2; exit 1;; esac; \
+    done; \
+    test -n "$RUNTIME_HOME"; \
+    owner="$(getent passwd "$RUNTIME_UID" | cut -d: -f1)"; \
+    if [ -n "$owner" ]; then userdel --remove "$owner"; fi; \
+    group="$(getent group "$RUNTIME_GID" | cut -d: -f1)"; \
+    if [ -n "$group" ]; then groupdel "$group"; fi; \
+    groupadd --gid "$RUNTIME_GID" sessionmaxxing; \
+    useradd --uid "$RUNTIME_UID" --gid "$RUNTIME_GID" --no-create-home \
+        --home-dir "$RUNTIME_HOME" --shell /bin/bash sessionmaxxing; \
+    install -d -m 0755 -o "$RUNTIME_UID" -g "$RUNTIME_GID" "$RUNTIME_HOME"
 
 ENV NODE_ENV=production \
-    HOME=/home/user \
+    HOME=${RUNTIME_HOME} \
     SESSIONMAXXING_HOST=0.0.0.0 \
     SESSIONMAXXING_PORT=4317 \
     DISABLE_AUTOUPDATER=1
@@ -38,7 +51,7 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
 
-USER 1000:1000
+USER ${RUNTIME_UID}:${RUNTIME_GID}
 RUN claude --version
 EXPOSE 4317
 CMD ["node", "dist/server/server/main.js"]
