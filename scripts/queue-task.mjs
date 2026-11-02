@@ -3,14 +3,7 @@ import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 const DEFAULT_URL = process.env.SESSIONMAXXING_URL ?? "http://127.0.0.1:4317";
-const MAC_HOME = "/Users/me";
-// Syncthing folder pairs between the Mac and deltabeta. Runs execute on deltabeta,
-// so a workdir given from the Mac must name the same folder by its deltabeta path.
-const SYNCED_ROOTS = [
-  ["/Users/me/Documents/Personal", "/home/user/syncthing/Personal"],
-  ["/Users/me/ObsidianVaults", "/home/user/syncthing/Obsidian"],
-  ["/Users/me/.claude", "/home/user/.claude"],
-];
+const PATH_MAP_VAR = "SESSIONMAXXING_PATH_MAP";
 const DEFAULT_MAX_TURNS = 500;
 const AUTO_TOKENS = "auto";
 const MIN_TOKENS = 5_000;
@@ -31,7 +24,8 @@ const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." 
   [--window HH]          0-23; omit for any hour
   [--depends-on ID[,ID]] run only after these queued task ids finish
   [--after ISO] [--dry-run]
-  [--url URL]            default: $SESSIONMAXXING_URL, else http://127.0.0.1:4317`;
+  [--url URL]            default: $SESSIONMAXXING_URL, else http://127.0.0.1:4317
+  $SESSIONMAXXING_PATH_MAP  from=to[,from=to] absolute prefixes; rewrites --workdir for a server that sees these folders elsewhere`;
 const VALUE_FLAGS = new Set([
   "--title",
   "--prompt",
@@ -97,15 +91,33 @@ function integer(raw, flag, min, max) {
 
 const within = (path, root) => path === root || path.startsWith(`${root}/`);
 
-function dashboardPath(path) {
-  if (!isAbsolute(path)) fail("--workdir must be an absolute path.");
-  if (!within(path, MAC_HOME)) return path;
-  for (const [mac, deltabeta] of SYNCED_ROOTS) {
-    if (within(path, mac)) return deltabeta + path.slice(mac.length);
+function pathMapEntry(entry) {
+  const sides = entry.split("=");
+  if (sides.length !== 2 || !sides.every(isAbsolute))
+    fail(
+      `${PATH_MAP_VAR}: "${entry}" must be two absolute paths joined by one =.`,
+    );
+  const [from, to] = sides.map((side) => side.replace(/\/+$/, ""));
+  if (!from || !to)
+    fail(`${PATH_MAP_VAR}: "${entry}" must not map the filesystem root.`);
+  return [from, to];
+}
+
+function parsePathMap(raw) {
+  if (!raw) return [];
+  const pairs = raw.split(",").map(pathMapEntry);
+  const seen = new Set();
+  for (const [from] of pairs) {
+    if (seen.has(from)) fail(`${PATH_MAP_VAR}: ${from} is mapped twice.`);
+    seen.add(from);
   }
-  fail(
-    `${path} is not in a Syncthing folder shared with deltabeta. Pass --workdir with the deltabeta path.`,
-  );
+  return pairs.sort((a, b) => b[0].length - a[0].length);
+}
+
+function dashboardPath(path, pathMap) {
+  if (!isAbsolute(path)) fail("--workdir must be an absolute path.");
+  const pair = pathMap.find(([from]) => within(path, from));
+  return pair ? pair[1] + path.slice(pair[0].length) : path;
 }
 
 function buildBody(values) {
@@ -117,7 +129,8 @@ function buildBody(values) {
       ? values["--prompt"]
       : readFileSync(values["--prompt-file"], "utf8");
   if (!prompt) fail(`--prompt or --prompt-file is required.\n${USAGE}`);
-  const workdir = dashboardPath(values["--workdir"] ?? process.cwd());
+  const pathMap = parsePathMap(process.env[PATH_MAP_VAR]);
+  const workdir = dashboardPath(values["--workdir"] ?? process.cwd(), pathMap);
   const body = {
     title: values["--title"],
     prompt,

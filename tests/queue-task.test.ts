@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { realpath } from "node:fs/promises";
 import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
@@ -269,55 +270,113 @@ it("leaves the output tokens for the server to estimate unless a number is given
   expect(JSON.parse(byDefault.stdout).tokens).toBe("auto");
 });
 
-const dryRunWorkdir = (workdir: string) =>
-  run(process.execPath, [
-    SCRIPT,
-    "--title",
-    "Rename the parser",
-    "--prompt",
-    PROMPT,
-    "--workdir",
-    workdir,
-    "--dry-run",
-  ]);
+const PATH_MAP = "SESSIONMAXXING_PATH_MAP";
+const NOTES_MAP = "/Users/me/notes=/srv/notes";
 
-it("rewrites a Mac workdir inside a synced folder to its deltabeta path", async () => {
-  const { stdout } = await dryRunWorkdir(
-    "/Users/me/Documents/Personal/local_code/py/cs_detector",
+const dryRunWorkdir = (workdir: string | null, map?: string, cwd?: string) => {
+  const env = { ...process.env };
+  delete env[PATH_MAP];
+  if (map !== undefined) env[PATH_MAP] = map;
+  return run(
+    process.execPath,
+    [
+      SCRIPT,
+      "--title",
+      "Rename the parser",
+      "--prompt",
+      PROMPT,
+      ...(workdir === null ? [] : ["--workdir", workdir]),
+      "--dry-run",
+    ],
+    { env, cwd },
   );
-  expect(JSON.parse(stdout).workdir).toBe(
-    "/home/user/syncthing/Personal/local_code/py/cs_detector",
+};
+
+const mappedWorkdir = async (workdir: string, map?: string) =>
+  JSON.parse((await dryRunWorkdir(workdir, map)).stdout).workdir;
+
+it("rewrites a workdir under a mapped prefix to the server's prefix", async () => {
+  expect(await mappedWorkdir("/Users/me/notes/project/sub", NOTES_MAP)).toBe(
+    "/srv/notes/project/sub",
   );
 });
 
-it("rewrites the synced folder root itself", async () => {
-  const { stdout } = await dryRunWorkdir("/Users/me/.claude");
-  expect(JSON.parse(stdout).workdir).toBe("/home/user/.claude");
+it("rewrites the mapped folder itself", async () => {
+  expect(await mappedWorkdir("/Users/me/notes", NOTES_MAP)).toBe("/srv/notes");
 });
 
-it("rejects a Mac workdir outside every synced folder", async () => {
-  await expect(
-    dryRunWorkdir("/Users/me/code/repo"),
-  ).rejects.toMatchObject({
-    stderr: expect.stringContaining("not in a Syncthing folder"),
+it("rewrites a workdir given with a trailing slash on the map entry", async () => {
+  expect(
+    await mappedWorkdir("/Users/me/notes/a", "/Users/me/notes/=/srv/n/"),
+  ).toBe("/srv/n/a");
+});
+
+it("uses the longest matching prefix whatever the entry order", async () => {
+  const orders = [
+    "/Users/me=/srv/home,/Users/me/notes=/srv/notes",
+    "/Users/me/notes=/srv/notes,/Users/me=/srv/home",
+  ];
+  for (const map of orders) {
+    expect(await mappedWorkdir("/Users/me/notes/project", map)).toBe(
+      "/srv/notes/project",
+    );
+    expect(await mappedWorkdir("/Users/me/other/x", map)).toBe(
+      "/srv/home/other/x",
+    );
+  }
+});
+
+it("leaves a sibling whose name only starts with a mapped folder name unchanged", async () => {
+  expect(await mappedWorkdir("/Users/me/notes-archive/x", NOTES_MAP)).toBe(
+    "/Users/me/notes-archive/x",
+  );
+});
+
+it("sends a path matching no entry unchanged", async () => {
+  expect(await mappedWorkdir("/srv/elsewhere/x", NOTES_MAP)).toBe(
+    "/srv/elsewhere/x",
+  );
+});
+
+it("rewrites nothing when the variable is unset or empty", async () => {
+  expect(await mappedWorkdir("/Users/me/notes/x")).toBe("/Users/me/notes/x");
+  expect(await mappedWorkdir("/Users/me/notes/x", "")).toBe(
+    "/Users/me/notes/x",
+  );
+});
+
+it("maps the current directory when no workdir is given", async () => {
+  const temp = await temporary();
+  try {
+    const directory = await realpath(temp.path);
+    const { stdout } = await dryRunWorkdir(
+      null,
+      `${directory}=/srv/mapped`,
+      directory,
+    );
+    expect(JSON.parse(stdout).workdir).toBe("/srv/mapped");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it.each([
+  ["an entry without =", "nopair"],
+  ["an entry with two =", "/a=/b=/c"],
+  ["a relative from side", "relative=/srv/x"],
+  ["a relative to side", "/Users/me=relative"],
+  ["an empty entry", "/Users/me=/srv/a,,/Users/other=/srv/b"],
+  ["a repeated from", "/Users/me=/srv/a,/Users/me=/srv/b"],
+  ["the filesystem root as from", "/=/srv/x"],
+  ["the filesystem root as to", "/Users/me=/"],
+])("fails loudly on a malformed map with %s", async (_label, map) => {
+  await expect(dryRunWorkdir("/srv/elsewhere/x", map)).rejects.toMatchObject({
+    stderr: expect.stringContaining(PATH_MAP),
   });
 });
 
-it("rejects a Mac sibling whose name only starts with a synced folder name", async () => {
-  await expect(
-    dryRunWorkdir("/Users/me/Documents/PersonalArchive/repo"),
-  ).rejects.toMatchObject({
-    stderr: expect.stringContaining("not in a Syncthing folder"),
-  });
-});
-
-it("leaves a deltabeta workdir unchanged", async () => {
-  const { stdout } = await dryRunWorkdir("/home/user/maizetix");
-  expect(JSON.parse(stdout).workdir).toBe("/home/user/maizetix");
-});
-
-it("rejects the Mac home directory itself", async () => {
-  await expect(dryRunWorkdir("/Users/me")).rejects.toMatchObject({
-    stderr: expect.stringContaining("not in a Syncthing folder"),
+it("still rejects a relative workdir with the absolute-path message", async () => {
+  await expect(dryRunWorkdir("project/sub", NOTES_MAP)).rejects.toMatchObject({
+    stderr: expect.stringContaining("--workdir must be an absolute path"),
   });
 });
