@@ -44,7 +44,7 @@ export async function startDashboard(
     );
   // Phase 4 reads the edition; until then an unsupported value must fail instead of silently running full.
   resolveEdition(process.env);
-  resolveAllowedHosts(process.env, host);
+  const allowedHosts = resolveAllowedHosts(process.env, host);
   const directory = await prepareDataDirectory({
     explicit: options.dataDirectory,
     env: process.env,
@@ -95,6 +95,7 @@ export async function startDashboard(
     app = await createApp({
       queue,
       runner,
+      allowedHosts,
       settings,
       usage,
       keeper,

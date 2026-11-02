@@ -1,3 +1,4 @@
+import { isIPv6 } from "node:net";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import fastifyStatic from "@fastify/static";
@@ -27,6 +28,7 @@ import {
   emptyQuerySchema,
   settingsSchema,
 } from "./dispatch-settings.js";
+import { UNSPECIFIED_ADDRESSES } from "./environment.js";
 import { estimateTokens, type TokensEstimator } from "./estimate.js";
 import { createHistoryReader } from "./history.js";
 import { planScore } from "./plan-score.js";
@@ -39,11 +41,23 @@ import { DomainError } from "./storage.js";
 import { mergeSessionWindows, sessionWindows } from "./usage-history.js";
 import type { UsageMonitor } from "./usage-monitor.js";
 
-const DASHBOARD_HOST =
-  /^(127\.0\.0\.1|localhost|100\.98\.196\.62|deltabeta\.tail537c71\.ts\.net)(:\d+)?$/;
+const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
+const BRACKETED = /^\[(.*)\]$/;
+const REGEXP_SPECIALS = /[.*+?^${}()|[\]\\]/g;
+
+function hostMatcher(allowedHosts: readonly string[]) {
+  const names = [...LOCAL_HOSTS, ...allowedHosts]
+    .map((name) => BRACKETED.exec(name)?.[1] ?? name)
+    .filter((name) => !UNSPECIFIED_ADDRESSES.has(name))
+    .map((name) => (isIPv6(name) ? `[${name}]` : name))
+    .map((name) => name.replace(REGEXP_SPECIALS, "\\$&"));
+  return new RegExp(`^(?:${names.join("|")})(?::\\d+)?$`, "i");
+}
 
 export interface AppOptions {
   staticRoot?: string;
+  /** Host names and addresses accepted besides localhost and 127.0.0.1. */
+  allowedHosts?: readonly string[];
   queue?: QueueStore;
   runner?: Runner;
   loadHistory?: () => Promise<HistoryData>;
@@ -74,11 +88,12 @@ export async function createApp(options: AppOptions = {}) {
         ]),
     );
   const now = () => options.now?.() ?? new Date();
+  const approvedHost = hostMatcher(options.allowedHosts ?? []);
   app.addHook("onRequest", async (request, reply) => {
     const host = request.headers.host ?? "";
     const origin = request.headers.origin;
     if (
-      !DASHBOARD_HOST.test(host) ||
+      !approvedHost.test(host) ||
       (origin !== undefined && origin !== `http://${host}`) ||
       request.headers["sec-fetch-site"] === "cross-site"
     ) {

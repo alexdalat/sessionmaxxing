@@ -9,6 +9,15 @@ import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
 import { sessionRates, temporary, usageSnapshot } from "./helpers";
 
+const APPROVED_ADDRESS = "192.0.2.10";
+const APPROVED_NAME = "dashboard.example.test";
+const APPROVED_IPV6 = "::1";
+const APPROVED_HOSTS = [APPROVED_ADDRESS, APPROVED_NAME, APPROVED_IPV6];
+const emptyHistory = async () => ({
+  events: [],
+  health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
+});
+
 it("returns task prompts and working directories to the browser while edits preserve their stored execution directory", async () => {
   const { temporary, taskInput } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");
@@ -48,19 +57,18 @@ it("returns task prompts and working directories to the browser while edits pres
   }
 });
 
-it("accepts localhost and Tailscale dashboard requests without credentials", async () => {
+it("accepts localhost and the listed hosts without credentials", async () => {
   const app = await createApp({
-    loadHistory: async () => ({
-      events: [],
-      health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
-    }),
+    allowedHosts: APPROVED_HOSTS,
+    loadHistory: emptyHistory,
   });
   try {
     for (const hostname of [
       "localhost",
       "127.0.0.1",
-      "192.0.2.10",
-      "dashboard.example.ts.net",
+      APPROVED_ADDRESS,
+      APPROVED_NAME,
+      "[::1]",
     ]) {
       for (const host of [hostname, `${hostname}:4317`]) {
         for (const headers of [
@@ -82,30 +90,83 @@ it("accepts localhost and Tailscale dashboard requests without credentials", asy
   }
 });
 
+it("matches approved hosts case-insensitively", async () => {
+  const app = await createApp({
+    allowedHosts: APPROVED_HOSTS,
+    loadHistory: emptyHistory,
+  });
+  try {
+    const host = "DASHBOARD.EXAMPLE.TEST:4317";
+    const response = await app.inject({
+      url: "/api/analytics",
+      headers: { host, origin: `http://${host}` },
+    });
+    expect(response.statusCode).toBe(200);
+  } finally {
+    await app.close();
+  }
+});
+
+it("approves only localhost when no hosts are listed", async () => {
+  const app = await createApp({ loadHistory: emptyHistory });
+  try {
+    const rejected = await app.inject({
+      url: "/api/analytics",
+      headers: { host: `${APPROVED_ADDRESS}:4317` },
+    });
+    expect(rejected.statusCode).toBe(403);
+    const accepted = await app.inject({
+      url: "/api/analytics",
+      headers: { host: "localhost:4317" },
+    });
+    expect(accepted.statusCode).toBe(200);
+  } finally {
+    await app.close();
+  }
+});
+
+it("never approves an unspecified address, even when it is listed", async () => {
+  const app = await createApp({
+    allowedHosts: [...APPROVED_HOSTS, "0.0.0.0", "::", "[::]"],
+    loadHistory: emptyHistory,
+  });
+  try {
+    for (const host of ["0.0.0.0:4317", "0.0.0.0", "[::]:4317", "[::2]:4317"]) {
+      const response = await app.inject({
+        url: "/api/analytics",
+        headers: { host },
+      });
+      expect(response.statusCode, host).toBe(403);
+    }
+  } finally {
+    await app.close();
+  }
+});
+
 it("rejects unapproved hosts and origins even when forwarded headers claim a trusted host", async () => {
-  const app = await createApp();
-  const host = "192.0.2.10:4317";
+  const app = await createApp({ allowedHosts: APPROVED_HOSTS });
+  const host = `${APPROVED_ADDRESS}:4317`;
   try {
     const rejectedHeaders = [
       ...[
         "0.0.0.0:4317",
-        "192.168.1.10:4317",
         "192.0.2.11:4317",
-        "192.0.2.10.evil.example:4317",
-        "dashboard.example.ts.net.evil.example:4317",
-        "other.example.ts.net:4317",
-        "user@192.0.2.10:4317",
-        "192.0.2.10:4317/path",
-        "192.0.2.10:4317,localhost:4317",
+        `${APPROVED_ADDRESS}.evil.example:4317`,
+        `${APPROVED_NAME}.evil.example:4317`,
+        "other.example.test:4317",
+        `user@${APPROVED_ADDRESS}:4317`,
+        `${APPROVED_ADDRESS}:4317/path`,
+        `${APPROVED_ADDRESS}:4317,localhost:4317`,
+        "[::2]:4317",
       ].map((host) => ({ host })),
       ...[
         "",
         "null",
-        "https://192.0.2.10:4317",
-        "http://192.0.2.10:4318",
-        "http://192.0.2.10:4317/",
-        "http://192.0.2.10:4317.evil.example",
-        "http://dashboard.example.ts.net:4317",
+        `https://${host}`,
+        `http://${APPROVED_ADDRESS}:4318`,
+        `http://${host}/`,
+        `http://${host}.evil.example`,
+        `http://${APPROVED_NAME}:4317`,
         "http://localhost:4317",
       ].map((origin) => ({ host, origin })),
       { host, origin: `http://${host}`, "sec-fetch-site": "cross-site" },
@@ -174,15 +235,19 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
   const queue = await QueueStore.open(temp.path);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
-  const app = await createApp({ queue, runner });
+  const app = await createApp({
+    queue,
+    runner,
+    allowedHosts: [APPROVED_NAME],
+  });
   const submitted = taskInput(temp.path);
   try {
     const create = await app.inject({
       method: "POST",
       url: "/api/tasks",
       headers: {
-        host: "dashboard.example.ts.net:4317",
-        origin: "http://dashboard.example.ts.net:4317",
+        host: `${APPROVED_NAME}:4317`,
+        origin: `http://${APPROVED_NAME}:4317`,
       },
       payload: submitted,
     });
@@ -320,6 +385,7 @@ it("serves the production client locally, protects API errors, and does not fall
   );
   const app = await createApp({
     staticRoot: temp.path,
+    allowedHosts: [APPROVED_NAME],
     loadHistory: async () => {
       throw new Error("PRIVATE /home/user/credential SECRET");
     },
@@ -327,7 +393,7 @@ it("serves the production client locally, protects API errors, and does not fall
   try {
     const index = await app.inject({
       url: "/",
-      headers: { host: "dashboard.example.ts.net:4317" },
+      headers: { host: `${APPROVED_NAME}:4317` },
     });
     expect(index.statusCode).toBe(200);
     expect(index.body).toContain("<title>Capacity</title>");

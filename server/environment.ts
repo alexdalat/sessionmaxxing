@@ -7,7 +7,7 @@ export const EDITION_VARIABLE = "SESSIONMAXXING_EDITION";
 export const ALLOWED_HOSTS_VARIABLE = "SESSIONMAXXING_ALLOWED_HOSTS";
 
 const LOOPBACK = "127.0.0.1";
-const UNSPECIFIED_ADDRESSES = new Set(["0.0.0.0", "::"]);
+export const UNSPECIFIED_ADDRESSES = new Set(["0.0.0.0", "::"]);
 const HOST_NAME = /^[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 const BRACKETED_IPV6 = /^\[([^\]]+)\]$/;
 

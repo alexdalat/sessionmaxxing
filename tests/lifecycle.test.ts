@@ -135,6 +135,7 @@ it("creates the data directory and every missing parent with mode 0700", async (
 
 it("binds all container interfaces when SESSIONMAXXING_HOST is explicitly 0.0.0.0 and still validates requests", async () => {
   vi.stubEnv("SESSIONMAXXING_HOST", "0.0.0.0");
+  vi.stubEnv("SESSIONMAXXING_ALLOWED_HOSTS", "192.0.2.10");
   const temp = await temporary();
   try {
     const app = await startDashboard({
@@ -163,7 +164,7 @@ it("binds all container interfaces when SESSIONMAXXING_HOST is explicitly 0.0.0.
       });
       const denied = await app.inject({
         url: "/api/queue",
-        headers: { host: "192.168.1.10:4317" },
+        headers: { host: "192.0.2.11:4317" },
       });
       expect(denied.statusCode).toBe(403);
     } finally {
