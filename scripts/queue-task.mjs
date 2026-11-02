@@ -3,7 +3,6 @@ import { readFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
 const DEFAULT_URL = process.env.SESSIONMAXXING_URL ?? "http://127.0.0.1:4317";
-const TAILNET_URL = "http://192.0.2.10:4317";
 const MAC_HOME = "/Users/me";
 // Syncthing folder pairs between the Mac and deltabeta. Runs execute on deltabeta,
 // so a workdir given from the Mac must name the same folder by its deltabeta path.
@@ -161,8 +160,10 @@ async function connect(base) {
   try {
     return { base, usage: await send(base, "/api/usage") };
   } catch (error) {
-    if (base === TAILNET_URL || !isConnectionError(error)) throw error;
-    return { base: TAILNET_URL, usage: await send(TAILNET_URL, "/api/usage") };
+    if (!isConnectionError(error)) throw error;
+    return fail(
+      `Cannot reach SessionMaxxing at ${base}. Start it, or point this helper at it with --url or SESSIONMAXXING_URL.`,
+    );
   }
 }
 

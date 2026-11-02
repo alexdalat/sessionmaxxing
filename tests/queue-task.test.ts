@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createServer } from "node:net";
 import { resolve } from "node:path";
 import { promisify } from "node:util";
 import { expect, it } from "vitest";
@@ -176,6 +177,70 @@ it("lets --url override SESSIONMAXXING_URL", async () => {
     await flagged.close();
     await fromEnv.close();
   }
+});
+
+async function closedPort() {
+  const probe = createServer();
+  await new Promise<void>((done) => probe.listen(0, "127.0.0.1", done));
+  const address = probe.address();
+  if (address === null || typeof address === "string")
+    throw new Error("The probe server did not report a port.");
+  await new Promise((done) => probe.close(done));
+  return address.port;
+}
+
+it("fails fast naming the URL and both ways to change it when --url is unreachable", async () => {
+  const url = `http://127.0.0.1:${await closedPort()}`;
+  const failure = await run(
+    process.execPath,
+    queueArgs("/srv/notes", "--url", url),
+  ).then(
+    () => {
+      throw new Error("The script exited 0 against a closed port.");
+    },
+    (error: { code: number; stderr: string }) => error,
+  );
+  expect(failure.code).toBe(1);
+  expect(failure.stderr).toContain(url);
+  expect(failure.stderr).toContain("--url");
+  expect(failure.stderr).toContain("SESSIONMAXXING_URL");
+});
+
+it("fails the same way when SESSIONMAXXING_URL is unreachable", async () => {
+  const url = `http://127.0.0.1:${await closedPort()}`;
+  await expect(
+    run(process.execPath, queueArgs("/srv/notes"), {
+      env: { ...process.env, SESSIONMAXXING_URL: url },
+    }),
+  ).rejects.toMatchObject({
+    code: 1,
+    stderr: expect.stringContaining(url),
+  });
+});
+
+it("prints the server's own message when it answers with an HTTP error", async () => {
+  const server = await startServer();
+  try {
+    await expect(
+      run(
+        process.execPath,
+        queueArgs("/srv/not-a-real-dir", "--url", server.base),
+      ),
+    ).rejects.toMatchObject({
+      code: 1,
+      stderr: expect.not.stringContaining("SESSIONMAXXING_URL"),
+    });
+    expect(server.queue.snapshot().tasks).toHaveLength(0);
+  } finally {
+    await server.close();
+  }
+});
+
+it("shows only the loopback default in --help", async () => {
+  const { stdout } = await run(process.execPath, [SCRIPT, "--help"]);
+  expect(stdout.match(/https?:\/\/[^\s,]+/g)).toEqual([
+    "http://127.0.0.1:4317",
+  ]);
 });
 
 it("leaves the output tokens for the server to estimate unless a number is given", async () => {
