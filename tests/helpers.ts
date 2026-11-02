@@ -20,6 +20,8 @@ export const taskInput = (workdir: string) => ({
   tokens: 100_000,
   dependsOn: [] as string[],
 });
+// Same offsets and abbreviations as the author's zone, so expectations derived for the old fixed zone still hold.
+export const TEST_TIME_ZONE = "America/Toronto";
 /** The rates fitted from tests/fixtures/session-windows.json, so 100k Opus tokens cost 13.8%. */
 export const SESSION_RATES: SessionRates = {
   fable: 357.2,
