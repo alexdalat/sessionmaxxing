@@ -14,6 +14,8 @@ vi.mock("../server/history.js", () => ({
 beforeEach(() => {
   vi.stubEnv("SESSIONMAXXING_HOST", undefined);
   vi.stubEnv("SESSIONMAXXING_PORT", undefined);
+  vi.stubEnv("SESSIONMAXXING_EDITION", undefined);
+  vi.stubEnv("SESSIONMAXXING_ALLOWED_HOSTS", undefined);
   vi.stubEnv("HOST", undefined);
 });
 afterEach(() => vi.unstubAllEnvs());
@@ -216,7 +218,7 @@ it("rejects unsupported SESSIONMAXXING_HOST values before touching runtime state
   const temp = await temporary();
   const dataDirectory = join(temp.path, "runtime");
   try {
-    for (const host of ["", "localhost", "192.168.1.10", "::", "0.0.0.0 "]) {
+    for (const host of ["", "localhost", "example.test", "0.0.0.0 "]) {
       vi.stubEnv("SESSIONMAXXING_HOST", host);
       await expect(
         startDashboard({
@@ -225,11 +227,63 @@ it("rejects unsupported SESSIONMAXXING_HOST values before touching runtime state
           development: true,
           fetchUsage,
         }).then((app) => app.close()),
-      ).rejects.toThrow("SESSIONMAXXING_HOST must be 127.0.0.1 or 0.0.0.0.");
+      ).rejects.toThrow("SESSIONMAXXING_HOST");
       await expect(access(dataDirectory)).rejects.toMatchObject({
         code: "ENOENT",
       });
     }
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("rejects an unsupported SESSIONMAXXING_EDITION before touching runtime state and starts with full", async () => {
+  const temp = await temporary();
+  const dataDirectory = join(temp.path, "runtime");
+  try {
+    vi.stubEnv("SESSIONMAXXING_EDITION", "lite");
+    await expect(
+      startDashboard({
+        port: 0,
+        dataDirectory,
+        development: true,
+        fetchUsage,
+      }).then((app) => app.close()),
+    ).rejects.toThrow("SESSIONMAXXING_EDITION");
+    await expect(access(dataDirectory)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    vi.stubEnv("SESSIONMAXXING_EDITION", "full");
+    const app = await startDashboard({
+      port: 0,
+      dataDirectory,
+      development: true,
+      fetchUsage,
+    });
+    await app.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("rejects a malformed SESSIONMAXXING_ALLOWED_HOSTS entry before touching runtime state", async () => {
+  vi.stubEnv("SESSIONMAXXING_ALLOWED_HOSTS", "dashboard.example.test:4317");
+  const temp = await temporary();
+  const dataDirectory = join(temp.path, "runtime");
+  try {
+    await expect(
+      startDashboard({
+        port: 0,
+        dataDirectory,
+        development: true,
+        fetchUsage,
+      }).then((app) => app.close()),
+    ).rejects.toThrow(
+      /SESSIONMAXXING_ALLOWED_HOSTS.*"dashboard\.example\.test:4317"/,
+    );
+    await expect(access(dataDirectory)).rejects.toMatchObject({
+      code: "ENOENT",
+    });
   } finally {
     await temp.cleanup();
   }

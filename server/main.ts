@@ -9,6 +9,12 @@ import { createApp } from "./app.js";
 import { type FetchUsage, officialUsageFetcher } from "./claude-usage.js";
 import { LOCK_FILE, prepareDataDirectory } from "./data-directory.js";
 import { DispatchSettingsStore } from "./dispatch-settings.js";
+import {
+  formatListenUrl,
+  resolveAllowedHosts,
+  resolveEdition,
+  resolveHost,
+} from "./environment.js";
 import { readSessionTokens } from "./history.js";
 import { QueueStore } from "./queue.js";
 import { Runner } from "./runner.js";
@@ -17,7 +23,6 @@ import { DomainError } from "./storage.js";
 import { UsageHistoryStore } from "./usage-history.js";
 import { UsageMonitor } from "./usage-monitor.js";
 
-const HOST_VARIABLE = "SESSIONMAXXING_HOST";
 const PORT_VARIABLE = "SESSIONMAXXING_PORT";
 
 interface StartOptions {
@@ -30,18 +35,16 @@ interface StartOptions {
 export async function startDashboard(
   options: StartOptions = {},
 ): Promise<FastifyInstance> {
-  const host = process.env[HOST_VARIABLE] ?? "127.0.0.1";
-  if (host !== "127.0.0.1" && host !== "0.0.0.0")
-    throw new DomainError(
-      `${HOST_VARIABLE} must be 127.0.0.1 or 0.0.0.0.`,
-      400,
-    );
+  const host = resolveHost(process.env);
   const port = options.port ?? Number(process.env[PORT_VARIABLE] ?? 4317);
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new DomainError(
       `${PORT_VARIABLE} must be an integer from 1 to 65535.`,
       400,
     );
+  // Phase 4 reads the edition; until then an unsupported value must fail instead of silently running full.
+  resolveEdition(process.env);
+  resolveAllowedHosts(process.env, host);
   const directory = await prepareDataDirectory({
     explicit: options.dataDirectory,
     env: process.env,
@@ -122,9 +125,7 @@ if (
     });
     const address = app.server.address();
     if (address && typeof address !== "string")
-      console.info(
-        `${PRODUCT_NAME}: http://${address.address}:${address.port}`,
-      );
+      console.info(`${PRODUCT_NAME}: ${formatListenUrl(address)}`);
     let stopping = false;
     const stop = async () => {
       if (stopping) return;
