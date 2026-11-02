@@ -5,6 +5,7 @@ import "@fontsource/inter/500.css";
 import "@fontsource/inter/600.css";
 import "@fontsource/jetbrains-mono/400.css";
 import "./styles.css";
+import { EnvironmentProvider } from "@/app/components/EnvironmentProvider";
 import { Sidebar } from "@/app/components/Sidebar";
 import { TooltipProvider } from "@/app/components/ui/tooltip";
 import { PRODUCT_NAME } from "@/shared/product";
@@ -31,7 +32,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
             </a>
             <Sidebar />
             <main id="main" tabIndex={-1}>
-              {children}
+              <EnvironmentProvider>{children}</EnvironmentProvider>
             </main>
           </div>
         </TooltipProvider>

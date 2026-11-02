@@ -337,6 +337,12 @@ export interface WorkdirSuggestions {
   /** Absolute directories whose path starts with the typed prefix. */
   matches: string[];
 }
+export interface Environment {
+  /** IANA zone the server resolved from TZ. */
+  timeZone: string;
+  /** Absolute directory under which task work directories are accepted. */
+  workdirRoot: string;
+}
 export interface QueueSnapshot {
   planning?: PlanningSnapshot;
   sessionKeeper?: SessionKeeperState;
