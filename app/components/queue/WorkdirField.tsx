@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import {
   Command,
   CommandGroup,
@@ -17,7 +18,6 @@ import type { WorkdirSuggestions } from "@/shared/types";
 
 const DEBOUNCE_MS = 150;
 const LIST_KEYS = ["ArrowDown", "ArrowUp", "Enter"];
-export const DEFAULT_WORKDIR = "/home/user/workspace";
 
 export function WorkdirField({
   value,
@@ -30,6 +30,7 @@ export function WorkdirField({
   id: string;
   defaultToRecent?: boolean;
 }) {
+  const { workdirRoot } = useEnvironment();
   const [query, setQuery] = useState(value);
   const [suggestions, setSuggestions] = useState<WorkdirSuggestions>();
   const [error, setError] = useState("");
@@ -67,8 +68,8 @@ export function WorkdirField({
   useEffect(() => {
     if (prefilled.current || !defaultToRecent || value || !suggestions) return;
     prefilled.current = true;
-    onChange(suggestions.recent[0] ?? DEFAULT_WORKDIR);
-  }, [defaultToRecent, value, suggestions, onChange]);
+    onChange(suggestions.recent[0] ?? workdirRoot);
+  }, [defaultToRecent, value, suggestions, onChange, workdirRoot]);
 
   const recent =
     suggestions && (!value || suggestions.recent.includes(value))
@@ -99,7 +100,7 @@ export function WorkdirField({
             required
             autoComplete="off"
             value={value}
-            placeholder="/home/user/workspace/project"
+            placeholder={`${workdirRoot}/project`}
             onChange={(event) => {
               onChange(event.target.value);
               setOpen(true);
