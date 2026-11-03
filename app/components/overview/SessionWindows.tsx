@@ -1,5 +1,6 @@
 "use client";
 import { type MouseEvent, useState } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Skeleton } from "@/app/components/ui/skeleton";
 import {
   Tooltip,
@@ -9,7 +10,8 @@ import {
 import { accentAlpha, TOOLTIP_CLASS } from "@/app/lib/chart";
 import { formatRemaining } from "@/app/lib/duration";
 import { clockOfFraction, daySegments } from "@/app/lib/sessionWindows";
-import { easternDay, localClock, shiftDate, weekdayOf } from "@/app/lib/time";
+import { localDay, weekdayOf } from "@/app/lib/time";
+import { localClock, shiftDate } from "@/shared/local-time";
 import type { SessionWindow } from "@/shared/types";
 import { BLOCK_MINUTES, hourLabel, MINUTE_MS } from "@/shared/types";
 
@@ -31,8 +33,8 @@ const blockAlpha = (window: SessionWindow) =>
     (window.peakPercent === null
       ? window.activeMinutes / BLOCK_MINUTES
       : window.peakPercent / 100);
-const blockDescription = (window: SessionWindow) =>
-  `${localClock(window.start)} – ${localClock(window.end)} · ${
+const blockDescription = (window: SessionWindow, timeZone: string) =>
+  `${localClock(window.start, timeZone)} – ${localClock(window.end, timeZone)} · ${
     window.peakPercent === null
       ? `active ${activeLabel(window)}`
       : `peak ${Math.round(window.peakPercent)}%`
@@ -45,6 +47,7 @@ export function SessionWindows({
   windows: SessionWindow[] | undefined;
   now: number;
 }) {
+  const { timeZone } = useEnvironment();
   const [hover, setHover] = useState<number | null>(null);
   const track = (event: MouseEvent<HTMLUListElement>) => {
     const element = (event.target as HTMLElement).closest(".windows-track");
@@ -55,11 +58,11 @@ export function SessionWindows({
     const rect = element.getBoundingClientRect();
     setHover((event.clientX - rect.left) / rect.width);
   };
-  const today = easternDay(now);
+  const today = localDay(now, timeZone);
   const dates = Array.from({ length: DAYS }, (_, i) =>
     shiftDate(today.date, i - DAYS + 1),
   );
-  const segments = daySegments(windows ?? []);
+  const segments = daySegments(windows ?? [], timeZone);
   const used = windows?.length ?? 0;
   const idleShare = 1 - Math.min(1, (used * BLOCK_HOURS) / WEEK_HOURS);
   const peaks = (windows ?? []).flatMap((w) =>
@@ -113,7 +116,7 @@ export function SessionWindows({
                           background: accentAlpha(blockAlpha(segment.window)),
                         }}
                         role="img"
-                        aria-label={blockDescription(segment.window)}
+                        aria-label={blockDescription(segment.window, timeZone)}
                       >
                         {segment.to - segment.from > 0.08 &&
                           blockLabel(segment.window)}
@@ -121,9 +124,11 @@ export function SessionWindows({
                     </TooltipTrigger>
                     <TooltipContent className={TOOLTIP_CLASS}>
                       <strong className="font-medium">
-                        {weekdayOf(easternDay(segment.window.start).date)}{" "}
-                        {localClock(segment.window.start)} –{" "}
-                        {localClock(segment.window.end)}
+                        {weekdayOf(
+                          localDay(segment.window.start, timeZone).date,
+                        )}{" "}
+                        {localClock(segment.window.start, timeZone)} –{" "}
+                        {localClock(segment.window.end, timeZone)}
                       </strong>
                       <span>
                         {segment.window.peakPercent === null

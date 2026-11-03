@@ -1,7 +1,7 @@
+import { localParts } from "@/shared/local-time";
 import { TIME_ZONE } from "@/shared/types";
 
 const MINUTES_PER_DAY = 24 * 60;
-const DAY_MS = 86_400_000;
 const formatter = new Intl.DateTimeFormat("en-CA", {
   timeZone: TIME_ZONE,
   year: "numeric",
@@ -11,14 +11,8 @@ const formatter = new Intl.DateTimeFormat("en-CA", {
   minute: "2-digit",
   hourCycle: "h23",
 });
-export const localClock = (time: string | number) =>
-  new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(time));
 
-function localParts(time: string | number) {
+function fixedZoneParts(time: string | number) {
   const parts = Object.fromEntries(
     formatter.formatToParts(new Date(time)).map((p) => [p.type, p.value]),
   );
@@ -28,9 +22,9 @@ function localParts(time: string | number) {
     minute: Number(parts.minute),
   };
 }
-/** Eastern calendar date plus the fraction of that day already elapsed. */
-export function easternDay(time: string | number) {
-  const { date, hour, minute } = localParts(time);
+/** Local calendar date plus the fraction of that day already elapsed. */
+export function localDay(time: string | number, timeZone: string) {
+  const { date, hour, minute } = localParts(time, timeZone);
   return { date, fraction: (hour * 60 + minute) / MINUTES_PER_DAY };
 }
 const WEEKDAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -38,12 +32,8 @@ const weekdayIndex = (date: string) =>
   new Date(`${date}T12:00:00Z`).getUTCDay();
 /** Eastern weekday (0 = Sunday) and hour of the clock time, matching the heatmap grid. */
 export function easternCell(time: string | number) {
-  const { date, hour } = localParts(time);
+  const { date, hour } = fixedZoneParts(time);
   return { day: weekdayIndex(date), hour };
 }
-export const shiftDate = (date: string, days: number) =>
-  new Date(Date.parse(`${date}T12:00:00Z`) + days * DAY_MS)
-    .toISOString()
-    .slice(0, 10);
 export const weekdayOf = (date: string) => WEEKDAY_NAMES[weekdayIndex(date)];
 export const WEEKDAYS = WEEKDAY_NAMES;

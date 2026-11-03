@@ -1,10 +1,10 @@
 import { hourLabel, type SessionWindow } from "@/shared/types";
-import { easternDay } from "./time";
+import { localDay } from "./time";
 
 const HOURS = 24;
 const MINUTES_PER_DAY = HOURS * 60;
 
-/** Clock label for a fraction of a Eastern day, to the minute: 0.5 → 12:00 PM. */
+/** Clock label for a fraction of a local day, to the minute: 0.5 → 12:00 PM. */
 export function clockOfFraction(fraction: number) {
   const minutes = Math.round(
     Math.min(1, Math.max(0, fraction)) * MINUTES_PER_DAY,
@@ -20,10 +20,13 @@ interface Segment {
   to: number;
   window: SessionWindow;
 }
-export function daySegments(windows: SessionWindow[]): Segment[] {
+export function daySegments(
+  windows: SessionWindow[],
+  timeZone: string,
+): Segment[] {
   return windows.flatMap((window) => {
-    const start = easternDay(window.start);
-    const end = easternDay(window.end);
+    const start = localDay(window.start, timeZone);
+    const end = localDay(window.end, timeZone);
     if (start.date === end.date)
       return [
         { date: start.date, from: start.fraction, to: end.fraction, window },

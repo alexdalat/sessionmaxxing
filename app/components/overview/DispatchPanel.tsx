@@ -1,12 +1,13 @@
 "use client";
 import { useState } from "react";
 import { DispatchSettingsDialog } from "@/app/components/DispatchSettingsDialog";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { QueueBadges } from "@/app/components/QueueBadges";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
 import { quietSummary, usageHue } from "@/app/lib/dispatchSummary";
 import { queuePreview } from "@/app/lib/queuePreview";
-import { localClock } from "@/app/lib/time";
+import { localClock } from "@/shared/local-time";
 import type {
   BucketGate,
   PlanningSnapshot,
@@ -51,6 +52,7 @@ export function DispatchPanel({
   now: number;
   onSaved: () => void;
 }) {
+  const { timeZone } = useEnvironment();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pending = tasks?.filter((task) => task.status === "pending") ?? [];
   const counts = [
@@ -108,7 +110,8 @@ export function DispatchPanel({
       </p>
       {planning.settings.keepSessionActive && keeper?.lastStartedAt && (
         <p className="dispatch-quiet">
-          Session keeper · last start {localClock(keeper.lastStartedAt)}
+          Session keeper · last start{" "}
+          {localClock(keeper.lastStartedAt, timeZone)}
         </p>
       )}
       {keeper?.error && (

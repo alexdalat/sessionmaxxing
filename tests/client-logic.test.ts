@@ -12,8 +12,8 @@ import { scoreSeries } from "../app/lib/planScore";
 import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
 import { queuePreview, waitNote } from "../app/lib/queuePreview";
 import { allowedStartHours } from "../app/lib/quietHours";
-import { clockOfFraction } from "../app/lib/sessionWindows";
-import { easternCell } from "../app/lib/time";
+import { clockOfFraction, daySegments } from "../app/lib/sessionWindows";
+import { easternCell, localDay } from "../app/lib/time";
 import type {
   ActivitySource,
   ChangedFile,
@@ -24,6 +24,7 @@ import type {
   PlanScore as PlanScoreData,
   PublicTask,
   Run,
+  SessionWindow,
   SourceActivity,
   TaskGate,
   UsageSample,
@@ -822,6 +823,60 @@ describe("heatmapTotals", () => {
     expect(totals.days).toHaveLength(7);
     expect(totals.hours).toHaveLength(24);
     expect(totals.total).toBe(0);
+  });
+});
+
+describe("localDay", () => {
+  it("returns the local date and the elapsed fraction of the day", () => {
+    expect(localDay("2026-09-06T12:00:00Z", TEST_TIME_ZONE)).toEqual({
+      date: "2026-09-06",
+      fraction: 480 / 1440,
+    });
+  });
+
+  it("reads the half-hour offset of Asia/Kolkata", () => {
+    expect(localDay("2026-09-06T12:00:00Z", "Asia/Kolkata")).toEqual({
+      date: "2026-09-06",
+      fraction: 1050 / 1440,
+    });
+  });
+
+  it("starts a new local day at 18:30Z in Asia/Kolkata", () => {
+    expect(localDay("2026-09-06T18:30:00Z", "Asia/Kolkata")).toEqual({
+      date: "2026-09-07",
+      fraction: 0,
+    });
+  });
+});
+
+describe("daySegments", () => {
+  const sessionWindow = (start: string, end: string): SessionWindow => ({
+    start,
+    end,
+    peakPercent: 40,
+    samples: 3,
+    activeMinutes: 60,
+  });
+
+  it("splits a window that crosses local midnight into two dated segments", () => {
+    const crossing = sessionWindow(
+      "2026-09-06T18:00:00.000Z",
+      "2026-09-06T23:00:00.000Z",
+    );
+    expect(daySegments([crossing], "Asia/Kolkata")).toEqual([
+      { date: "2026-09-06", from: 1410 / 1440, to: 1, window: crossing },
+      { date: "2026-09-07", from: 0, to: 270 / 1440, window: crossing },
+    ]);
+  });
+
+  it("keeps a window inside one local day as one segment", () => {
+    const inside = sessionWindow(
+      "2026-09-06T14:00:00.000Z",
+      "2026-09-06T19:00:00.000Z",
+    );
+    expect(daySegments([inside], TEST_TIME_ZONE)).toEqual([
+      { date: "2026-09-06", from: 600 / 1440, to: 900 / 1440, window: inside },
+    ]);
   });
 });
 
