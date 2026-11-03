@@ -33,7 +33,7 @@ it("orders recent directories by last Claude Code start, oldest for projects wit
     }),
   );
   try {
-    const { recent } = await suggestWorkdirs("", [], temp.path);
+    const { recent } = await suggestWorkdirs("", [], temp.path, temp.path);
     expect(recent).toEqual([at("alpha"), at("gamma"), at("beta")]);
   } finally {
     await temp.cleanup();
@@ -55,9 +55,9 @@ it("drops projects that no longer exist or sit outside the home root", async () 
     }),
   );
   try {
-    expect((await suggestWorkdirs("", [], temp.path)).recent).toEqual([
-      at("kept"),
-    ]);
+    expect(
+      (await suggestWorkdirs("", [], temp.path, temp.path)).recent,
+    ).toEqual([at("kept")]);
   } finally {
     await temp.cleanup();
   }
@@ -70,6 +70,7 @@ it("appends queued work directories once, newest first, when no state file exist
     const { recent } = await suggestWorkdirs(
       "",
       [at("two"), at("one"), at("two"), at("gone")],
+      temp.path,
       temp.path,
     );
     expect(recent).toEqual([at("two"), at("one")]);
@@ -91,7 +92,7 @@ it("keeps at most twelve recent directories", async () => {
     }),
   );
   try {
-    const { recent } = await suggestWorkdirs("", [], temp.path);
+    const { recent } = await suggestWorkdirs("", [], temp.path, temp.path);
     expect(recent).toHaveLength(12);
     expect(recent[0]).toBe(at("repo-0"));
     expect(recent).not.toContain(at("repo-12"));
@@ -104,7 +105,9 @@ it("fails instead of returning nothing when the Claude Code state file is malfor
   const temp = await fakeHome([]);
   await writeFile(join(temp.path, ".claude.json"), "{not json");
   try {
-    await expect(suggestWorkdirs("", [], temp.path)).rejects.toThrow();
+    await expect(
+      suggestWorkdirs("", [], temp.path, temp.path),
+    ).rejects.toThrow();
   } finally {
     await temp.cleanup();
   }
@@ -114,7 +117,12 @@ it("matches directories whose name starts with the typed prefix", async () => {
   const temp = await fakeHome(["work/alpha", "work/alphabet", "work/beta"], {});
   const at = (name: string) => join(temp.path, name);
   try {
-    const { matches } = await suggestWorkdirs(at("work/alph"), [], temp.path);
+    const { matches } = await suggestWorkdirs(
+      at("work/alph"),
+      [],
+      temp.path,
+      temp.path,
+    );
     expect(matches).toEqual([at("work/alpha"), at("work/alphabet")]);
   } finally {
     await temp.cleanup();
@@ -131,7 +139,12 @@ it("lists every visible directory when the typed path ends with a slash", async 
   await symlink(at("work/alpha"), at("work/link"));
   await symlink(at("work/missing"), at("work/dangling"));
   try {
-    const { matches } = await suggestWorkdirs(`${at("work")}/`, [], temp.path);
+    const { matches } = await suggestWorkdirs(
+      `${at("work")}/`,
+      [],
+      temp.path,
+      temp.path,
+    );
     expect(matches).toEqual([
       at("work/alpha"),
       at("work/beta"),
@@ -145,17 +158,83 @@ it("lists every visible directory when the typed path ends with a slash", async 
 it("returns no matches for a relative query or a directory outside the home root", async () => {
   const temp = await fakeHome(["work"], {});
   try {
-    expect((await suggestWorkdirs("work/al", [], temp.path)).matches).toEqual(
-      [],
-    );
-    expect((await suggestWorkdirs("/etc/pa", [], temp.path)).matches).toEqual(
-      [],
-    );
     expect(
-      (await suggestWorkdirs(join(temp.path, "absent/x"), [], temp.path))
-        .matches,
+      (await suggestWorkdirs("work/al", [], temp.path, temp.path)).matches,
+    ).toEqual([]);
+    expect(
+      (await suggestWorkdirs("/etc/pa", [], temp.path, temp.path)).matches,
+    ).toEqual([]);
+    expect(
+      (
+        await suggestWorkdirs(
+          join(temp.path, "absent/x"),
+          [],
+          temp.path,
+          temp.path,
+        )
+      ).matches,
     ).toEqual([]);
   } finally {
     await temp.cleanup();
+  }
+});
+
+it("reads Claude state only from the Claude home, whatever the root", async () => {
+  const root = await fakeHome(["inside"]);
+  const claudeHome = await temporary();
+  const at = (name: string) => join(root.path, name);
+  await writeFile(
+    join(root.path, ".claude.json"),
+    JSON.stringify({ projects: { [at("inside")]: { lastStartTime: 1 } } }),
+  );
+  try {
+    expect(
+      (await suggestWorkdirs("", [], root.path, claudeHome.path)).recent,
+    ).toEqual([]);
+    await writeFile(
+      join(claudeHome.path, ".claude.json"),
+      JSON.stringify({
+        projects: {
+          [at("inside")]: { lastStartTime: 2 },
+          [claudeHome.path]: { lastStartTime: 3 },
+        },
+      }),
+    );
+    expect(
+      (await suggestWorkdirs("", [], root.path, claudeHome.path)).recent,
+    ).toEqual([at("inside")]);
+  } finally {
+    await root.cleanup();
+    await claudeHome.cleanup();
+  }
+});
+
+it("lists matches only inside the root", async () => {
+  const root = await fakeHome(["work/alpha"]);
+  const outside = await fakeHome(["work/alpha"]);
+  try {
+    expect(
+      (
+        await suggestWorkdirs(
+          join(root.path, "work/al"),
+          [],
+          root.path,
+          outside.path,
+        )
+      ).matches,
+    ).toEqual([join(root.path, "work/alpha")]);
+    expect(
+      (
+        await suggestWorkdirs(
+          join(outside.path, "work/al"),
+          [],
+          root.path,
+          outside.path,
+        )
+      ).matches,
+    ).toEqual([]);
+  } finally {
+    await root.cleanup();
+    await outside.cleanup();
   }
 });

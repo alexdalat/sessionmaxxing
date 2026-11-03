@@ -23,10 +23,10 @@ async function isDirectory(path: string) {
 }
 
 /** Project paths Claude Code has opened, newest first; a project without a start time sorts last. */
-async function claudeProjects(home: string): Promise<string[]> {
+async function claudeProjects(claudeHome: string): Promise<string[]> {
   let raw: string;
   try {
-    raw = await readFile(join(home, CLAUDE_STATE_FILE), "utf8");
+    raw = await readFile(join(claudeHome, CLAUDE_STATE_FILE), "utf8");
   } catch (error) {
     if (errorCode(error) === "ENOENT") return [];
     throw error;
@@ -52,23 +52,30 @@ async function claudeProjects(home: string): Promise<string[]> {
     .map((project) => project.path);
 }
 
-async function recentWorkdirs(queueWorkdirs: string[], home: string) {
+async function recentWorkdirs(
+  queueWorkdirs: string[],
+  root: string,
+  claudeHome: string,
+) {
   const recent: string[] = [];
-  for (const path of [...(await claudeProjects(home)), ...queueWorkdirs]) {
+  for (const path of [
+    ...(await claudeProjects(claudeHome)),
+    ...queueWorkdirs,
+  ]) {
     if (recent.length === MAX_RECENT) break;
     if (recent.includes(path)) continue;
-    if (!underRoot(path, home) || !(await isDirectory(path))) continue;
+    if (!underRoot(path, root) || !(await isDirectory(path))) continue;
     recent.push(path);
   }
   return recent;
 }
 
-async function matchingWorkdirs(query: string, home: string) {
+async function matchingWorkdirs(query: string, root: string) {
   if (!query.startsWith("/")) return [];
   const listing = query.endsWith("/");
   const directory = listing ? query : dirname(query);
   const prefix = listing ? "" : basename(query);
-  if (!underRoot(directory, home)) return [];
+  if (!underRoot(directory, root)) return [];
   let entries: Dirent[];
   try {
     entries = await readdir(directory, { withFileTypes: true });
@@ -96,10 +103,11 @@ async function matchingWorkdirs(query: string, home: string) {
 export async function suggestWorkdirs(
   query: string,
   queueWorkdirs: string[],
-  home: string,
+  root: string,
+  claudeHome: string,
 ): Promise<WorkdirSuggestions> {
   return {
-    recent: await recentWorkdirs(queueWorkdirs, home),
-    matches: query ? await matchingWorkdirs(query, home) : [],
+    recent: await recentWorkdirs(queueWorkdirs, root, claudeHome),
+    matches: query ? await matchingWorkdirs(query, root) : [],
   };
 }

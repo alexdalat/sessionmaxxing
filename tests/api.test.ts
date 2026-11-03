@@ -1278,9 +1278,9 @@ it("suggests recent and prefix-matched work directories", async () => {
     expect(suggestions.statusCode).toBe(200);
     const { recent, matches } = suggestions.json();
     expect(recent.length).toBeGreaterThan(0);
-    expect(recent.every((path: string) => path.startsWith("/home/user"))).toBe(
-      true,
-    );
+    expect(
+      recent.every((path: string) => path.startsWith(TEST_WORKDIR_ROOT)),
+    ).toBe(true);
     expect(matches).toEqual([]);
     const typed = await app.inject(
       `/api/workdirs?q=${encodeURIComponent(`${temp.path}/`)}`,

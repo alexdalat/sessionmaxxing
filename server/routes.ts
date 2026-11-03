@@ -1,3 +1,4 @@
+import { homedir } from "node:os";
 import type { FastifyInstance } from "fastify";
 import {
   AUTO_TOKENS,
@@ -208,6 +209,7 @@ export function registerQueueRoutes(
           .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
           .map((task) => task.workdir),
         queue.workdirRoot,
+        homedir(),
       ),
   );
   app.get<{ Querystring: { limit?: string } }>(
