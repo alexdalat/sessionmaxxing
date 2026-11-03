@@ -24,7 +24,7 @@ function fakeStorage(entries: [string, string][] = []) {
 
 const event: ActivityEvent = {
   timestamp: "2026-09-05T14:31:02.104Z",
-  project: "-home-user-workspace-claude-capacity-dashboard",
+  project: "-home-user-workspace-project",
   model: "claude-opus-4-5-20251101",
   source: "local",
   inputTokens: 12,

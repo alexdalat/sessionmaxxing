@@ -156,7 +156,7 @@ it("resumes the stopped Claude session with the resume prompt instead of the tas
 it("recognizes the session and weekly limit messages Claude Code ends a run with", () => {
   expect(
     isLimitStop(
-      "You've hit your session limit · resets 5:50am (America/New_York)",
+      "You've hit your session limit · resets 5:50am (America/Chicago)",
     ),
   ).toBe(true);
   expect(isLimitStop("You’ve hit your weekly limit · resets Oct 11, 4am")).toBe(

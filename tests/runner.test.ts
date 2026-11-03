@@ -644,7 +644,7 @@ it("appends the apply instruction to a dispatched prompt only while the override
   }
 });
 const SESSION_LIMIT_RESULT =
-  '{"type":"result","is_error":true,"num_turns":41,"result":"You\'ve hit your session limit · resets 5:50am (America/New_York)"}\n';
+  '{"type":"result","is_error":true,"num_turns":41,"result":"You\'ve hit your session limit · resets 5:50am (America/Chicago)"}\n';
 
 it("puts a task stopped by the session limit back in line and resumes its Claude session on the next run", async () => {
   const temp = await temporary();
