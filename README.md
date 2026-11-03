@@ -2,7 +2,7 @@
 
 A local dashboard for one job: squeeze the most out of a Claude Max plan. It shows Anthropic's official usage for the three buckets Max enforces (Session 5h, Weekly, Fable weekly), records how much of each five-hour window you actually used, and auto-dispatches queued Claude Code tasks into idle windows while keeping weekly usage on pace.
 
-## Run
+## Install natively
 
 Requires Node.js 22.12+, pnpm, and a signed-in `claude` CLI (the dashboard reuses its OAuth token).
 
@@ -12,7 +12,28 @@ pnpm build
 pnpm start
 ```
 
-Open http://127.0.0.1:4317. `SESSIONMAXXING_PORT` changes the port; `SESSIONMAXXING_HOST` is `127.0.0.1` or `0.0.0.0` (container only). For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs); Fastify serves the build from `dist/client`.
+Run these from the repository root; the server serves the build from `dist/client` relative to its working directory. It listens on http://127.0.0.1:4317. For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs).
+
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SESSIONMAXXING_HOST` | `127.0.0.1` | Bind address, an IPv4 or IPv6 literal. A wider bind such as `0.0.0.0` also needs `SESSIONMAXXING_ALLOWED_HOSTS`. |
+| `SESSIONMAXXING_PORT` | `4317` | Listen port. |
+| `SESSIONMAXXING_ALLOWED_HOSTS` | empty | Comma-separated host names or addresses clients type, added to `localhost`, `127.0.0.1` and the bind address. No ports, paths or wildcards. |
+| `SESSIONMAXXING_DATA_DIR` | see Data directory | Absolute path of the data directory. |
+| `XDG_DATA_HOME` | `~/.local/share` | Absolute base for the default data directory. |
+| `SESSIONMAXXING_WORKDIR_ROOT` | the user's home | Absolute existing directory that task work directories must be under. |
+| `SESSIONMAXXING_EDITION` | `full` | Edition; `full` is the only value. |
+| `TZ` | the host's zone | IANA zone name. Day boundaries, quiet hours, the plan score and every chart follow it. |
+| `SESSIONMAXXING_URL` | `http://127.0.0.1:4317` | Server the `scripts/queue-task.mjs` helper contacts. |
+| `SESSIONMAXXING_PATH_MAP` | empty | `from=to[,from=to]` absolute path prefixes the helper rewrites `--workdir` through. |
+
+Work directories are accepted only under the running user's home; `SESSIONMAXXING_WORKDIR_ROOT` moves that boundary. The server stops at startup with a message when `TZ` is not an IANA zone the process applied. `GET /api/environment` returns the zone and the work-directory root, and the browser formats every time in that zone.
+
+## Data directory
+
+Runtime state lives in one directory, created with mode 0700: `SESSIONMAXXING_DATA_DIR` when set, else `$XDG_DATA_HOME/sessionmaxxing` when `XDG_DATA_HOME` is absolute, else `~/.local/share/sessionmaxxing`. Inside: `queue.json`, `dispatch-settings.json`, `session-keeper.json`, `usage-snapshot.json`, `usage-samples.jsonl`, `runs/`, `deploy/` and `server.lock`. The lock refuses a second server on the same directory.
+
+A native start finds a `data/` directory in its working directory and moves it to the data directory once, as one rename. Startup stops with a message naming both paths when the data directory already exists, a lock file is left inside `data`, `data` is a symlink or a file, the two paths are nested, or they sit on different filesystems; the last message carries the exact `mv` command. Nothing is merged, copied or deleted.
 
 ## Official usage
 
@@ -20,16 +41,16 @@ The server calls `GET https://api.anthropic.com/api/oauth/usage` with the token 
 
 The server fetches every five minutes and on **Refresh** (at most once per 30 s). A failed fetch keeps the last snapshot, shows the error in the panel, and blocks auto-dispatch until a fresh fetch succeeds. An expired token is reported with "run `claude`"; the dashboard never refreshes or stores the token, and no route returns it.
 
-Every snapshot is appended to `data/usage-samples.jsonl` (14 days kept). From those samples:
+Every snapshot is appended to `usage-samples.jsonl` in the data directory (90 days kept). From those samples:
 
-- **Session windows · last 7 days** draws each five-hour window Anthropic reported, shaded by its peak utilization, on a Eastern-time day grid, with the share of the week that had no window at all.
+- **Session windows · last 7 days** draws each five-hour window Anthropic reported, shaded by its peak utilization, on a day grid in the host's time zone, with the share of the week that had no window at all.
 - **Weekly usage vs pace** plots weekly and Fable utilization through the current seven-day window against the straight line to the reset and the auto-dispatch limit (pace plus the weekly margin, capped at 95%).
 
 ## Auto-dispatch
 
-Queue tasks under **Task queue**. With the queue on, the server runs up to *Tasks running at once* **Ready** tasks together (default 2, at most 4; 1 keeps the old one-at-a-time behaviour). The on/off state is stored in `data/queue.json` and survives restarts; every task still running at a restart is marked failed. A Claude task is Ready when a run slot is free, the official snapshot is fresh (under 15 min) and newer than the last finished run, session usage plus the points held for running Claude tasks is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage plus its held points is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. A Claude run that Claude Code stops at the session or weekly limit puts its task back in line; once the window resets and the gate passes, the next run resumes the same Claude session instead of starting over. **Run now** overrides the usage gate and the schedule, never the slot limit or a busy repository. Settings live in `data/dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ autoApply, keepSessionActive, sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours, maxConcurrentRuns, runWeeklyCostPercent }`.
+Queue tasks under **Task queue**. With the queue on, the server runs up to *Tasks running at once* **Ready** tasks together (default 2, at most 4; 1 keeps the old one-at-a-time behaviour). The on/off state is stored in `queue.json` and survives restarts; every task still running at a restart is marked failed. A Claude task is Ready when a run slot is free, the official snapshot is fresh (under 15 min) and newer than the last finished run, session usage plus the points held for running Claude tasks is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage plus its held points is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. A Claude run that Claude Code stops at the session or weekly limit puts its task back in line; once the window resets and the gate passes, the next run resumes the same Claude session instead of starting over. **Run now** overrides the usage gate and the schedule, never the slot limit or a busy repository. Settings live in `dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ autoApply, keepSessionActive, sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours, maxConcurrentRuns, runWeeklyCostPercent }`.
 
-With **Start each 5-hour session automatically** on, the server opens a new session window as soon as the previous one ends by running a one-turn `claude -p hi` from the home directory and letting it exit. This is separate from the queue: it needs no task and ignores the queue switch and the reserves. It waits for a fresh usage snapshot after each ping and at least ten minutes between pings, skips while a Claude task is running, and stops when the weekly window is at 100%. Ping session ids live in `data/session-keeper.json`.
+With **Start each 5-hour session automatically** on, the server opens a new session window as soon as the previous one ends by running a one-turn `claude -p hi` from the home directory and letting it exit. This is separate from the queue: it needs no task and ignores the queue switch and the reserves. It waits for a fresh usage snapshot after each ping and at least ten minutes between pings, skips while a Claude task is running, and stops when the weekly window is at 100%. Ping session ids live in `session-keeper.json`.
 
 ### Parallel runs
 
@@ -43,7 +64,7 @@ Dispatched Claude tasks run with `--dangerously-skip-permissions`, so a queued r
 
 Each Claude task carries **Tokens**, the weighted count the whole run is expected to consume: output tokens count once, and input, cache writes and cache reads count at their list-price ratio to output, since cached context re-reads are most of what a session spends. The dashboard prices them at the session rates it fits from its own history, so the same task costs more on Fable than on Opus and the number survives a plan change. A task only becomes Ready when session usage, the percent held for running Claude tasks, and its own expected cost (its tokens at the current rates, or the largest percent one of its runs has cost) stay at or below the cutoff.
 
-**Quiet hours** keep your own five-hour windows opening when you actually work. The server ranks all 24 Eastern start hours by your average active minutes in the following five hours over the last 30 days (recomputed every 10 minutes) and, with *Quiet hours only* on (default), a task with no chosen window starts only when the current hour is one of the `quietStartHours` quietest starts (default 8). The dispatch panel lists those hours as ranges and the next one coming up. A task with an explicit preferred window ignores the quiet-hours rule and runs inside that window instead.
+**Quiet hours** keep your own five-hour windows opening when you actually work. The server ranks all 24 local start hours by your average active minutes in the following five hours over the last 30 days (recomputed every 10 minutes) and, with *Quiet hours only* on (default), a task with no chosen window starts only when the current hour is one of the `quietStartHours` quietest starts (default 8). The dispatch panel lists those hours as ranges and the next one coming up. A task with an explicit preferred window ignores the quiet-hours rule and runs inside that window instead.
 
 ## Queueing work
 
@@ -54,43 +75,81 @@ node scripts/queue-task.mjs --title "Rename the parser" --prompt-file ./prompt.m
   --workdir /home/user/workspace/some-repo --model claude-fable-5-1
 ```
 
-It prints session and weekly usage, the quiet start hours, and the Claude gate reason before posting, then the new task id and the window it will wait for. `--window HH` pins a start hour, `--tokens N` sets the expected weighted tokens (`auto` by default, estimated by the server), `--dry-run` prints the body instead of posting, and `SESSIONMAXXING_URL` (or `--url`) picks the server; the loopback default falls back to the tailnet address once. Claude Code queues through it with the `queue-task` skill in `~/.claude/skills/queue-task`; `skills/queue-task/SKILL.md` is the same skill for uploading to claude.ai, where it writes the command out for you to paste instead.
+It prints session and weekly usage, the quiet start hours, and the Claude gate reason before posting, then the new task id and the window it will wait for. `--window HH` pins a start hour, `--tokens N` sets the expected weighted tokens (`auto` by default, estimated by the server), `--dry-run` prints the body instead of posting, and `SESSIONMAXXING_URL` (or `--url`) picks the server and the helper tries only that one. `SESSIONMAXXING_PATH_MAP` rewrites a `--workdir` prefix for a server that sees the same folders under other paths, for example `SESSIONMAXXING_PATH_MAP=/Users/me/Projects=/home/user/projects`. Claude Code queues through it with the `queue-task` skill in `~/.claude/skills/queue-task`; `skills/queue-task/SKILL.md` is the same skill for uploading to claude.ai, where it writes the command out for you to paste instead.
 
 ## API
 
 - `GET /api/analytics?days=7|14|30|90` local activity aggregates plus per-bucket local windows.
 - `GET /api/usage` `{ snapshot, error, samples, windows }`; `POST /api/usage/refresh` fetches now.
 - `GET|PUT /api/dispatch-settings` settings plus the planning snapshot (per-bucket gates and the Claude gate status and reason).
+- `GET /api/environment` `{ timeZone, workdirRoot }`.
 - `GET /api/queue`, `POST /api/tasks`, `PATCH|DELETE /api/tasks/:id`, `POST /api/tasks/:id/run|cancel|retry`, `PUT /api/queue/order`, `PUT /api/queue/auto`, `GET /api/runs`.
 
-Hosts are limited to `localhost`, `127.0.0.1`, `192.0.2.10`, and `dashboard.example.ts.net`; an Origin header must match `http://<Host>`. There is no dashboard authentication.
+Hosts are limited to `localhost`, `127.0.0.1`, the bind address, and the entries of `SESSIONMAXXING_ALLOWED_HOSTS`; an Origin header must match `http://<Host>`. There is no dashboard authentication.
 
-## Docker over Tailscale
-
-Compose mounts `/home/user` at the same path (Claude history, `.claude/.credentials.json`, work directories) and `./data` at `/app/data`. Compose runs the project and the container as `sessionmaxxing`. Run as UID/GID `1000:1000` from this repository:
+## Install with Docker Compose
 
 ```sh
-mkdir -p data && chmod 700 data
-docker compose build
-docker compose up --no-build
+cp .env.example .env
+# fill in .env
+docker compose up -d --build
 ```
 
-Open http://192.0.2.10:4317 from the tailnet or http://127.0.0.1:4317 on the host. Stop with Ctrl+C; `docker compose down` removes the container. Do not run a native and a container instance against the same `data` directory; the runtime lock refuses a second server.
+`.env` holds eight fields; Compose refuses to start while a required one is empty.
+
+| Field | Value |
+| --- | --- |
+| `SESSIONMAXXING_UID` | `id -u` |
+| `SESSIONMAXXING_GID` | `id -g` |
+| `SESSIONMAXXING_HOME` | Your home directory; mounted at the same path in the container |
+| `SESSIONMAXXING_BIND_ADDRESS` | Address Docker publishes on; `127.0.0.1` keeps the dashboard on this machine |
+| `SESSIONMAXXING_PORT` | Published port, `4317` |
+| `SESSIONMAXXING_EDITION` | `full` |
+| `TZ` | IANA zone name such as `Europe/Berlin`; the container's zone |
+| `SESSIONMAXXING_ALLOWED_HOSTS` | Extra host names or addresses clients type; may stay empty |
+
+The home directory is mounted at the same path, so Claude history, `.claude/.credentials.json`, work directories and the data directory (`$SESSIONMAXXING_HOME/.local/share/sessionmaxxing`) are all the host's own; there is no data volume. A native install and a container on the same account share that directory, and the lock refuses the second server.
+
+A second published address goes into an untracked `compose.override.yaml`, which Compose merges with `compose.yaml`:
+
+```yaml
+services:
+  sessionmaxxing:
+    ports:
+      - target: 4317
+        published: "4317"
+        host_ip: 192.0.2.10
+        protocol: tcp
+```
+
+Add that address, or the name clients type for it, to `SESSIONMAXXING_ALLOWED_HOSTS`; only the `SESSIONMAXXING_BIND_ADDRESS` address is approved on its own.
+
+### Upgrading an existing Docker install
+
+An install from before the data directory kept its state in `./data`, mounted at `/app/data`. Stop the old container first, move the directory to the data directory (it must not exist yet), then start the new one:
+
+```sh
+docker compose down
+mkdir -p ~/.local/share && mv data ~/.local/share/sessionmaxxing
+docker compose up -d --build
+```
+
+Starting first would create an empty data directory, which the move then refuses to overwrite. These paths assume `SESSIONMAXXING_HOME` is your home directory.
 
 ## Host deploy watcher
 
-Runs happen inside the container, which has no docker CLI, so a run that changes a Compose project cannot redeploy it. When **Apply and deploy without review** is on and a run completes with changes in a directory holding a Compose file, the server writes a request into `data/deploy/requests/`; a systemd user path unit runs `deploy/host-deploy.sh`, which builds the project, waits until no dashboard run is in flight before recreating the dashboard's own container, brings it up, and writes the result back. The run card shows **Deploy queued**, **Deploying**, **Deployed** or **Deploy failed**, and no new run starts until the deploy is finished. Install it once (requires `jq` and `curl`):
+Runs happen inside the container, which has no docker CLI, so a run that changes a Compose project cannot redeploy it. When **Apply and deploy without review** is on and a run completes with changes in a directory holding a Compose file, the server writes a request into `deploy/requests/` in the data directory; a systemd user path unit runs `deploy/host-deploy.sh`, which builds the project, waits until no dashboard run is in flight before recreating the dashboard's own container, brings it up, and writes the result back. The run card shows **Deploy queued**, **Deploying**, **Deployed** or **Deploy failed**, and no new run starts until the deploy is finished. The path unit watches the default data location (`~/.local/share/sessionmaxxing`) only, and the units assume the repository at `~/workspace/claude-capacity-dashboard` until a later phase removes them. Install it once (requires `jq` and `curl`; replace the path with your checkout):
 
 ```sh
 systemctl --user link ~/workspace/claude-capacity-dashboard/deploy/claude-dashboard-deploy.service
 systemctl --user enable --now ~/workspace/claude-capacity-dashboard/deploy/claude-dashboard-deploy.path
 ```
 
-`journalctl --user -u claude-dashboard-deploy.service` has the watcher's own log; each deploy's output is `data/deploy/results/<run id>.log`.
+`journalctl --user -u claude-dashboard-deploy.service` has the watcher's own log; each deploy's output is `deploy/results/<run id>.log` in the data directory.
 
 ## Privacy
 
-Transcript content is discarded at the parser boundary. Prompts and work directories stay on disk in `data/queue.json` and are never returned by the API. Run previews keep only allowlisted event labels and counters. Runtime state: `data/queue.json`, `data/dispatch-settings.json`, `data/session-keeper.json`, `data/usage-samples.jsonl`, `data/runs/`, `data/deploy/`, `data/server.lock`.
+Transcript content is discarded at the parser boundary. Prompts and work directories stay on disk in `queue.json` and are never returned by the API. Run previews keep only allowlisted event labels and counters. Runtime state sits in the data directory described above.
 
 ## Layout
 
@@ -100,8 +159,8 @@ Transcript content is discarded at the parser boundary. Prompts and work directo
 | `app/components/` | Feature components by route (`overview/`, `analytics/`, `queue/`, `runs/`); shared ones at the root; `ui/` is shadcn |
 | `app/hooks/` | React hooks (`usePolling`, `useAnalytics`) |
 | `app/lib/` | Pure client logic: API client, time helpers, chart series, queue ordering, analytics cache |
-| `server/` | Fastify server, usage monitor, dispatcher, Claude launcher, transcript parser |
-| `shared/` | Types and constants shared by server and client |
+| `server/` | Fastify server, usage monitor, dispatcher, Claude launcher, transcript parser, data directory and environment settings |
+| `shared/` | Types, constants and zone-explicit time helpers shared by server and client |
 | `scripts/` | `queue-task.mjs` CLI |
 | `tests/` | Vitest suites, `helpers.ts`, `fixtures/` |
 
