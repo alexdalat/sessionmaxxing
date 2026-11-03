@@ -1,5 +1,6 @@
 "use client";
 import { useId, useState } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Button } from "@/app/components/ui/button";
 import { Checkbox } from "@/app/components/ui/checkbox";
 import {
@@ -18,7 +19,10 @@ import {
   SelectValue,
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
+import { useClock } from "@/app/hooks/useClock";
 import { modelOptions } from "@/app/lib/models";
+import { earliestStartFromInput, earliestStartInput } from "@/app/lib/schedule";
+import { zoneName } from "@/shared/local-time";
 import type { PublicTask, TaskInput } from "@/shared/types";
 import {
   AUTO_TOKENS,
@@ -69,14 +73,9 @@ export function TaskFormDialog({
     task && !TOKEN_PRESETS.includes(task.tokens)
       ? [...TOKEN_PRESETS, task.tokens].sort((a, b) => a - b)
       : TOKEN_PRESETS;
-  const browserDate = task?.earliestStart
-    ? new Date(
-        Date.parse(task.earliestStart) -
-          new Date(task.earliestStart).getTimezoneOffset() * 60_000,
-      )
-        .toISOString()
-        .slice(0, 16)
-    : "";
+  const { timeZone } = useEnvironment();
+  const now = useClock();
+  const zoneLabel = zoneName(timeZone, now);
   return (
     <Dialog
       open={open}
@@ -97,8 +96,6 @@ export function TaskFormDialog({
             event.preventDefault();
             const form = event.currentTarget;
             const fields = new FormData(form);
-            const earliest = String(fields.get("earliestStart"));
-            const parsedEarliest = earliest ? Date.parse(earliest) : Number.NaN;
             const input: TaskInput = {
               title: String(fields.get("title")),
               prompt: String(fields.get("prompt")),
@@ -107,9 +104,10 @@ export function TaskFormDialog({
               priority: Number(fields.get("priority")),
               maxTurns: Number(fields.get("maxTurns")),
               tokens: tokens === AUTO_TOKENS ? AUTO_TOKENS : Number(tokens),
-              earliestStart: Number.isFinite(parsedEarliest)
-                ? new Date(parsedEarliest).toISOString()
-                : null,
+              earliestStart: earliestStartFromInput(
+                String(fields.get("earliestStart")),
+                timeZone,
+              ),
               preferredWindowStart:
                 windowStart === ANY_WINDOW ? null : Number(windowStart),
               dependsOn,
@@ -214,18 +212,21 @@ export function TaskFormDialog({
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-earliest-start`}>
-                Earliest start (local time)
+                Earliest start ({zoneLabel})
               </Label>
               <Input
                 id={`${fieldId}-earliest-start`}
                 name="earliestStart"
                 type="datetime-local"
-                defaultValue={browserDate}
+                defaultValue={earliestStartInput(
+                  task?.earliestStart ?? null,
+                  timeZone,
+                )}
               />
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-window`}>
-                Preferred five-hour window (ET)
+                Preferred five-hour window ({zoneLabel})
               </Label>
               <Select
                 name="preferredWindowStart"
