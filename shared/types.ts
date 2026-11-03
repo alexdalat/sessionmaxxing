@@ -1,4 +1,3 @@
-export const TIME_ZONE = "America/New_York";
 export const BLOCK_MINUTES = 300;
 export const RANGE_DAYS = [7, 14, 30, 90] as const;
 export type RangeDays = (typeof RANGE_DAYS)[number];
@@ -332,7 +331,7 @@ export type PublicTask = Task & {
   sessionCostPercent: number | null;
 };
 export interface WorkdirSuggestions {
-  /** Absolute directories under the home root, most recently opened in Claude Code or queued first. */
+  /** Absolute directories under the work-directory root, most recently opened in Claude Code or queued first. */
   recent: string[];
   /** Absolute directories whose path starts with the typed prefix. */
   matches: string[];
@@ -437,15 +436,6 @@ const clockHour = (hour: number) =>
   hour % HOURS_PER_HALF_DAY || HOURS_PER_HALF_DAY;
 export const hourLabel = (hour: number) =>
   `${clockHour(hour)} ${hour < HOURS_PER_HALF_DAY ? "AM" : "PM"}`;
-export const localTimestamp = (time: string | number) =>
-  new Intl.DateTimeFormat("en-US", {
-    timeZone: TIME_ZONE,
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    timeZoneName: "short",
-  }).format(new Date(time));
 export const shortHourLabel = (hour: number) =>
   `${clockHour(hour)}${hour < HOURS_PER_HALF_DAY ? "a" : "p"}`;
 
@@ -534,7 +524,7 @@ export interface PlanningSnapshot {
 
 export const PLAN_SCORE_DAYS = 28;
 export const PLAN_SCORE_COVERAGE_DAYS = 7;
-/** Share of a Eastern day's session capacity that official samples show as used; null before sampling began. */
+/** Share of a local day's session capacity that official samples show as used; null before sampling began. */
 export interface CoverageDay {
   date: string;
   coverage: number | null;
