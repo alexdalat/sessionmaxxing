@@ -217,7 +217,7 @@ it("serves aggregated history through a validated, local-only API with safe erro
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       days: 14,
-      timeZone: "America/New_York",
+      timeZone: TEST_TIME_ZONE,
       daily: expect.any(Array),
     });
     expect(response.json().daily).toHaveLength(14);
@@ -710,7 +710,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
   }
 });
 
-it("scores the plan from recorded samples over the last twenty-eight Eastern days", async () => {
+it("scores the plan from recorded samples over the last twenty-eight local days", async () => {
   const temp = await temporary();
   const now = new Date("2026-09-06T12:00:00Z");
   const usage = new UsageMonitor(
@@ -731,7 +731,7 @@ it("scores the plan from recorded samples over the last twenty-eight Eastern day
     await app.inject({ method: "POST", url: "/api/usage/refresh" });
     const score = (await app.inject("/api/plan-score")).json();
     // The only window runs 11:09Z to 16:09Z at 16%, so 51 of today's 8
-    // elapsed Eastern hours are covered: 16 x 0.85 / 8 = 1.7.
+    // elapsed local hours are covered: 16 x 0.85 / 8 = 1.7.
     expect(score.days).toHaveLength(28);
     const noMinutes = {
       sources: { local: 0, dispatched: 0, unknown: 0 },

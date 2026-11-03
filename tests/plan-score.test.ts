@@ -1,10 +1,19 @@
 import { expect, it } from "vitest";
-import { planScore } from "../server/plan-score.js";
+import { planScore as planScoreInZone } from "../server/plan-score.js";
 import {
   type ActivityEvent,
   PLAN_SCORE_DAYS,
   type UsageSample,
 } from "../shared/types.js";
+import { TEST_TIME_ZONE } from "./helpers.js";
+
+const KOLKATA = "Asia/Kolkata";
+
+const planScore = (
+  samples: UsageSample[],
+  now: Date,
+  events: ActivityEvent[],
+) => planScoreInZone(samples, now, events, TEST_TIME_ZONE);
 
 const NOW = new Date("2026-09-06T12:00:00Z");
 const WEEKLY_RESETS_AT = "2026-09-13T07:53:00.000Z";
@@ -165,7 +174,7 @@ it("reports no score at all before any sample exists", () => {
   expect(score.generatedAt).toBe("2026-09-06T12:00:00.000Z");
 });
 
-it("plan score days carry the minutes of local events on that Eastern date", () => {
+it("plan score days carry the minutes of local events on that local date", () => {
   const { days } = planScore(
     [sample("2026-09-04T10:00:00Z", 40, "2026-09-04T14:00:00.000Z")],
     NOW,
@@ -200,4 +209,16 @@ it("plan score days carry the minutes of local events on that Eastern date", () 
 it("leaves events after now out of the day they fall on", () => {
   const { days } = planScore([], NOW, [event("2026-09-06T13:00:00Z")]);
   expect(days.at(-1)).toMatchObject(NO_MINUTES);
+});
+
+it("splits a window across local days whose midnight falls on a half hour", () => {
+  // Kolkata midnight is 18:30Z, so 16:00Z to 21:00Z puts 2.5 hours in each of 2026-09-06 and 2026-09-07.
+  const { days } = planScoreInZone(
+    [sample("2026-09-06T16:00:00Z", 100, "2026-09-06T21:00:00.000Z")],
+    new Date("2026-09-07T18:30:00Z"),
+    [],
+    KOLKATA,
+  );
+  expect(days.find((day) => day.date === "2026-09-06")?.coverage).toBe(10.4);
+  expect(days.find((day) => day.date === "2026-09-07")?.coverage).toBe(10.4);
 });

@@ -1,3 +1,4 @@
+import { localParts, localStart, shiftDate } from "../shared/local-time.js";
 import {
   ACTIVITY_SOURCES,
   type ActivityEvent,
@@ -12,12 +13,7 @@ import {
   WEEK_MINUTES,
   type WeekScore,
 } from "../shared/types.js";
-import {
-  localParts,
-  localStart,
-  partitionMinutes,
-  shiftDate,
-} from "./analytics.js";
+import { partitionMinutes } from "./analytics.js";
 import { sessionWindows } from "./usage-history.js";
 
 const HOUR_MS = 60 * MINUTE_MS;
@@ -33,11 +29,11 @@ function overlapMs(
   return Math.max(0, Math.min(aEnd, bEnd) - Math.max(aStart, bStart));
 }
 
-function eventsByDate(events: ActivityEvent[], now: Date) {
+function eventsByDate(events: ActivityEvent[], now: Date, timeZone: string) {
   const dates = new Map<string, ActivityEvent[]>();
   for (const event of events) {
     if (Date.parse(event.timestamp) > now.getTime()) continue;
-    const { date } = localParts(event.timestamp);
+    const { date } = localParts(event.timestamp, timeZone);
     const onDate = dates.get(date);
     if (onDate) onDate.push(event);
     else dates.set(date, [event]);
@@ -59,6 +55,7 @@ function coverageDays(
   samples: UsageSample[],
   now: Date,
   events: ActivityEvent[],
+  timeZone: string,
 ): { days: CoverageDay[]; rangeStart: number } {
   const spans: { start: number; end: number; peakPercent: number }[] = [];
   for (const window of sessionWindows(samples, now, PLAN_SCORE_DAYS + 1)) {
@@ -72,15 +69,15 @@ function coverageDays(
   const earliest = samples.length
     ? Math.min(...samples.map((sample) => Date.parse(sample.at)))
     : Number.POSITIVE_INFINITY;
-  const today = localParts(now).date;
-  const byDate = eventsByDate(events, now);
+  const today = localParts(now, timeZone).date;
+  const byDate = eventsByDate(events, now, timeZone);
   const days: CoverageDay[] = [];
   let rangeStart = Number.POSITIVE_INFINITY;
   for (let i = 0; i < PLAN_SCORE_DAYS; i++) {
     const date = shiftDate(today, i - PLAN_SCORE_DAYS + 1);
-    const start = localStart(date, 0);
+    const start = localStart(date, 0, timeZone);
     if (i === 0) rangeStart = start;
-    const dayEnd = localStart(shiftDate(date, 1), 0);
+    const dayEnd = localStart(shiftDate(date, 1), 0, timeZone);
     const end = Math.min(dayEnd, now.getTime());
     const minutes = dayMinutes(byDate.get(date) ?? []);
     if (dayEnd < earliest) {
@@ -151,8 +148,9 @@ export function planScore(
   samples: UsageSample[],
   now: Date,
   events: ActivityEvent[],
+  timeZone: string,
 ): PlanScore {
-  const { days, rangeStart } = coverageDays(samples, now, events);
+  const { days, rangeStart } = coverageDays(samples, now, events, timeZone);
   const weeks = weekScores(samples, now, rangeStart);
   const covered = days
     .slice(-PLAN_SCORE_COVERAGE_DAYS)

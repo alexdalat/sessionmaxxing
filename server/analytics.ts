@@ -1,4 +1,10 @@
 import {
+  localParts,
+  localStart,
+  shiftDate,
+  weekdayIndex,
+} from "../shared/local-time.js";
+import {
   ACTIVITY_SOURCES,
   type ActivityEvent,
   type ActivitySource,
@@ -13,38 +19,12 @@ import {
   type HistoryData,
   modelFamily,
   type RangeDays,
-  TIME_ZONE,
   type UsageSnapshot,
   WEEK_MINUTES,
   weightedTokens,
 } from "../shared/types.js";
 
 const MINUTE_MS = 60_000;
-const DAY_MS = 86_400_000;
-const formatter = new Intl.DateTimeFormat("en-CA", {
-  timeZone: TIME_ZONE,
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  hourCycle: "h23",
-});
-export function localParts(time: Date | string | number) {
-  const parts = Object.fromEntries(
-    formatter.formatToParts(new Date(time)).map((p) => [p.type, p.value]),
-  );
-  const date = `${parts.year}-${parts.month}-${parts.day}`;
-  return {
-    date,
-    hour: Number(parts.hour),
-    day: new Date(`${date}T12:00:00Z`).getUTCDay(),
-  };
-}
-export function shiftDate(date: string, days: number) {
-  return new Date(Date.parse(`${date}T12:00:00Z`) + days * DAY_MS)
-    .toISOString()
-    .slice(0, 10);
-}
 function countTimes(times: number[]) {
   return {
     responses: times.length,
@@ -110,13 +90,12 @@ function tokensOf(events: ActivityEvent[]) {
 }
 const HOURS_PER_DAY = 24;
 const WEEKDAYS = 7;
-const weekdayOf = (date: string) => new Date(`${date}T12:00:00Z`).getUTCDay();
 function heatmap(
   decorated: { event: ActivityEvent; day: number; hour: number }[],
   dates: string[],
 ): HeatCell[] {
   const occurrences = new Array<number>(WEEKDAYS).fill(0);
-  for (const date of dates) occurrences[weekdayOf(date)] += 1;
+  for (const date of dates) occurrences[weekdayIndex(date)] += 1;
   const cells = Array.from(
     { length: WEEKDAYS * HOURS_PER_DAY },
     (): ActivityEvent[] => [],
@@ -149,15 +128,16 @@ function mix(events: ActivityEvent[], key: "model" | "project") {
 export function aggregate(
   history: HistoryData,
   days: RangeDays,
+  timeZone: string,
   now = new Date(),
   official: UsageSnapshot | null = null,
 ): Analytics {
-  const today = localParts(now).date;
+  const today = localParts(now, timeZone).date;
   const dates = Array.from({ length: days }, (_, i) =>
     shiftDate(today, i - days + 1),
   );
   const decorated = history.events
-    .map((event) => ({ event, ...localParts(event.timestamp) }))
+    .map((event) => ({ event, ...localParts(event.timestamp, timeZone) }))
     .filter(
       (e) =>
         e.date >= dates[0] && Date.parse(e.event.timestamp) <= now.getTime(),
@@ -167,9 +147,9 @@ export function aggregate(
   return {
     claudeBudgets: claudeBudgets(history.events, now, block, official),
     currentBlock: block,
-    opportunities: opportunities(history.events, now),
+    opportunities: opportunities(history.events, now, timeZone),
     days,
-    timeZone: TIME_ZONE,
+    timeZone,
     generatedAt: now.toISOString(),
     daily: dates.map((date) => {
       const onDate = decorated
@@ -203,7 +183,6 @@ export function aggregate(
   };
 }
 
-const HOUR_MS = 60 * MINUTE_MS;
 const BLOCK_MS = BLOCK_MINUTES * MINUTE_MS;
 const WEEK_MS = WEEK_MINUTES * MINUTE_MS;
 function futureReset(usage: { resetsAt: string | null }, now: Date) {
@@ -278,38 +257,12 @@ function claudeBudgets(
   };
 }
 const PLANNER_DAYS = 30;
-// Choose the earlier occurrence in a fold; move a nonexistent start forward across a DST gap.
-export function localStart(date: string, hour: number): number {
-  const rough = Date.parse(`${date}T${String(hour).padStart(2, "0")}:00:00Z`);
-  const offsets = [
-    ...new Set(
-      [-12, 12].map((delta) => {
-        const instant = rough + delta * HOUR_MS;
-        const part = localParts(instant);
-        return (
-          Date.parse(
-            `${part.date}T${String(part.hour).padStart(2, "0")}:00:00Z`,
-          ) - instant
-        );
-      }),
-    ),
-  ];
-  const candidates = offsets
-    .map((offset) => rough - offset)
-    .sort((a, b) => a - b);
-  return (
-    candidates.find((candidate) => {
-      const part = localParts(candidate);
-      return part.date === date && part.hour === hour;
-    }) ?? candidates[candidates.length - 1]
-  );
-}
 // Quiet hours describe when the person is not using Claude Code, so dispatched
 // and unattributed activity must not make a window look busy.
 const INTERACTIVE_SOURCE: ActivitySource = "local";
-function opportunities(events: ActivityEvent[], now: Date) {
-  const today = localParts(now).date;
-  const earliest = localStart(shiftDate(today, -PLANNER_DAYS - 1), 0);
+function opportunities(events: ActivityEvent[], now: Date, timeZone: string) {
+  const today = localParts(now, timeZone).date;
+  const earliest = localStart(shiftDate(today, -PLANNER_DAYS - 1), 0, timeZone);
   const recent = events
     .filter((e) => e.source === INTERACTIVE_SOURCE)
     .map((e) => Date.parse(e.timestamp))
@@ -318,9 +271,9 @@ function opportunities(events: ActivityEvent[], now: Date) {
     let activeMinutes = 0;
     let responses = 0;
     const lastDate =
-      localStart(today, startHour) + BLOCK_MS <= now.getTime()
+      localStart(today, startHour, timeZone) + BLOCK_MS <= now.getTime()
         ? today
-        : localStart(shiftDate(today, -1), startHour) + BLOCK_MS <=
+        : localStart(shiftDate(today, -1), startHour, timeZone) + BLOCK_MS <=
             now.getTime()
           ? shiftDate(today, -1)
           : shiftDate(today, -2);
@@ -328,7 +281,7 @@ function opportunities(events: ActivityEvent[], now: Date) {
       shiftDate(lastDate, i - PLANNER_DAYS + 1),
     );
     for (const date of dates) {
-      const start = localStart(date, startHour);
+      const start = localStart(date, startHour, timeZone);
       const totals = countTimes(
         recent.filter((time) => time >= start && time < start + BLOCK_MS),
       );

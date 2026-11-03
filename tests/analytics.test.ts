@@ -1,10 +1,25 @@
 import { expect, it } from "vitest";
 import {
   activityBlocks,
-  aggregate,
+  aggregate as aggregateInZone,
   partitionMinutes,
 } from "../server/analytics.js";
-import type { ActivityEvent, HistoryData } from "../shared/types.js";
+import type {
+  ActivityEvent,
+  HistoryData,
+  RangeDays,
+  UsageSnapshot,
+} from "../shared/types.js";
+import { TEST_TIME_ZONE } from "./helpers.js";
+
+const KOLKATA = "Asia/Kolkata";
+
+const aggregate = (
+  data: HistoryData,
+  days: RangeDays,
+  now?: Date,
+  official?: UsageSnapshot | null,
+) => aggregateInZone(data, days, TEST_TIME_ZONE, now, official);
 
 const event = (
   timestamp: string,
@@ -24,7 +39,7 @@ const history = (events: ActivityEvent[]): HistoryData => ({
   events,
   health: { files: 1, lines: events.length, warnings: 0, historyEntries: 0 },
 });
-it("aggregates selected Eastern calendar days with distinct real minutes through the fall DST fold", () => {
+it("aggregates selected local calendar days with distinct real minutes through the fall DST fold", () => {
   const result = aggregate(
     history([
       event("2026-11-01T05:30:00Z"),
@@ -397,4 +412,47 @@ it("details each heatmap cell: source split, top models and projects by owned mi
     projects: [],
     tokens: 0,
   });
+});
+
+it("buckets days and heatmap cells by local midnight in a half-hour zone", () => {
+  // Kolkata is UTC+5:30, so local midnight is 18:30Z.
+  const result = aggregateInZone(
+    history([event("2026-09-06T18:29:00Z"), event("2026-09-06T18:31:00Z")]),
+    7,
+    KOLKATA,
+    new Date("2026-09-07T06:00:00Z"),
+  );
+  expect(result.timeZone).toBe(KOLKATA);
+  expect(result.daily.at(-2)).toMatchObject({
+    date: "2026-09-06",
+    activeMinutes: 1,
+  });
+  expect(result.daily.at(-1)).toMatchObject({
+    date: "2026-09-07",
+    activeMinutes: 1,
+  });
+  expect(
+    result.heatmap.find((cell) => cell.day === 0 && cell.hour === 23),
+  ).toMatchObject({ activeMinutes: 1, responses: 1 });
+  expect(
+    result.heatmap.find((cell) => cell.day === 1 && cell.hour === 0),
+  ).toMatchObject({ activeMinutes: 1, responses: 1 });
+});
+
+it("starts each five-hour quiet-hours block at the local hour in a half-hour zone", () => {
+  // 2026-09-05T18:40Z is 00:10 local in Kolkata, inside the block that starts at local hour 0 (18:30Z).
+  const result = aggregateInZone(
+    history([event("2026-09-05T18:40:00Z")]),
+    7,
+    KOLKATA,
+    new Date("2026-09-07T06:00:00Z"),
+  );
+  expect(
+    result.opportunities.find((window) => window.startHour === 0)
+      ?.averageActiveMinutes,
+  ).toBe(1 / 30);
+  expect(
+    result.opportunities.find((window) => window.startHour === 1)
+      ?.averageActiveMinutes,
+  ).toBe(0);
 });

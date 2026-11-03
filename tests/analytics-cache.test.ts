@@ -6,6 +6,7 @@ import {
 } from "../app/lib/analyticsCache.js";
 import { aggregate } from "../server/analytics.js";
 import type { ActivityEvent } from "../shared/types.js";
+import { TEST_TIME_ZONE } from "./helpers.js";
 
 function fakeStorage(entries: [string, string][] = []) {
   const map = new Map(entries);
@@ -38,6 +39,7 @@ const analytics = aggregate(
     health: { files: 1, lines: 1, warnings: 0, historyEntries: 0 },
   },
   7,
+  TEST_TIME_ZONE,
   new Date("2026-09-05T20:00:00.000Z"),
 );
 
