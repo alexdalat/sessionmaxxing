@@ -1,5 +1,6 @@
 "use client";
 import type { ReactNode } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Badge } from "@/app/components/ui/badge";
 import {
   type PreviewState,
@@ -7,12 +8,9 @@ import {
   STATE_LABELS,
   waitNote,
 } from "@/app/lib/queuePreview";
-import {
-  formatTokens,
-  hourLabel,
-  localTimestamp,
-  type PublicTask,
-} from "@/shared/types";
+import { windowRangeLabel } from "@/app/lib/schedule";
+import { localTimestamp } from "@/shared/local-time";
+import { formatTokens, type PublicTask } from "@/shared/types";
 
 const stateVariants: Record<PreviewState, "success" | "info" | "warning"> = {
   running: "success",
@@ -36,6 +34,7 @@ export function TaskCard({
   dependencies: string[];
   children: ReactNode;
 }) {
+  const { timeZone } = useEnvironment();
   const state = previewState(task);
   const wait = waitNote(task, now);
   return (
@@ -66,10 +65,10 @@ export function TaskCard({
           <span>
             {task.preferredWindowStart === null
               ? "Any hour"
-              : `${hourLabel(task.preferredWindowStart)} → ${hourLabel((task.preferredWindowStart + 5) % 24)} ET`}
+              : windowRangeLabel(task.preferredWindowStart, timeZone, now)}
           </span>
           {task.earliestStart && (
-            <span>After {localTimestamp(task.earliestStart)}</span>
+            <span>After {localTimestamp(task.earliestStart, timeZone)}</span>
           )}
           {dependencies.length > 0 && (
             <span>Depends on {dependencies.join(", ")}</span>

@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { ListSkeleton } from "@/app/components/Skeletons";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
@@ -7,11 +8,11 @@ import { Input } from "@/app/components/ui/input";
 import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
 import { api, QUEUE_CHANGED } from "@/app/lib/api";
+import { localTimestamp } from "@/shared/local-time";
 import {
   COMMIT_MESSAGE_MAX,
   type DeployStatus,
   formatTokens,
-  localTimestamp,
   MODEL_FAMILIES,
   needsCommit,
   needsReview,
@@ -98,6 +99,7 @@ function CommitForm({
   );
 }
 export function Runs() {
+  const { timeZone } = useEnvironment();
   const [limit, setLimit] = useState(PAGE_SIZE);
   const { data, error, reload } = usePolling<{
     runs: Run[];
@@ -253,7 +255,7 @@ export function Runs() {
             </div>
             <div>
               <dt>Started</dt>
-              <dd>{localTimestamp(run.startedAt)}</dd>
+              <dd>{localTimestamp(run.startedAt, timeZone)}</dd>
             </div>
             <div>
               <dt>Duration</dt>
@@ -277,7 +279,9 @@ export function Runs() {
             </div>
           </dl>
           {run.endedAt && (
-            <p className="muted">Ended {localTimestamp(run.endedAt)}</p>
+            <p className="muted">
+              Ended {localTimestamp(run.endedAt, timeZone)}
+            </p>
           )}
           {run.error && <p className="warning">{run.error}</p>}
           {run.summary && <pre className="summary">{run.summary}</pre>}
