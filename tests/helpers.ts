@@ -4,6 +4,10 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import { vi } from "vitest";
+import type {
+  RestartSpawnOptions,
+  SpawnRestart,
+} from "../server/restart-executor.js";
 import type { SessionRates, UsageSnapshot } from "../shared/types.js";
 export async function temporary() {
   await mkdir("tests/.tmp", { recursive: true });
@@ -68,4 +72,52 @@ export function fakeEstimator(code: number, stdout: string, stderr = "") {
     });
     return child;
   });
+}
+export interface CommandResponse {
+  code?: number;
+  stdout?: string;
+  stderr?: string;
+  /** Fail to start, as a missing program does. */
+  error?: boolean;
+  /** Stay open until the test emits `close` on the child itself. */
+  hang?: boolean;
+}
+/** The process boundary of a restart: records every spawn and answers with `respond`. */
+export function fakeCommand(
+  respond: (command: string, args: string[]) => CommandResponse = () => ({}),
+) {
+  const calls: {
+    command: string;
+    args: string[];
+    options: RestartSpawnOptions;
+  }[] = [];
+  const children: ReturnType<typeof fakeChild>[] = [];
+  const spawn: SpawnRestart = (command, args, options) => {
+    const child = fakeChild();
+    calls.push({ command, args, options });
+    children.push(child);
+    const response = respond(command, args);
+    setImmediate(() => {
+      if (response.error) {
+        child.emit(
+          "error",
+          Object.assign(new Error(`spawn ${command} ENOENT`), {
+            code: "ENOENT",
+          }),
+        );
+        return;
+      }
+      if (response.hang) return;
+      let ended = 0;
+      const close = () => {
+        if (++ended === 2) child.emit("close", response.code ?? 0, null);
+      };
+      child.stdout.on("end", close);
+      child.stderr.on("end", close);
+      child.stdout.end(response.stdout ?? "");
+      child.stderr.end(response.stderr ?? "");
+    });
+    return child;
+  };
+  return { spawn, calls, children };
 }

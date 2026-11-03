@@ -776,7 +776,7 @@ const finishedRun = (
   sessionCostPercent: 12,
   summary: "Renamed the parser.",
   changes,
-  deploy: null,
+  restart: null,
   reviewedAt,
   preview: [],
 });

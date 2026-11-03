@@ -11,11 +11,11 @@ import { api, QUEUE_CHANGED } from "@/app/lib/api";
 import { localTimestamp } from "@/shared/local-time";
 import {
   COMMIT_MESSAGE_MAX,
-  type DeployStatus,
   formatTokens,
   MODEL_FAMILIES,
   needsCommit,
   needsReview,
+  type RestartStatus,
   type Run,
   type WeightedTokens,
 } from "@/shared/types";
@@ -37,14 +37,14 @@ const statusVariants: Record<Run["status"], BadgeVariant> = {
   failed: "warning",
   cancelled: "warning",
 };
-const deployBadges: Record<
-  DeployStatus,
+const restartBadges: Record<
+  RestartStatus,
   { label: string; variant: BadgeVariant }
 > = {
-  requested: { label: "Deploy queued", variant: "info" },
-  deploying: { label: "Deploying", variant: "info" },
-  succeeded: { label: "Deployed", variant: "success" },
-  failed: { label: "Deploy failed", variant: "warning" },
+  requested: { label: "Restart queued", variant: "info" },
+  restarting: { label: "Restarting", variant: "info" },
+  succeeded: { label: "Restarted", variant: "success" },
+  failed: { label: "Restart failed", variant: "warning" },
 };
 function CommitForm({
   run,
@@ -233,9 +233,9 @@ export function Runs() {
               >
                 {run.status}
               </Badge>
-              {run.deploy && (
-                <Badge variant={deployBadges[run.deploy.status].variant}>
-                  {deployBadges[run.deploy.status].label}
+              {run.restart && (
+                <Badge variant={restartBadges[run.restart.status].variant}>
+                  {restartBadges[run.restart.status].label}
                 </Badge>
               )}
             </span>

@@ -385,7 +385,7 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         sessionCostPercent: null,
         summary: null,
         changes: null,
-        deploy: null,
+        restart: null,
         reviewedAt: null,
         preview: [],
       },

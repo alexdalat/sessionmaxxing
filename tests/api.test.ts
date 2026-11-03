@@ -1314,7 +1314,7 @@ it("suggests recent and prefix-matched work directories", async () => {
       `/api/workdirs?q=${encodeURIComponent(`${temp.path}/`)}`,
     );
     expect(typed.json().matches).toEqual([
-      `${temp.path}/deploy`,
+      `${temp.path}/restarts`,
       `${temp.path}/runs`,
     ]);
     expect((await app.inject("/api/workdirs?days=7")).statusCode).toBe(400);

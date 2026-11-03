@@ -11,13 +11,13 @@ import {
   type PlanningSnapshot,
   type PublicTask,
   type Run,
+  type RunChanges,
   type SessionRates,
   type Task,
   type TaskGate,
   type WeightedTokens,
 } from "../shared/types.js";
 import { sessionPercent } from "./calibration.js";
-import { DeployQueue, hasComposeFile, leftChanges } from "./deploy.js";
 import {
   blockingDependency,
   costsAhead,
@@ -45,10 +45,14 @@ import {
 } from "./providers.js";
 import type { QueueStore } from "./queue.js";
 import { resolveResources, resourcesCollide } from "./resources.js";
+import { RestartExecutor, type RestartOptions } from "./restart-executor.js";
+import { RestartMethodStore } from "./restart-methods.js";
+import { RestartStore } from "./restarts.js";
 import { atomicJson, DomainError, id } from "./storage.js";
 import { validateWorkdir } from "./validation.js";
 
 interface RunnerOptions {
+  restart?: RestartOptions;
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   launch?: (task: Task, sessionId: string, resume: boolean) => ProviderProcess;
   autoApply?: () => boolean;
@@ -56,14 +60,17 @@ interface RunnerOptions {
   now?: () => Date;
 }
 export type Planner = (load: DispatchLoad) => PlanningSnapshot;
-/** A run plus the session id dispatched to Claude, which never leaves the server. Deploy state lives in the deploy queue. */
-type StoredRun = Omit<Run, "deploy" | "sessionCostPercent"> & {
+/** A run plus the session id dispatched to Claude, which never leaves the server. Restart state lives in the restart store. */
+type StoredRun = Omit<Run, "restart" | "sessionCostPercent"> & {
   sessionId: string | null;
 };
 const publicRun = ({
   sessionId: _sessionId,
   ...run
-}: StoredRun): Omit<Run, "deploy" | "sessionCostPercent"> => run;
+}: StoredRun): Omit<Run, "restart" | "sessionCostPercent"> => run;
+/** Whether a run left commits or changed files in its work directory. */
+const leftChanges = (changes: RunChanges | null) =>
+  changes !== null && (changes.commits > 0 || changes.files.length > 0);
 const measured = (tokens: WeightedTokens) =>
   MODEL_FAMILIES.some((family) => tokens[family] > 0);
 const savedTokens = (value: unknown): WeightedTokens | null =>
@@ -83,7 +90,7 @@ interface Active extends Holding {
   run: StoredRun;
   /** Work directory git state when the run started; undefined when it could not be read, null outside a repository. */
   gitStart?: GitSnapshot | null;
-  /** Whether the run was launched with the apply override, so the host may redeploy what it changed. */
+  /** Whether the run was launched with the apply override, so the dashboard may restart what it changed. */
   applied: boolean;
   output: OutputPreview;
   child?: ProviderProcess;
@@ -101,7 +108,10 @@ const TICK_MS = 5000;
 export const SLOTS_BUSY_ERROR = "All run slots are busy.";
 export const blockedReason = (title: string) =>
   `Waits for “${title}” · same project`;
-export const deployReason = (title: string) => `Waits for deploy of “${title}”`;
+export const restartReason = (title: string) =>
+  `Waits for restart of “${title}”`;
+const RESTART_REQUEST_ERROR =
+  "Could not request the restart of the run. Auto-dispatch is paused; check runtime file access.";
 const START_ERROR =
   "Run could not start. Check the work directory, CLI, and runtime file access.";
 export const LIMIT_STOP_ERROR =
@@ -168,10 +178,12 @@ export class Runner {
     return this.getPlanning(load);
   }
   error: string | null = null;
+  private methods!: RestartMethodStore;
+  private restarts!: RestartStore;
+  private executor!: RestartExecutor;
   private constructor(
     private store: QueueStore,
     private directory: string,
-    private deploys: DeployQueue,
     private options: RunnerOptions,
   ) {}
   static async open(
@@ -179,12 +191,7 @@ export class Runner {
     directory: string,
     options: RunnerOptions = {},
   ) {
-    const runner = new Runner(
-      store,
-      join(directory, "runs"),
-      await DeployQueue.open(directory),
-      options,
-    );
+    const runner = new Runner(store, join(directory, "runs"), options);
     await mkdir(runner.directory, { recursive: true, mode: 0o700 });
     for (const name of await readdir(runner.directory)) {
       if (!/^[a-f0-9]{24}\.json$/.test(name)) continue;
@@ -249,7 +256,23 @@ export class Runner {
       run.tokens = tokens;
       await runner.persist(run);
     }
+    // A data directory without the file is a fresh install with no methods.
+    runner.methods = await RestartMethodStore.open(directory, async () => ({}));
+    runner.restarts = await RestartStore.open(directory, () => runner.now());
+    runner.executor = new RestartExecutor(
+      runner.restarts,
+      options.restart ?? {},
+      {
+        idle: () => runner.waitForIdle(),
+        report: (message) => {
+          runner.error = message;
+        },
+      },
+    );
     return runner;
+  }
+  get restartMethods() {
+    return this.methods;
   }
   private now() {
     return this.options.now?.() ?? new Date();
@@ -264,7 +287,7 @@ export class Runner {
           run.tokens === null || rates === null
             ? null
             : sessionPercent(run.tokens, rates),
-        deploy: this.deploys.status(run.id),
+        restart: this.restarts.publicStatus(run.id),
         preview: this.active.get(run.id)?.output.lines() ?? [...run.preview],
         durationMs:
           run.status === "running"
@@ -354,12 +377,12 @@ export class Runner {
       costsAhead(task.id, queued, runs, this.rates()),
     );
     if (gate.status !== "ready") return gate;
-    const deploying = this.deploys.pending();
-    if (deploying)
+    const restarting = this.restarts.pending();
+    if (restarting)
       return {
         ...gate,
         status: "waiting",
-        reason: deployReason(deploying.title),
+        reason: restartReason(restarting.title),
       };
     let resources: string[];
     try {
@@ -392,9 +415,8 @@ export class Runner {
     }
   }
   private async admit(taskId: string, gated: boolean): Promise<Run> {
-    await this.deploys.refresh();
-    const deploying = this.deploys.pending();
-    if (deploying) throw new DomainError(deployReason(deploying.title));
+    const restarting = this.restarts.pending();
+    if (restarting) throw new DomainError(restartReason(restarting.title));
     const queued = this.store.snapshot().tasks;
     const task = queued.find((candidate) => candidate.id === taskId);
     if (!task) throw new DomainError("Task not found.", 404);
@@ -612,25 +634,31 @@ export class Runner {
         "Could not finalize the queue task. Auto-dispatch is paused; check runtime file access and restart.";
     }
     try {
+      const method = this.restartMethods.get(active.task.workdir);
       if (
         active.applied &&
         active.run.status === "completed" &&
         leftChanges(active.run.changes) &&
-        (await hasComposeFile(active.task.workdir))
+        method.kind !== "none"
       )
-        await this.deploys.request({
+        await this.restarts.request({
           runId: active.run.id,
           title: active.run.title,
           workdir: active.task.workdir,
+          method,
           requestedAt: this.now().toISOString(),
         });
     } catch {
-      this.error =
-        "Could not request the deploy of the run. Auto-dispatch is paused; check runtime file access.";
+      this.error = RESTART_REQUEST_ERROR;
     } finally {
       this.active.delete(active.run.id);
       active.resolve();
     }
+    this.drainRestarts();
+  }
+  /** Starts the restart executor without awaiting it: a self-restart waits for this run to leave the active set. */
+  private drainRestarts() {
+    void this.executor.drain();
   }
   async waitForIdle() {
     while (this.starts.size > 0 || this.active.size > 0) {
@@ -673,7 +701,7 @@ export class Runner {
    * after every earlier pick, and the locks held by running and picked tasks.
    */
   private async select(at: Date): Promise<PublicTask[]> {
-    if (this.deploys.pending()) return [];
+    if (this.restarts.pending()) return [];
     const settings = this.settings();
     const rates = this.rates();
     const runs = this.list();
@@ -710,7 +738,6 @@ export class Runner {
     if (this.ticking || this.stopped) return;
     this.ticking = true;
     try {
-      await this.deploys.refresh();
       if (
         !this.getPlanning ||
         this.error ||
@@ -736,6 +763,8 @@ export class Runner {
   }
   startScheduler() {
     if (this.timer || this.stopped) return;
+    // Restarts a previous process requested but never ran.
+    this.drainRestarts();
     this.timer = setInterval(() => {
       void this.tick().catch((error) => {
         this.error =
@@ -749,9 +778,12 @@ export class Runner {
   async close() {
     this.stopped = true;
     if (this.timer) clearInterval(this.timer);
+    // Awaited last: a self-restart waits for the runs to go idle first.
+    const restarts = this.executor.close();
     await Promise.allSettled([...this.starts]);
     for (const active of this.active.values())
       if (!active.finishing) await this.cancel(active.task.id);
     await this.waitForIdle();
+    await restarts;
   }
 }

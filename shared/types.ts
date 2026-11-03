@@ -363,17 +363,25 @@ export interface RunChanges {
   commits: number;
   files: ChangedFile[];
 }
-export const DEPLOY_STATUSES = [
+export const RESTART_STATUSES = [
   "requested",
-  "deploying",
+  "restarting",
   "succeeded",
   "failed",
 ] as const;
-export type DeployStatus = (typeof DEPLOY_STATUSES)[number];
-export interface RunDeploy {
-  status: DeployStatus;
+export type RestartStatus = (typeof RESTART_STATUSES)[number];
+export interface RunRestart {
+  status: RestartStatus;
   updatedAt: string;
+  /** Output of a failed restart, null otherwise. */
+  output: string | null;
 }
+export type RestartMethod =
+  | { kind: "none" }
+  | { kind: "compose" }
+  | { kind: "command"; argv: string[] };
+export const RESTART_ARGV_MAX = 64;
+export const RESTART_ARG_MAX = 4096;
 export interface PendingReview {
   pending: number;
 }
@@ -400,8 +408,8 @@ export interface Run {
   summary: string | null;
   /** What the run left in its work directory; null when the work directory is not a git repository. */
   changes: RunChanges | null;
-  /** Host redeploy of the run's Compose project; null when none was requested. */
-  deploy: RunDeploy | null;
+  /** Restart of the run's work directory; null when none was requested. */
+  restart: RunRestart | null;
   reviewedAt: string | null;
   preview: string[];
 }
@@ -440,7 +448,7 @@ export const shortHourLabel = (hour: number) =>
   `${clockHour(hour)}${hour < HOURS_PER_HALF_DAY ? "a" : "p"}`;
 
 export interface DispatchSettings {
-  /** Tell every dispatched task to commit its own work and redeploy the service instead of leaving it for review. */
+  /** Tell every dispatched task to edit its work directory in place instead of leaving it for review; the dashboard restarts the directory afterwards. */
   autoApply: boolean;
   /** Start a new five-hour session with a short Claude ping as soon as the previous window has ended. */
   keepSessionActive: boolean;
