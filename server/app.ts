@@ -6,6 +6,7 @@ import Fastify, { type FastifyError } from "fastify";
 import {
   type DispatchSettings,
   EMPTY_LOAD,
+  type Environment,
   type HistoryData,
   type PlanningSnapshot,
   type RangeDays,
@@ -55,6 +56,8 @@ function hostMatcher(allowedHosts: readonly string[]) {
 }
 
 export interface AppOptions {
+  /** IANA zone the server resolved from TZ. */
+  timeZone: string;
   staticRoot?: string;
   /** Host names and addresses accepted besides localhost and 127.0.0.1. */
   allowedHosts?: readonly string[];
@@ -71,7 +74,7 @@ export interface AppOptions {
   /** Overrides the fitted session rates; by default they are fitted from samples and transcripts. */
   sessionRates?: () => Promise<SessionRates | null>;
 }
-export async function createApp(options: AppOptions = {}) {
+export async function createApp(options: AppOptions) {
   const app = Fastify({
     logger: false,
     bodyLimit: 128 * 1024,
@@ -238,6 +241,14 @@ export async function createApp(options: AppOptions = {}) {
         await settings.save(request.body);
         return getPlanning();
       },
+    );
+  }
+  if (options.queue) {
+    const workdirRoot = options.queue.workdirRoot;
+    app.get<{ Reply: Environment }>(
+      "/api/environment",
+      { schema: { querystring: emptyQuerySchema } },
+      async () => ({ timeZone: options.timeZone, workdirRoot }),
     );
   }
   if (options.queue && options.runner)

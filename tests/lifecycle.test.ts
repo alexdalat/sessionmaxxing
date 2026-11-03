@@ -316,3 +316,44 @@ it("wires persisted dispatch settings and live usage planning into the dashboard
     await temp.cleanup();
   }
 });
+
+it("serves the configured time zone and work-directory root", async () => {
+  const temp = await temporary();
+  const app = await startDashboard({
+    port: 0,
+    dataDirectory: temp.path,
+    development: true,
+    fetchUsage,
+    timeZone: "Europe/Berlin",
+    workdirRoot: temp.path,
+  });
+  try {
+    expect((await app.inject("/api/environment")).json()).toEqual({
+      timeZone: "Europe/Berlin",
+      workdirRoot: temp.path,
+    });
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("rejects an invalid SESSIONMAXXING_WORKDIR_ROOT before creating the data directory", async () => {
+  const temp = await temporary();
+  const dataDirectory = join(temp.path, "data");
+  vi.stubEnv("SESSIONMAXXING_WORKDIR_ROOT", join(temp.path, "missing"));
+  try {
+    await expect(
+      startDashboard({
+        port: 0,
+        dataDirectory,
+        development: true,
+        fetchUsage,
+        timeZone: "Europe/Berlin",
+      }),
+    ).rejects.toThrow("SESSIONMAXXING_WORKDIR_ROOT");
+    await expect(access(dataDirectory)).rejects.toThrow();
+  } finally {
+    await temp.cleanup();
+  }
+});

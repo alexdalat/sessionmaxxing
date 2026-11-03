@@ -26,6 +26,7 @@ import {
   fakeChild,
   SESSION_RATES,
   sessionRates,
+  TEST_TIME_ZONE,
   TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
@@ -548,6 +549,7 @@ it("reports slots, reservations, and the blocking run through the queue route", 
     now,
   });
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     settings,

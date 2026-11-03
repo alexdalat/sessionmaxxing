@@ -9,6 +9,7 @@ import { USAGE_MIN_REFRESH_MS, UsageMonitor } from "../server/usage-monitor.js";
 import {
   fakeChild,
   sessionRates,
+  TEST_TIME_ZONE,
   TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
@@ -39,6 +40,7 @@ it("auto-dispatch holds a Claude task without headroom and promotes it once usag
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     settings,
@@ -113,6 +115,7 @@ it("refreshes official usage after a run ends before dispatching the next Claude
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     settings,
@@ -184,6 +187,7 @@ it("lets a small task start when a larger one ahead of it lacks headroom", async
   const launch = vi.fn(() => child);
   const runner = await Runner.open(queue, temp.path, { launch, now });
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     settings,

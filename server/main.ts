@@ -14,6 +14,7 @@ import {
   resolveAllowedHosts,
   resolveEdition,
   resolveHost,
+  resolveTimeZone,
   resolveWorkdirRoot,
 } from "./environment.js";
 import { readSessionTokens } from "./history.js";
@@ -33,6 +34,7 @@ interface StartOptions {
   loadHistory?: () => Promise<HistoryData>;
   fetchUsage?: FetchUsage;
   workdirRoot?: string;
+  timeZone?: string;
 }
 export async function startDashboard(
   options: StartOptions = {},
@@ -49,6 +51,12 @@ export async function startDashboard(
   const allowedHosts = resolveAllowedHosts(process.env, host);
   const workdirRoot =
     options.workdirRoot ?? (await resolveWorkdirRoot(process.env, homedir()));
+  const timeZone =
+    options.timeZone ??
+    resolveTimeZone(
+      process.env,
+      Intl.DateTimeFormat().resolvedOptions().timeZone,
+    );
   const directory = await prepareDataDirectory({
     explicit: options.dataDirectory,
     env: process.env,
@@ -97,6 +105,7 @@ export async function startDashboard(
       claudeRuns: () => runner.load().claudeRuns,
     });
     app = await createApp({
+      timeZone,
       queue,
       runner,
       allowedHosts,

@@ -9,6 +9,7 @@ import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
 import {
   sessionRates,
+  TEST_TIME_ZONE,
   TEST_WORKDIR_ROOT,
   temporary,
   usageSnapshot,
@@ -30,7 +31,7 @@ it("returns task prompts and working directories to the browser while edits pres
   const temp = await temporary();
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   const submitted = taskInput(temp.path);
   try {
     const created = await app.inject({
@@ -64,6 +65,7 @@ it("returns task prompts and working directories to the browser while edits pres
 
 it("accepts localhost and the listed hosts without credentials", async () => {
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     allowedHosts: APPROVED_HOSTS,
     loadHistory: emptyHistory,
   });
@@ -97,6 +99,7 @@ it("accepts localhost and the listed hosts without credentials", async () => {
 
 it("matches approved hosts case-insensitively", async () => {
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     allowedHosts: APPROVED_HOSTS,
     loadHistory: emptyHistory,
   });
@@ -113,7 +116,10 @@ it("matches approved hosts case-insensitively", async () => {
 });
 
 it("approves only localhost when no hosts are listed", async () => {
-  const app = await createApp({ loadHistory: emptyHistory });
+  const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
+    loadHistory: emptyHistory,
+  });
   try {
     const rejected = await app.inject({
       url: "/api/analytics",
@@ -132,6 +138,7 @@ it("approves only localhost when no hosts are listed", async () => {
 
 it("never approves an unspecified address, even when it is listed", async () => {
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     allowedHosts: [...APPROVED_HOSTS, "0.0.0.0", "::", "[::]"],
     loadHistory: emptyHistory,
   });
@@ -149,7 +156,10 @@ it("never approves an unspecified address, even when it is listed", async () => 
 });
 
 it("rejects unapproved hosts and origins even when forwarded headers claim a trusted host", async () => {
-  const app = await createApp({ allowedHosts: APPROVED_HOSTS });
+  const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
+    allowedHosts: APPROVED_HOSTS,
+  });
   const host = `${APPROVED_ADDRESS}:4317`;
   try {
     const rejectedHeaders = [
@@ -195,6 +205,7 @@ it("rejects unapproved hosts and origins even when forwarded headers claim a tru
 
 it("serves aggregated history through a validated, local-only API with safe errors", async () => {
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     loadHistory: async () => ({
       events: [],
       health: { files: 0, lines: 0, warnings: 0, historyEntries: 0 },
@@ -241,6 +252,7 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     allowedHosts: [APPROVED_NAME],
@@ -356,7 +368,7 @@ it("rejects a task body that still names a provider", async () => {
   const temp = await temporary();
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     const created = await app.inject({
       method: "POST",
@@ -389,6 +401,7 @@ it("serves the production client locally, protects API errors, and does not fall
     "<!doctype html><title>Capacity</title>",
   );
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     staticRoot: temp.path,
     allowedHosts: [APPROVED_NAME],
     loadHistory: async () => {
@@ -428,7 +441,10 @@ it("serves a route directory's index.html for deep links", async () => {
     `${temp.path}/runs/index.html`,
     "<!doctype html><title>Runs</title>",
   );
-  const app = await createApp({ staticRoot: temp.path });
+  const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
+    staticRoot: temp.path,
+  });
   try {
     const runs = await app.inject("/runs/");
     expect(runs.statusCode).toBe(200);
@@ -451,7 +467,10 @@ it("redirects a route without a trailing slash to its directory", async () => {
     `${temp.path}/runs/index.html`,
     "<!doctype html><title>Runs</title>",
   );
-  const app = await createApp({ staticRoot: temp.path });
+  const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
+    staticRoot: temp.path,
+  });
   try {
     const redirected = await app.inject("/runs");
     expect(redirected.statusCode).toBe(301);
@@ -471,7 +490,7 @@ it("preserves an unscheduled null window and rejects coerced body values", async
   const temp = await temporary();
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     const response = await app.inject({
       method: "POST",
@@ -504,6 +523,7 @@ it("fills session windows from local transcripts for stretches no official sampl
     () => now,
   );
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     usage,
     now: () => now,
     loadHistory: async () => ({
@@ -562,6 +582,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
   );
   const settings = await DispatchSettingsStore.open(temp.path);
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     usage,
     settings,
     now: () => now,
@@ -698,6 +719,7 @@ it("scores the plan from recorded samples over the last twenty-eight Eastern day
     () => now,
   );
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     usage,
     now: () => now,
     loadHistory: async () => ({
@@ -759,6 +781,7 @@ it("serves the snapshot persisted before a restart when the usage fetch fails", 
       () => now,
     );
     const app = await createApp({
+      timeZone: TEST_TIME_ZONE,
       usage,
       settings: await DispatchSettingsStore.open(temp.path),
       now: () => now,
@@ -795,6 +818,7 @@ it("computes quiet start hours from local history for the planning snapshot and 
     () => now,
   );
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     usage,
     settings: await DispatchSettingsStore.open(temp.path),
     now: () => now,
@@ -844,7 +868,7 @@ it("leaves finished tasks out of the active queue", async () => {
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     const titles = ["Finished", "Waiting"];
     for (const title of titles)
@@ -883,7 +907,7 @@ it("returns only the newest runs up to the limit with the full count", async () 
     launch: () => child,
     now: () => new Date(clock),
   });
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     for (const title of ["Older", "Newer"]) {
       const created = await app.inject({
@@ -920,7 +944,7 @@ it("never exposes the session id of a dispatched run through the runs route", as
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     const created = await app.inject({
       method: "POST",
@@ -949,6 +973,7 @@ it("never exposes the session id of a dispatched run through the runs route", as
 
 it("reports activity per source in the analytics route", async () => {
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     now: () => new Date("2026-09-06T12:00:00Z"),
     loadHistory: async () => ({
       events: [
@@ -1033,7 +1058,7 @@ it("rejects tokens outside the allowed range and requires them on create", async
   const temp = await temporary();
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   const post = (payload: object) =>
     app.inject({ method: "POST", url: "/api/tasks", payload });
   try {
@@ -1091,7 +1116,7 @@ it("stamps a run as reviewed and clears the needs-review flag on its task", asyn
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     const task = (
       await app.inject({
@@ -1151,6 +1176,7 @@ it("stores the estimated tokens when a task is created or edited with auto", asy
   const runner = await Runner.open(queue, temp.path);
   const estimated: string[] = [];
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     estimate: async (task) => {
@@ -1190,6 +1216,7 @@ it("hands the estimator what earlier runs were estimated to produce", async () =
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
   const histories: EstimateRun[][] = [];
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     estimate: async (_task, history) => {
@@ -1239,6 +1266,7 @@ it("refuses to queue an auto-token task when the estimate fails", async () => {
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     estimate: async () => {
@@ -1267,7 +1295,7 @@ it("suggests recent and prefix-matched work directories", async () => {
   const temp = await temporary();
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
-  const app = await createApp({ queue, runner });
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
   try {
     await app.inject({
       method: "POST",
@@ -1336,6 +1364,7 @@ it("fits the session rates from official samples and local transcripts, and pric
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const runner = await Runner.open(queue, temp.path);
   const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
     queue,
     runner,
     usage,
@@ -1393,7 +1422,12 @@ async function finishedRun(suggestCommit: (run: CommitRun) => Promise<string>) {
   const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
   const child = fakeChild();
   const runner = await Runner.open(queue, temp.path, { launch: () => child });
-  const app = await createApp({ queue, runner, suggestCommit });
+  const app = await createApp({
+    timeZone: TEST_TIME_ZONE,
+    queue,
+    runner,
+    suggestCommit,
+  });
   const task = (
     await app.inject({
       method: "POST",
@@ -1541,5 +1575,31 @@ it("surfaces git's error when the run's files were committed outside the dashboa
     ).toBeNull();
   } finally {
     await cleanup();
+  }
+});
+
+it("serves the time zone and the work-directory root from /api/environment", async () => {
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({ timeZone: "Asia/Kolkata", queue, runner });
+  try {
+    const response = await app.inject("/api/environment");
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual({
+      timeZone: "Asia/Kolkata",
+      workdirRoot: TEST_WORKDIR_ROOT,
+    });
+    expect((await app.inject("/api/environment?x=1")).statusCode).toBe(400);
+    const foreign = await app.inject({
+      url: "/api/environment",
+      headers: { host: `${APPROVED_ADDRESS}:4317` },
+    });
+    expect(foreign.statusCode).toBe(403);
+  } finally {
+    await app.close();
+    await temp.cleanup();
   }
 });

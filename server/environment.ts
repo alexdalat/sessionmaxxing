@@ -8,6 +8,7 @@ export const HOST_VARIABLE = "SESSIONMAXXING_HOST";
 export const EDITION_VARIABLE = "SESSIONMAXXING_EDITION";
 export const ALLOWED_HOSTS_VARIABLE = "SESSIONMAXXING_ALLOWED_HOSTS";
 export const WORKDIR_ROOT_VARIABLE = "SESSIONMAXXING_WORKDIR_ROOT";
+export const TIME_ZONE_VARIABLE = "TZ";
 
 const LOOPBACK = "127.0.0.1";
 export const UNSPECIFIED_ADDRESSES = new Set(["0.0.0.0", "::"]);
@@ -94,4 +95,40 @@ export async function resolveWorkdirRoot(env: Env, home: string) {
       400,
     );
   return root;
+}
+
+const UNKNOWN_TIME_ZONE = "Etc/Unknown";
+
+function canonicalTimeZone(name: string) {
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: name,
+    }).resolvedOptions().timeZone;
+  } catch (error) {
+    if (error instanceof RangeError) return undefined;
+    throw error;
+  }
+}
+
+export function resolveTimeZone(env: Env, resolved: string | undefined) {
+  if (resolved === undefined || resolved === UNKNOWN_TIME_ZONE)
+    throw new DomainError(
+      `${TIME_ZONE_VARIABLE} must name an IANA time zone such as America/Chicago; the process resolved none.`,
+      400,
+    );
+  const configured = env[TIME_ZONE_VARIABLE];
+  if (configured === undefined) return resolved;
+  const name = configured.startsWith(":") ? configured.slice(1) : configured;
+  const canonical = canonicalTimeZone(name);
+  if (canonical === undefined)
+    throw new DomainError(
+      `${TIME_ZONE_VARIABLE}=${configured} is not an IANA time zone such as America/Chicago.`,
+      400,
+    );
+  if (canonical !== resolved)
+    throw new DomainError(
+      `${TIME_ZONE_VARIABLE}=${configured} was not applied; the process resolved ${resolved}. Use an IANA zone such as America/Chicago.`,
+      400,
+    );
+  return resolved;
 }

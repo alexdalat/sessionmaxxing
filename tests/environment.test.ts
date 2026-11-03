@@ -4,6 +4,7 @@ import {
   resolveAllowedHosts,
   resolveEdition,
   resolveHost,
+  resolveTimeZone,
 } from "../server/environment.js";
 import { DomainError } from "../server/storage.js";
 
@@ -99,4 +100,24 @@ it("brackets an IPv6 listen address", () => {
   expect(formatListenUrl({ address: "::1", family: "IPv6", port: 4317 })).toBe(
     "http://[::1]:4317",
   );
+});
+
+it.each([
+  [{ TZ: "Asia/Kolkata" }, "Asia/Calcutta"],
+  [{ TZ: ":America/Chicago" }, "America/Chicago"],
+  [{}, "Europe/Berlin"],
+  [{ TZ: "UTC" }, "UTC"],
+])("accepts the resolved zone %s for env %j", (env, resolved) => {
+  expect(resolveTimeZone(env, resolved)).toBe(resolved);
+});
+it.each([
+  [{ TZ: "Foo/Bar" }, undefined],
+  [{}, undefined],
+  [{ TZ: "" }, "Etc/Unknown"],
+  [{ TZ: "PST8PDT,M3.2.0,M11.1.0" }, "UTC"],
+  [{ TZ: "Asia/Kolkata" }, "UTC"],
+])("rejects env %j with resolved zone %s naming TZ", (env, resolved) => {
+  const attempt = () => resolveTimeZone(env, resolved);
+  expect(attempt).toThrow(DomainError);
+  expect(attempt).toThrow("TZ");
 });
