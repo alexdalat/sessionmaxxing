@@ -195,25 +195,28 @@ it("ignores the shell's HOST and binds loopback", async () => {
   }
 });
 
-it("rejects an out-of-range SESSIONMAXXING_PORT before touching runtime state", async () => {
-  vi.stubEnv("SESSIONMAXXING_PORT", "70000");
-  const temp = await temporary();
-  const dataDirectory = join(temp.path, "runtime");
-  try {
-    await expect(
-      startDashboard({ dataDirectory, development: true, fetchUsage }).then(
-        (app) => app.close(),
-      ),
-    ).rejects.toThrow(
-      "SESSIONMAXXING_PORT must be an integer from 1 to 65535.",
-    );
-    await expect(access(dataDirectory)).rejects.toMatchObject({
-      code: "ENOENT",
-    });
-  } finally {
-    await temp.cleanup();
-  }
-});
+it.each(["70000", "", " "])(
+  "rejects SESSIONMAXXING_PORT=%j before touching runtime state",
+  async (value) => {
+    vi.stubEnv("SESSIONMAXXING_PORT", value);
+    const temp = await temporary();
+    const dataDirectory = join(temp.path, "runtime");
+    try {
+      await expect(
+        startDashboard({ dataDirectory, development: true, fetchUsage }).then(
+          (app) => app.close(),
+        ),
+      ).rejects.toThrow(
+        "SESSIONMAXXING_PORT must be an integer from 1 to 65535.",
+      );
+      await expect(access(dataDirectory)).rejects.toMatchObject({
+        code: "ENOENT",
+      });
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
 
 it("rejects unsupported SESSIONMAXXING_HOST values before touching runtime state", async () => {
   const temp = await temporary();

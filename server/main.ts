@@ -26,6 +26,7 @@ import { UsageHistoryStore } from "./usage-history.js";
 import { UsageMonitor } from "./usage-monitor.js";
 
 const PORT_VARIABLE = "SESSIONMAXXING_PORT";
+const DEFAULT_PORT = 4317;
 
 interface StartOptions {
   port?: number;
@@ -40,7 +41,12 @@ export async function startDashboard(
   options: StartOptions = {},
 ): Promise<FastifyInstance> {
   const host = resolveHost(process.env);
-  const port = options.port ?? Number(process.env[PORT_VARIABLE] ?? 4317);
+  const configuredPort = process.env[PORT_VARIABLE];
+  const port =
+    options.port ??
+    (configuredPort === undefined
+      ? DEFAULT_PORT
+      : Number(configuredPort.trim() || Number.NaN));
   if (!Number.isInteger(port) || port < 0 || port > 65535)
     throw new DomainError(
       `${PORT_VARIABLE} must be an integer from 1 to 65535.`,
