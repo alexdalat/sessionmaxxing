@@ -10,12 +10,12 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Skeleton } from "@/app/components/ui/skeleton";
 import { FABLE_COLOR, TOOLTIP_STYLE, WEEKLY_COLOR } from "@/app/lib/chart";
 import { dayTicks, paceSeries } from "@/app/lib/pace";
+import { localTimestamp } from "@/shared/local-time";
 import {
-  localTimestamp,
-  TIME_ZONE,
   type UsageSample,
   type UsageSnapshot,
   WEEKLY_HARD_CEILING_PERCENT,
@@ -33,10 +33,11 @@ export function WeeklyPace({
   snapshot: UsageSnapshot | null;
   marginPercent: number;
 }) {
+  const { timeZone } = useEnvironment();
   const series =
     samples && snapshot ? paceSeries(samples, snapshot, marginPercent) : null;
   const ticks = series
-    ? dayTicks(series[0].t, series[series.length - 1].t)
+    ? dayTicks(series[0].t, series[series.length - 1].t, timeZone)
     : [];
   return (
     <figure className="panel" aria-label="Weekly usage against pace">
@@ -47,7 +48,7 @@ export function WeeklyPace({
         ) : (
           <span className="muted">
             {snapshot?.weekly.resetsAt
-              ? `Queue cutoff pace + ${marginPercent}%, max ${WEEKLY_HARD_CEILING_PERCENT}% · resets ${localTimestamp(snapshot.weekly.resetsAt)}`
+              ? `Queue cutoff pace + ${marginPercent}%, max ${WEEKLY_HARD_CEILING_PERCENT}% · resets ${localTimestamp(snapshot.weekly.resetsAt, timeZone)}`
               : "No weekly window reported"}
           </span>
         )}
@@ -70,14 +71,14 @@ export function WeeklyPace({
                 tickFormatter={(t: number) =>
                   new Date(t).toLocaleDateString("en-US", {
                     weekday: "short",
-                    timeZone: TIME_ZONE,
+                    timeZone,
                   })
                 }
                 stroke="#8a8f98"
               />
               <YAxis domain={[0, 100]} unit="%" stroke="#8a8f98" width={45} />
               <Tooltip
-                labelFormatter={(t) => localTimestamp(Number(t))}
+                labelFormatter={(t) => localTimestamp(Number(t), timeZone)}
                 formatter={(value) => `${value}%`}
                 contentStyle={TOOLTIP_STYLE}
                 separator=": "

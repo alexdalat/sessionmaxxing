@@ -1,3 +1,4 @@
+import { localParts, localStart, shiftDate } from "@/shared/local-time";
 import {
   MINUTE_MS,
   resetMinute,
@@ -6,10 +7,8 @@ import {
   WEEK_MINUTES,
   WEEKLY_HARD_CEILING_PERCENT,
 } from "@/shared/types";
-import { easternDay } from "./time";
 
 const WEEK_MS = WEEK_MINUTES * MINUTE_MS;
-const DAY_MS = 86_400_000;
 const round = (value: number) => Math.round(value * 10) / 10;
 
 export interface PacePoint {
@@ -71,13 +70,21 @@ export function paceSeries(
   ].sort((a, b) => a.t - b.t);
 }
 
-/** Eastern midnights inside [start, end], one tick per calendar day. */
-export function dayTicks(start: number, end: number): number[] {
+/** Local midnights inside [start, end], one tick per calendar day. */
+export function dayTicks(
+  start: number,
+  end: number,
+  timeZone: string,
+): number[] {
   const ticks: number[] = [];
-  for (let t = start; t <= end + DAY_MS; t += DAY_MS) {
-    const midnight = t - easternDay(t).fraction * DAY_MS;
-    if (midnight >= start && midnight <= end && !ticks.includes(midnight))
-      ticks.push(midnight);
+  const lastDate = localParts(end, timeZone).date;
+  for (
+    let date = localParts(start, timeZone).date;
+    date <= lastDate;
+    date = shiftDate(date, 1)
+  ) {
+    const midnight = localStart(date, 0, timeZone);
+    if (midnight >= start && midnight <= end) ticks.push(midnight);
   }
   return ticks;
 }

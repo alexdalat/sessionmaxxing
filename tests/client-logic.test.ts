@@ -13,7 +13,7 @@ import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
 import { queuePreview, waitNote } from "../app/lib/queuePreview";
 import { allowedStartHours } from "../app/lib/quietHours";
 import { clockOfFraction } from "../app/lib/sessionWindows";
-import { easternCell, easternDay } from "../app/lib/time";
+import { easternCell } from "../app/lib/time";
 import type {
   ActivitySource,
   ChangedFile,
@@ -37,7 +37,7 @@ import {
   needsReview,
   planLabel,
 } from "../shared/types.js";
-import { usageSnapshot } from "./helpers";
+import { TEST_TIME_ZONE, usageSnapshot } from "./helpers";
 
 const samples: UsageSample[] = [
   {
@@ -143,20 +143,64 @@ it("quiet summary names the ranges, when they open, and the two session reserves
   ).toBe("Quiet hours not computed yet (Local history could not be read.)");
 });
 
-it("day ticks land on each Eastern midnight inside the weekly window", () => {
-  const start = Date.parse("2026-09-06T07:53:00.000Z");
-  const end = Date.parse("2026-09-13T07:53:00.000Z");
-  const ticks = dayTicks(start, end);
-  expect(ticks.map((t) => easternDay(t).date)).toEqual([
-    "2026-09-07",
-    "2026-09-08",
-    "2026-09-09",
-    "2026-09-10",
-    "2026-09-11",
-    "2026-09-12",
-    "2026-09-13",
-  ]);
-  for (const t of ticks) expect(easternDay(t).fraction).toBe(0);
+describe("dayTicks", () => {
+  const ms = (iso: string) => Date.parse(iso);
+
+  it("lands on each local midnight inside the weekly window", () => {
+    expect(
+      dayTicks(
+        ms("2026-09-06T07:53:00.000Z"),
+        ms("2026-09-13T07:53:00.000Z"),
+        TEST_TIME_ZONE,
+      ),
+    ).toEqual([
+      ms("2026-09-07T04:00:00Z"),
+      ms("2026-09-08T04:00:00Z"),
+      ms("2026-09-09T04:00:00Z"),
+      ms("2026-09-10T04:00:00Z"),
+      ms("2026-09-11T04:00:00Z"),
+      ms("2026-09-12T04:00:00Z"),
+      ms("2026-09-13T04:00:00Z"),
+    ]);
+  });
+
+  it("keeps the 25-hour fall-back day between two local midnights", () => {
+    expect(
+      dayTicks(
+        ms("2026-10-31T12:00:00Z"),
+        ms("2026-11-03T12:00:00Z"),
+        TEST_TIME_ZONE,
+      ),
+    ).toEqual([
+      ms("2026-11-01T04:00:00Z"),
+      ms("2026-11-02T05:00:00Z"),
+      ms("2026-11-03T05:00:00Z"),
+    ]);
+  });
+
+  it("returns half-hour-zone local midnights", () => {
+    expect(
+      dayTicks(
+        ms("2026-09-06T00:00:00Z"),
+        ms("2026-09-09T00:00:00Z"),
+        "Asia/Kolkata",
+      ),
+    ).toEqual([
+      ms("2026-09-06T18:30:00Z"),
+      ms("2026-09-07T18:30:00Z"),
+      ms("2026-09-08T18:30:00Z"),
+    ]);
+  });
+
+  it("includes a range start that is exactly a local midnight once", () => {
+    expect(
+      dayTicks(
+        ms("2026-09-07T04:00:00Z"),
+        ms("2026-09-08T04:00:00Z"),
+        TEST_TIME_ZONE,
+      ),
+    ).toEqual([ms("2026-09-07T04:00:00Z"), ms("2026-09-08T04:00:00Z")]);
+  });
 });
 
 it("clock of a day fraction reads to the minute with 12-hour labels", () => {
