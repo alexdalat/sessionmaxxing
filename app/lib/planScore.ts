@@ -5,10 +5,10 @@ import {
   partitionKeys,
   partitionShares,
 } from "@/app/lib/activitySeries";
+import { localStart } from "@/shared/local-time";
 import type { ActivitySource, CoverageDay, PlanScore } from "@/shared/types";
 
-/** 16:00Z is noon EST and 1 PM EDT, so the same suffix stays inside the Eastern day in either offset. */
-const EASTERN_MIDDAY_SUFFIX = "T16:00:00Z";
+const LOCAL_NOON_HOUR = 12;
 const UNATTRIBUTED_SOURCE: ActivitySource = "unknown";
 
 export interface ScoreRow {
@@ -52,6 +52,7 @@ function splitCoverage(
 export function scoreSeries(
   plan: PlanScore,
   breakdown: Breakdown,
+  timeZone: string,
 ): { keys: string[]; rows: ScoreRow[] } {
   const keys = partitionKeys(plan.days, breakdown);
   const unattributed = unattributedKey(breakdown);
@@ -64,7 +65,7 @@ export function scoreSeries(
   if (!keys.includes(unattributed) && plan.days.some(needsUnattributed))
     keys.push(unattributed);
   const rows = plan.days.map((day) => {
-    const midday = Date.parse(`${day.date}${EASTERN_MIDDAY_SUFFIX}`);
+    const midday = localStart(day.date, LOCAL_NOON_HOUR, timeZone);
     const week = plan.weeks.find(
       (candidate) =>
         midday >= Date.parse(candidate.start) &&

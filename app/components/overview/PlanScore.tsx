@@ -12,6 +12,7 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Label } from "@/app/components/ui/label";
 import {
   Select,
@@ -39,9 +40,10 @@ const WEEKLY_LINE_COLOR = "#d0d6e0";
 const dash = (value: number | null) => (value === null ? "–" : String(value));
 
 export function PlanScore() {
+  const { timeZone } = useEnvironment();
   const plan = usePolling<PlanScoreData>("/api/plan-score", USAGE_POLL_MS);
   const [breakdown, setBreakdown] = useState<Breakdown>("source");
-  const series = plan.data ? scoreSeries(plan.data, breakdown) : null;
+  const series = plan.data ? scoreSeries(plan.data, breakdown, timeZone) : null;
   return (
     <section
       className="panel"

@@ -13,7 +13,7 @@ import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
 import { queuePreview, waitNote } from "../app/lib/queuePreview";
 import { allowedStartHours } from "../app/lib/quietHours";
 import { clockOfFraction, daySegments } from "../app/lib/sessionWindows";
-import { easternCell, localDay } from "../app/lib/time";
+import { localCell, localDay } from "../app/lib/time";
 import type {
   ActivitySource,
   ChangedFile,
@@ -279,7 +279,7 @@ const queued = (
   id,
   title: id,
   prompt: "do the thing",
-  workdir: "/home/user/workspace/claude-capacity-dashboard",
+  workdir: "/work/project",
   model: "opus",
   priority: 0,
   status,
@@ -564,7 +564,9 @@ describe("plan score series", () => {
   };
 
   const rowFor = (breakdown: Breakdown, date: string) =>
-    scoreSeries(plan, breakdown).rows.find((row) => row.date === date);
+    scoreSeries(plan, breakdown, TEST_TIME_ZONE).rows.find(
+      (row) => row.date === date,
+    );
 
   it("gives each day its coverage and the score of the week containing it", () => {
     expect(rowFor("source", "2026-08-30")).toMatchObject({
@@ -581,6 +583,7 @@ describe("plan score series", () => {
     const { rows } = scoreSeries(
       { ...plan, days: [coverageDay("2026-09-09", 30, { local: 5 })] },
       "source",
+      TEST_TIME_ZONE,
     );
     expect(rows).toEqual([
       {
@@ -606,7 +609,7 @@ describe("plan score series", () => {
   });
 
   it("splits coverage across models and folds the unnamed ones", () => {
-    const { keys } = scoreSeries(plan, "model");
+    const { keys } = scoreSeries(plan, "model", TEST_TIME_ZONE);
     expect(keys).toEqual([
       "claude-opus-4-6",
       "claude-fable-5-1",
@@ -632,6 +635,36 @@ describe("plan score series", () => {
       "claude-opus-4-6": 0,
       Other: 12.5,
     });
+  });
+
+  it("assigns a day to the week containing its local noon", () => {
+    const boundary = "2026-09-07T10:00:00.000Z";
+    const split: PlanScoreData = {
+      ...plan,
+      days: [coverageDay("2026-09-07", 30, { local: 5 })],
+      weeks: [
+        {
+          start: "2026-08-31T10:00:00.000Z",
+          end: boundary,
+          percent: 70,
+          score: 70,
+          complete: true,
+        },
+        {
+          start: boundary,
+          end: "2026-09-14T10:00:00.000Z",
+          percent: 90,
+          score: 90,
+          complete: false,
+        },
+      ],
+    };
+    expect(scoreSeries(split, "source", "Asia/Kolkata").rows[0].weekly).toBe(
+      70,
+    );
+    expect(scoreSeries(split, "source", TEST_TIME_ZONE).rows[0].weekly).toBe(
+      90,
+    );
   });
 
   it("leaves null-coverage days without series fields", () => {
@@ -880,9 +913,22 @@ describe("daySegments", () => {
   });
 });
 
-describe("easternCell", () => {
-  it("maps an instant to its Eastern weekday and hour across DST", () => {
-    expect(easternCell("2026-09-06T12:00:00Z")).toEqual({ day: 0, hour: 8 });
-    expect(easternCell("2026-01-15T03:30:00Z")).toEqual({ day: 3, hour: 22 });
+describe("localCell", () => {
+  it("maps an instant to its local weekday and hour across DST", () => {
+    expect(localCell("2026-09-06T12:00:00Z", TEST_TIME_ZONE)).toEqual({
+      day: 0,
+      hour: 8,
+    });
+    expect(localCell("2026-01-15T03:30:00Z", TEST_TIME_ZONE)).toEqual({
+      day: 3,
+      hour: 22,
+    });
+  });
+
+  it("reads Monday 00:15 for 18:45Z in Asia/Kolkata", () => {
+    expect(localCell("2026-09-06T18:45:00Z", "Asia/Kolkata")).toEqual({
+      day: 1,
+      hour: 0,
+    });
   });
 });

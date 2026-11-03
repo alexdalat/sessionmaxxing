@@ -1,4 +1,5 @@
 "use client";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import {
   Tooltip,
   TooltipContent,
@@ -8,7 +9,7 @@ import { useClock } from "@/app/hooks/useClock";
 import { formatNumber, heatmapTotals } from "@/app/lib/analyticsRows";
 import { TOOLTIP_CLASS } from "@/app/lib/chart";
 import { allowedStartHours } from "@/app/lib/quietHours";
-import { easternCell, WEEKDAYS } from "@/app/lib/time";
+import { localCell, WEEKDAYS } from "@/app/lib/time";
 import type { Analytics, HeatCell, HeatShare } from "@/shared/types";
 import {
   ACTIVITY_SOURCE_LABELS,
@@ -97,7 +98,8 @@ export function Heatmap({
   data: Analytics;
   quietStartHours: number | undefined;
 }) {
-  const now = easternCell(useClock());
+  const { timeZone } = useEnvironment();
+  const now = localCell(useClock(), timeZone);
   const max = Math.max(1, ...data.heatmap.map((cell) => cell.activeMinutes));
   const totals = heatmapTotals(data.heatmap);
   const dayMax = Math.max(1, ...totals.days);
