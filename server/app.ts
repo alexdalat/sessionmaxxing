@@ -155,6 +155,7 @@ export async function createApp(options: AppOptions) {
       aggregate(
         await loadHistory(),
         Number(request.query.days ?? 30) as RangeDays,
+        options.timeZone,
         now(),
         options.usage?.current().snapshot ?? null,
       ),
@@ -181,7 +182,12 @@ export async function createApp(options: AppOptions) {
       "/api/plan-score",
       { schema: { querystring: emptyQuerySchema } },
       async () =>
-        planScore(usage.samples(now()), now(), (await loadHistory()).events),
+        planScore(
+          usage.samples(now()),
+          now(),
+          (await loadHistory()).events,
+          options.timeZone,
+        ),
     );
     app.post(
       "/api/usage/refresh",
@@ -197,9 +203,12 @@ export async function createApp(options: AppOptions) {
     const { settings, usage } = options;
     const quiet = new QuietHoursCache(
       async () =>
-        aggregate(await loadHistory(), 30, now()).opportunities.map(
-          (window) => window.startHour,
-        ),
+        aggregate(
+          await loadHistory(),
+          30,
+          options.timeZone,
+          now(),
+        ).opportunities.map((window) => window.startHour),
       now,
       options.quietHoursTtlMs,
     );
@@ -221,6 +230,7 @@ export async function createApp(options: AppOptions) {
         settings.snapshot(),
         usage.current(),
         now(),
+        options.timeZone,
         quiet.current(),
         load,
         rates.current(),

@@ -12,6 +12,7 @@ import {
 import {
   fakeChild,
   SESSION_RATES,
+  TEST_TIME_ZONE,
   TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
@@ -31,6 +32,7 @@ const planner = (load: DispatchLoad) =>
     anyHour,
     { snapshot: usageSnapshot(), error: null },
     at,
+    TEST_TIME_ZONE,
     undefined,
     load,
     {

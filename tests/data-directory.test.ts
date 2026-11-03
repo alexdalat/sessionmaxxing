@@ -27,6 +27,7 @@ import {
 import {
   fakeChild,
   SESSION_RATES,
+  TEST_TIME_ZONE,
   TEST_WORKDIR_ROOT,
   taskInput,
   temporary,
@@ -40,6 +41,7 @@ const serial = (load: DispatchLoad) =>
     { ...DEFAULT_DISPATCH_SETTINGS, maxConcurrentRuns: 1 },
     { snapshot: null, error: null },
     new Date(),
+    TEST_TIME_ZONE,
     undefined,
     load,
     { rates: SESSION_RATES, error: null },

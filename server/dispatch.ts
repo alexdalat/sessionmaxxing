@@ -1,4 +1,11 @@
 import {
+  localParts,
+  localStart,
+  localTimestamp,
+  nextLocalHour,
+  shiftDate,
+} from "../shared/local-time.js";
+import {
   BLOCK_MINUTES,
   type BucketGate,
   type ClaudeBucket,
@@ -8,7 +15,6 @@ import {
   EMPTY_LOAD,
   FABLE_MODEL,
   hourLabel,
-  localTimestamp,
   type OfficialUsage,
   type PlanningSnapshot,
   type PublicTask,
@@ -22,7 +28,6 @@ import {
   WEEK_MINUTES,
   WEEKLY_HARD_CEILING_PERCENT,
 } from "../shared/types.js";
-import { localParts, localStart, shiftDate } from "./analytics.js";
 import { modelSessionPercent, type SessionCalibration } from "./calibration.js";
 import type { QuietRanking } from "./quiet-hours.js";
 
@@ -152,8 +157,9 @@ export function quietHours(
   ranking: QuietRanking,
   count: number,
   now: Date,
+  timeZone: string,
 ): QuietHours {
-  const nowHour = localParts(now).hour;
+  const nowHour = localParts(now, timeZone).hour;
   const startHours =
     ranking.ranking === null
       ? null
@@ -179,13 +185,14 @@ export function planDispatch(
   settings: DispatchSettings,
   usage: UsageState,
   now: Date,
+  timeZone: string,
   ranking: QuietRanking = { ranking: null, error: null },
   load: DispatchLoad = EMPTY_LOAD,
   calibration: SessionCalibration = { rates: null, error: null },
 ): PlanningSnapshot {
   const snapshot = usage.snapshot;
   const { lastRunEndedAt } = load;
-  const quiet = quietHours(ranking, settings.quietStartHours, now);
+  const quiet = quietHours(ranking, settings.quietStartHours, now, timeZone);
   const busyHours = inBusyHours(settings, quiet);
   const session = sessionGate(
     snapshot?.session,
@@ -258,6 +265,7 @@ export function planDispatch(
       reason: `${describe("Session", session)} · ${describe("Weekly", weekly)}`,
     };
   return {
+    timeZone,
     settings,
     rates: calibration.rates,
     usage: snapshot,
@@ -334,16 +342,16 @@ const fitCost = (expected: number, ceiling: number) =>
   Math.min(expected, ceiling);
 
 /** The window opening at `hour` that is still open at `at`, searching yesterday through tomorrow. */
-function windowStartAt(hour: number, at: number): number {
-  const date = localParts(at).date;
+function windowStartAt(hour: number, at: number, timeZone: string): number {
+  const date = localParts(at, timeZone).date;
   const starts = [-1, 0, 1].map((days) =>
-    localStart(shiftDate(date, days), hour),
+    localStart(shiftDate(date, days), hour, timeZone),
   );
   return starts.find((start) => start + WINDOW_MS > at) ?? starts[2];
 }
 
-const insideWindow = (hour: number, at: number) =>
-  windowStartAt(hour, at) <= at;
+const insideWindow = (hour: number, at: number, timeZone: string) =>
+  windowStartAt(hour, at, timeZone) <= at;
 
 /** Expected session cost of each pending Claude task queued ahead of `taskId` that can run before it, in dispatch order. */
 export function costsAhead(
@@ -389,17 +397,15 @@ function weeklyClearsAt(
 }
 
 const HOUR_MS = 60 * MINUTE_MS;
-// TIME_ZONE moves by whole hours, so its local hour boundaries fall on UTC hour boundaries.
-const nextHour = (at: number) => (Math.floor(at / HOUR_MS) + 1) * HOUR_MS;
 /** An idle or unknown session stays as it is until something starts, so one day covers every hour. */
 const IDLE_HORIZON_MS = (HOURS_PER_DAY + 1) * HOUR_MS;
 
 type Opens = (at: number) => boolean;
 const always: Opens = () => true;
 const inQuietHours =
-  (quiet: QuietHours): Opens =>
+  (quiet: QuietHours, timeZone: string): Opens =>
   (at) =>
-    quiet.startHours?.includes(localParts(at).hour) ?? false;
+    quiet.startHours?.includes(localParts(at, timeZone).hour) ?? false;
 
 /** The schedule rules of the task itself: earliest start aside, its preferred window or the quiet-hours-only rule. */
 function scheduleOpens(
@@ -407,27 +413,35 @@ function scheduleOpens(
   planning: PlanningSnapshot,
 ): Opens {
   const window = task.preferredWindowStart;
-  if (window !== null) return (at) => insideWindow(window, at);
-  if (quietHoursOnly(planning.settings)) return inQuietHours(planning.quiet);
+  if (window !== null)
+    return (at) => insideWindow(window, at, planning.timeZone);
+  if (quietHoursOnly(planning.settings))
+    return inQuietHours(planning.quiet, planning.timeZone);
   return always;
 }
 
 /** The session cutoff the live gate applies at `at`. */
 function cutoffAt(planning: PlanningSnapshot, now: number) {
-  const { session, settings, quiet } = planning;
+  const { session, settings, quiet, timeZone } = planning;
   return (at: number) =>
     // At `now` the gate reads the snapshot's own ceiling; matching it keeps "ready now" in agreement.
     at === now
       ? session.ceiling
       : FULL -
-        (quietHoursOnly(settings) || inQuietHours(quiet)(at)
+        (quietHoursOnly(settings) || inQuietHours(quiet, timeZone)(at)
           ? settings.sessionReservePercent
           : settings.busyHoursReservePercent);
 }
 
 /** The first instant from `from` (itself, then each later hour boundary) before `until` where `opens` holds. */
-function firstInstant(from: number, until: number, opens: Opens) {
-  for (let at = from; at < until; at = nextHour(at)) if (opens(at)) return at;
+function firstInstant(
+  from: number,
+  until: number,
+  opens: Opens,
+  timeZone: string,
+) {
+  for (let at = from; at < until; at = nextLocalHour(at, timeZone))
+    if (opens(at)) return at;
   return null;
 }
 
@@ -449,6 +463,7 @@ function startInSession(
   cost: number,
   opens: Opens,
   cutoff: (at: number) => number,
+  timeZone: string,
 ): SessionState | null {
   let { from, used, end, idle } = state;
   const fits = (at: number) =>
@@ -460,7 +475,7 @@ function startInSession(
     idle: false,
   });
   if (end !== null) {
-    const at = firstInstant(from, end, fits);
+    const at = firstInstant(from, end, fits, timeZone);
     if (at !== null) return startAt(at);
     // Tasks running now are assumed finished by the reset, so the next window starts empty.
     from = Math.max(from, end);
@@ -468,7 +483,7 @@ function startInSession(
     end = null;
     idle = true;
   }
-  const at = firstInstant(from, from + IDLE_HORIZON_MS, fits);
+  const at = firstInstant(from, from + IDLE_HORIZON_MS, fits, timeZone);
   return at === null ? null : startAt(at);
 }
 
@@ -488,9 +503,15 @@ function startsAt(
     now,
     task.earliestStart === null ? 0 : Date.parse(task.earliestStart),
   );
-  const { usage, session, weekly, fable, settings, rates, quiet } = planning;
+  const { usage, session, weekly, fable, settings, rates, quiet, timeZone } =
+    planning;
   if (usage === null)
-    return firstInstant(notBefore, notBefore + IDLE_HORIZON_MS, opens);
+    return firstInstant(
+      notBefore,
+      notBefore + IDLE_HORIZON_MS,
+      opens,
+      planning.timeZone,
+    );
   const expected = expectedSessionCost(task, runs, rates);
   if (expected === null || session.percent === null) return null;
   const weeklyAt = weekly.ok
@@ -520,16 +541,19 @@ function startsAt(
     idle: expired,
   };
   const cutoff = cutoffAt(planning, now);
-  const aheadOpens = quietHoursOnly(settings) ? inQuietHours(quiet) : always;
+  const aheadOpens = quietHoursOnly(settings)
+    ? inQuietHours(quiet, timeZone)
+    : always;
   for (const cost of ahead) {
     // A task ahead that can never start takes nothing from this one.
-    state = startInSession(state, cost, aheadOpens, cutoff) ?? state;
+    state = startInSession(state, cost, aheadOpens, cutoff, timeZone) ?? state;
   }
   const started = startInSession(
     { ...state, from: Math.max(state.from, notBefore, fableAt) },
     expected,
     opens,
     cutoff,
+    timeZone,
   );
   return started === null ? null : started.from;
 }
@@ -567,12 +591,12 @@ export function taskGate(
   )
     return {
       status: "waiting",
-      reason: `Starts after ${localTimestamp(task.earliestStart)}`,
+      reason: `Starts after ${localTimestamp(task.earliestStart, planning.timeZone)}`,
       eligibleAt: eligible,
     };
   if (
     task.preferredWindowStart !== null &&
-    !insideWindow(task.preferredWindowStart, now.getTime())
+    !insideWindow(task.preferredWindowStart, now.getTime(), planning.timeZone)
   )
     return {
       status: "waiting",

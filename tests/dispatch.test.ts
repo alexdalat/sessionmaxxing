@@ -15,7 +15,7 @@ import {
   type DispatchLoad,
   EMPTY_LOAD,
 } from "../shared/types.js";
-import { SESSION_RATES, usageSnapshot } from "./helpers";
+import { SESSION_RATES, TEST_TIME_ZONE, usageSnapshot } from "./helpers";
 
 const now = new Date("2026-09-06T12:00:00Z");
 const calibration = { rates: SESSION_RATES, error: null };
@@ -26,7 +26,15 @@ const plan = (
   ranking?: QuietRanking,
   load: DispatchLoad = EMPTY_LOAD,
 ) =>
-  planDispatch(settings, { snapshot, error }, now, ranking, load, calibration);
+  planDispatch(
+    settings,
+    { snapshot, error },
+    now,
+    TEST_TIME_ZONE,
+    ranking,
+    load,
+    calibration,
+  );
 
 it("measures weekly pace as the elapsed share of the seven-day window", () => {
   expect(weeklyPace("2026-09-13T12:00:00Z", now)).toBe(0);
@@ -221,6 +229,7 @@ it("ranks quiet start hours, marks whether now is inside one, and names the next
     DEFAULT_DISPATCH_SETTINGS,
     { snapshot: usageSnapshot(), error: null },
     new Date("2026-09-06T05:30:00Z"),
+    TEST_TIME_ZONE,
     ranking,
     EMPTY_LOAD,
     calibration,
@@ -241,6 +250,7 @@ it("distrusts official usage fetched before the last run ended", () => {
     DEFAULT_DISPATCH_SETTINGS,
     { snapshot, error: null },
     now,
+    TEST_TIME_ZONE,
     undefined,
     { ...EMPTY_LOAD, lastRunEndedAt: "2026-09-06T11:56:00Z" },
     calibration,
@@ -253,6 +263,7 @@ it("distrusts official usage fetched before the last run ended", () => {
     DEFAULT_DISPATCH_SETTINGS,
     { snapshot, error: null },
     now,
+    TEST_TIME_ZONE,
     undefined,
     { ...EMPTY_LOAD, lastRunEndedAt: "2026-09-06T11:55:00Z" },
     calibration,
@@ -513,6 +524,7 @@ it("admits no Claude task while the session rates are unknown", () => {
     anyHour,
     { snapshot: halfSpent, error: null },
     now,
+    TEST_TIME_ZONE,
     undefined,
     EMPTY_LOAD,
     { rates: null, error: "Local history could not be read." },
@@ -781,6 +793,7 @@ const planAt = (at: Date, sessionPercent: number) =>
       error: null,
     },
     at,
+    TEST_TIME_ZONE,
     smallHoursQuiet,
     EMPTY_LOAD,
     calibration,
@@ -881,4 +894,76 @@ it("waits for the weekly ceiling to clear what running tasks hold on top of the 
     status: "waiting",
     eligibleAt: "2026-09-07T00:00:00.000Z",
   });
+});
+
+const KOLKATA = "Asia/Kolkata";
+const planIn = (
+  timeZone: string,
+  at: Date,
+  snapshot: ReturnType<typeof usageSnapshot>,
+  settings = DEFAULT_DISPATCH_SETTINGS,
+  ranking?: QuietRanking,
+) =>
+  planDispatch(
+    settings,
+    { snapshot, error: null },
+    at,
+    timeZone,
+    ranking,
+    EMPTY_LOAD,
+    calibration,
+  );
+
+it("reads quiet hours in the zone it was given and carries that zone on the snapshot", () => {
+  // 2026-09-06T12:00Z is 17:30 in Kolkata.
+  const planning = planIn(KOLKATA, now, usageSnapshot());
+  expect(planning.timeZone).toBe(KOLKATA);
+  expect(planning.quiet.nowHour).toBe(17);
+});
+
+it("steps the eligible-time walk on local hours in a half-hour zone", () => {
+  // Kolkata hour 23 starts at 17:30Z; the session resets at 16:09Z, before any quiet start hour.
+  const planning = planIn(
+    KOLKATA,
+    now,
+    usageSnapshot(),
+    { ...DEFAULT_DISPATCH_SETTINGS, quietStartHours: 1 },
+    { ranking: [23, 0, 1], error: null },
+  );
+  expect(eligibleAt(pending, planning, now, [])).toBe(
+    "2026-09-06T17:30:00.000Z",
+  );
+});
+
+it("opens a preferred window at its local start hour in a half-hour zone", () => {
+  const planning = planIn(KOLKATA, now, usageSnapshot(), {
+    ...DEFAULT_DISPATCH_SETTINGS,
+    busyHoursReservePercent: 25,
+  });
+  const windowed = { ...pending, preferredWindowStart: 22 };
+  expect(taskGate(windowed, planning, now, [])).toMatchObject({
+    status: "waiting",
+    reason: "Outside window 10 PM → 3 AM",
+    eligibleAt: "2026-09-06T16:30:00.000Z",
+  });
+});
+
+it("starts a quiet hour after a spring-forward gap at the first instant it exists", () => {
+  // 01:00 EST is 06:00Z; 02:00 does not exist, so local hour 3 begins at 07:00Z.
+  const springNow = new Date("2026-03-08T05:30:00Z");
+  const planning = planIn(
+    TEST_TIME_ZONE,
+    springNow,
+    usageSnapshot({
+      fetchedAt: "2026-03-08T05:30:00.000Z",
+      session: { percent: 0, resetsAt: "2026-03-08T00:00:00.000Z" },
+      weekly: { percent: 2, resetsAt: "2026-03-13T07:53:00.000Z" },
+      fable: { percent: 2, resetsAt: "2026-03-13T07:53:00.000Z" },
+    }),
+    { ...DEFAULT_DISPATCH_SETTINGS, quietStartHours: 1 },
+    { ranking: [3, 0, 1], error: null },
+  );
+  expect(eligibleAt(pending, planning, springNow, [])).toBe(
+    "2026-03-08T07:00:00.000Z",
+  );
 });

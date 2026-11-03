@@ -517,6 +517,8 @@ export interface DispatchGate {
   reason: string;
 }
 export interface PlanningSnapshot {
+  /** The IANA zone every hour in this snapshot is read in. */
+  timeZone: string;
   settings: DispatchSettings;
   /** Session percent per million output tokens, fitted on this machine; null until a window can be fitted. */
   rates: SessionRates | null;
