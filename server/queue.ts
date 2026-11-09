@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
+  DEFAULT_COMMIT,
   DEFAULT_MODEL,
   type ModelFamily,
   modelFamily,
@@ -58,6 +59,7 @@ export function publicTask(task: Task): PublicTask {
     earliestStart: task.earliestStart,
     preferredWindowStart: task.preferredWindowStart,
     dependsOn: [...task.dependsOn],
+    commit: task.commit,
     maxTurns: task.maxTurns,
     tokens: task.tokens,
     sessionCostPercent: null,
@@ -135,9 +137,14 @@ export class QueueStore {
         tokens?: number;
         finishedAt?: string | null;
         dependsOn?: string[];
+        commit?: boolean;
       } = task;
       if (persisted.dependsOn === undefined) {
         persisted.dependsOn = [];
+        migrated = true;
+      }
+      if (persisted.commit === undefined) {
+        persisted.commit = DEFAULT_COMMIT;
         migrated = true;
       }
       if (persisted.tokens === undefined) {
@@ -236,6 +243,7 @@ export class QueueStore {
         workdir,
         id: taskId,
         model: input.model || DEFAULT_MODEL,
+        commit: input.commit ?? DEFAULT_COMMIT,
         status: "pending",
         createdAt: new Date().toISOString(),
         finishedAt: null,

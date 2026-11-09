@@ -90,6 +90,8 @@ export function validateFields(input: TaskInput) {
       `Depends on must list up to ${MAX_DEPENDENCIES} distinct task ids.`,
       400,
     );
+  if (input.commit !== undefined && typeof input.commit !== "boolean")
+    throw new DomainError("Commit must be true or false.", 400);
   if (
     input.preferredWindowStart !== null &&
     (!Number.isInteger(input.preferredWindowStart) ||

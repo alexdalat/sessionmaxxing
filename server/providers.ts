@@ -2,7 +2,11 @@ import { spawn } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import type { Readable } from "node:stream";
 import { PRODUCT_NAME } from "../shared/product.js";
-import type { RestartMethod, Task } from "../shared/types.js";
+import {
+  CONVENTIONAL_RULES,
+  type RestartMethod,
+  type Task,
+} from "../shared/types.js";
 export interface ProviderProcess extends EventEmitter {
   stdout: Readable | null;
   stderr: Readable | null;
@@ -23,6 +27,7 @@ export type SpawnProvider = (
 const CLAUDE_COMMAND = "claude";
 const APPLY_IN_PLACE =
   "Apply this work yourself instead of leaving it for review. Edit the files directly in this work directory and ignore git entirely: do not check git status, commit, stash, branch, or create a worktree, and never skip or refuse a change because of uncommitted changes.";
+const APPLY_AND_COMMIT = `Apply this work yourself instead of leaving it for review. Edit the files directly in this work directory, and never skip or refuse a change because of uncommitted changes. Do not stash, switch or create branches, or create a worktree. When the work is done, run \`git status\`, stage only the files this run created or changed, and commit them on the current branch. The commit message is a single subject line that follows these rules, never a free-form message: ${CONVENTIONAL_RULES} Then, if the current branch has an upstream, run \`git push\` to it, and report any push error.`;
 const OTHER_DEPLOYS =
   "Run any other deploy the project needs (a Coolify deploy, the project's own deploy command) before you finish.";
 const KEEP_DASHBOARD = `Never restart, recreate or stop the ${PRODUCT_NAME} container: it hosts this run.`;
@@ -39,16 +44,16 @@ const restartSentence = (method: RestartMethod) => {
   }
 };
 /** Appended to a dispatched prompt while the queue's apply override is on; names what the dashboard restarts afterwards. */
-export const autoApplyInstruction = (method: RestartMethod) =>
+export const autoApplyInstruction = (method: RestartMethod, commit: boolean) =>
   [
-    APPLY_IN_PLACE,
+    commit ? APPLY_AND_COMMIT : APPLY_IN_PLACE,
     restartSentence(method),
     KEEP_DASHBOARD,
     REPORT_BLOCKER,
   ].join(" ");
 export const withAutoApply = (task: Task, method: RestartMethod): Task => ({
   ...task,
-  prompt: `${task.prompt}\n\n${autoApplyInstruction(method)}`,
+  prompt: `${task.prompt}\n\n${autoApplyInstruction(method, task.commit)}`,
 });
 /** The final message Claude Code prints when a usage limit ends a run. */
 const LIMIT_STOP = /^You['’]ve hit your (?:session|weekly) limit\b/;

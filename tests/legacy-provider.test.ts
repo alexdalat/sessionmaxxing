@@ -33,6 +33,7 @@ const storedTask = (workdir: string, patch: Record<string, unknown> = {}) => ({
   createdAt: CREATED_AT,
   finishedAt: FINISHED_AT,
   dependsOn: [] as string[],
+  commit: true,
   tokens: 100_000,
   ...patch,
 });

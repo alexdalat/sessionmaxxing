@@ -637,9 +637,51 @@ it("appends the apply instruction to a dispatched prompt only while the override
     const second = await store.create(taskInput(temp.path));
     await finish(second.id);
     expect(launched[1]).toBe(
-      `${task.prompt}\n\n${autoApplyInstruction({ kind: "none" })}`,
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "none" }, true)}`,
     );
     expect(store.snapshot().tasks.find((t) => t.id === second.id)?.prompt).toBe(
+      task.prompt,
+    );
+
+    const optedOut = await store.create({
+      ...taskInput(temp.path),
+      commit: false,
+    });
+    await finish(optedOut.id);
+    expect(launched[2]).toBe(
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "none" }, false)}`,
+    );
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+it("tells an applied run the restart method of its work directory", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    const task = await store.create(taskInput(temp.path));
+    const launched: string[] = [];
+    let child = fakeChild();
+    const runner = await Runner.open(store, temp.path, {
+      launch: (dispatched: Task) => {
+        launched.push(dispatched.prompt);
+        child = fakeChild();
+        return child;
+      },
+      autoApply: () => true,
+      restart: { spawn: fakeCommand().spawn },
+    });
+    await runner.restartMethods.set(await realpath(temp.path), {
+      kind: "compose",
+    });
+    await runner.start(task.id);
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    expect(launched).toEqual([
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "compose" }, true)}`,
+    ]);
+    expect(store.snapshot().tasks.find((t) => t.id === task.id)?.prompt).toBe(
       task.prompt,
     );
     await runner.close();
@@ -706,39 +748,6 @@ it("starts a fresh Claude session when a retried task failed for another reason"
     await runner.waitForIdle();
     expect(store.snapshot().tasks[0].status).toBe("failed");
     await store.retry(task.id);
-it("tells an applied run the restart method of its work directory", async () => {
-  const temp = await temporary();
-  try {
-    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
-    const task = await store.create(taskInput(temp.path));
-    const launched: string[] = [];
-    let child = fakeChild();
-    const runner = await Runner.open(store, temp.path, {
-      launch: (dispatched: Task) => {
-        launched.push(dispatched.prompt);
-        child = fakeChild();
-        return child;
-      },
-      autoApply: () => true,
-      restart: { spawn: fakeCommand().spawn },
-    });
-    await runner.restartMethods.set(await realpath(temp.path), {
-      kind: "compose",
-    });
-    await runner.start(task.id);
-    child.emit("close", 0, null);
-    await runner.waitForIdle();
-    expect(launched).toEqual([
-      `${task.prompt}\n\n${autoApplyInstruction({ kind: "compose" })}`,
-    ]);
-    expect(store.snapshot().tasks.find((t) => t.id === task.id)?.prompt).toBe(
-      task.prompt,
-    );
-    await runner.close();
-  } finally {
-    await temp.cleanup();
-  }
-});
     await runner.start(task.id);
     const [first, second] = launch.mock.calls;
     expect(second[1]).toMatch(UUID);

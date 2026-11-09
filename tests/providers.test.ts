@@ -20,6 +20,7 @@ it("launches the exact claude argv with no shell and the whole prompt as one arg
     createdAt: new Date().toISOString(),
     finishedAt: null,
     model: "opus",
+    commit: true,
   };
   const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
   launchProvider(base, sessionId, false, spawn);
@@ -117,6 +118,7 @@ const applyTask = {
   createdAt: new Date().toISOString(),
   finishedAt: null,
   model: "opus",
+  commit: false,
 };
 const APPLY_METHODS: [string, RestartMethod, string][] = [
   [
@@ -135,24 +137,48 @@ const APPLY_METHODS: [string, RestartMethod, string][] = [
     "the restart command ./restart.sh",
   ],
 ];
+const KEPT_SENTENCES = [
+  "never skip or refuse a change because of uncommitted changes",
+  "Never restart, recreate or stop the SessionMaxxing container",
+  "If that tooling is unavailable, report the blocker and the command.",
+];
 it.each(APPLY_METHODS)(
-  "tells an auto-apply run about a %s restart method",
+  "tells an auto-apply run without the commit option about a %s restart method and to ignore git",
   (_kind, method, sentence) => {
-    const instruction = autoApplyInstruction(method);
+    const instruction = autoApplyInstruction(method, false);
     expect(instruction).toContain(
       "ignore git entirely: do not check git status, commit, stash, branch, or create a worktree",
     );
-    expect(instruction).toContain(
-      "never skip or refuse a change because of uncommitted changes",
-    );
-    expect(instruction).toContain(sentence);
-    expect(instruction).toContain(
-      "Never restart, recreate or stop the SessionMaxxing container",
-    );
+    for (const kept of [sentence, ...KEPT_SENTENCES])
+      expect(instruction).toContain(kept);
+    expect(instruction).not.toContain("git push");
     expect(instruction).not.toContain("no docker");
     expect(instruction).not.toContain("on the host");
     expect(instruction).not.toContain("--secret-flag");
     expect(withAutoApply(applyTask, method).prompt).toBe(
+      `${applyTask.prompt}\n\n${instruction}`,
+    );
+  },
+);
+it.each(APPLY_METHODS)(
+  "tells an auto-apply run with the commit option to commit and push with a conventional subject under a %s restart method",
+  (_kind, method, sentence) => {
+    const instruction = autoApplyInstruction(method, true);
+    expect(instruction).not.toContain("ignore git entirely");
+    expect(instruction).toContain(
+      "run `git status`, stage only the files this run created or changed, and commit them on the current branch",
+    );
+    expect(instruction).toContain("never a free-form message");
+    expect(instruction).toContain(
+      '"<type>: <subject>" or "<type>(<scope>): <subject>", type one of feat, fix, refactor, perf, test, docs, chore, style, build, ci',
+    );
+    expect(instruction).toContain(
+      "if the current branch has an upstream, run `git push` to it, and report any push error",
+    );
+    for (const kept of [sentence, ...KEPT_SENTENCES])
+      expect(instruction).toContain(kept);
+    expect(instruction).not.toContain("--secret-flag");
+    expect(withAutoApply({ ...applyTask, commit: true }, method).prompt).toBe(
       `${applyTask.prompt}\n\n${instruction}`,
     );
   },
@@ -167,6 +193,7 @@ it("resumes the stopped Claude session with the resume prompt instead of the tas
     createdAt: new Date().toISOString(),
     finishedAt: null,
     model: "opus",
+    commit: true,
   };
   const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
   launchProvider(task, sessionId, true, spawn);

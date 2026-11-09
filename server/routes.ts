@@ -66,6 +66,7 @@ const properties = {
     maxItems: MAX_DEPENDENCIES,
     items: idSchema,
   },
+  commit: { type: "boolean" },
 };
 const restartMethodSchema = {
   oneOf: [

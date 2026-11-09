@@ -305,10 +305,14 @@ export interface TaskInput {
   tokens: TokensInput;
   /** Ids of tasks that must complete before this one is dispatched. */
   dependsOn: string[];
+  /** While the apply override is on, finish the run by committing and pushing its own changes; omitted means DEFAULT_COMMIT. */
+  commit?: boolean;
 }
-export interface Task extends Omit<TaskInput, "tokens"> {
+export const DEFAULT_COMMIT = true;
+export interface Task extends Omit<TaskInput, "tokens" | "commit"> {
   id: string;
   model: string;
+  commit: boolean;
   /** Weighted tokens the whole run is expected to consume, every model and subagent included. */
   tokens: number;
   status: TaskStatus;
@@ -416,8 +420,23 @@ export interface Run {
 export const COMMIT_SUBJECT_MAX = 72;
 /** Room to edit past the suggested length; still one line. */
 export const COMMIT_MESSAGE_MAX = 120;
-export const CONVENTIONAL_SUBJECT =
-  /^(feat|fix|refactor|perf|test|docs|chore|style|build|ci)(\([^()\r\n]+\))?!?: \S[^\r\n]*$/;
+export const CONVENTIONAL_TYPES = [
+  "feat",
+  "fix",
+  "refactor",
+  "perf",
+  "test",
+  "docs",
+  "chore",
+  "style",
+  "build",
+  "ci",
+] as const;
+export const CONVENTIONAL_SUBJECT = new RegExp(
+  `^(${CONVENTIONAL_TYPES.join("|")})(\\([^()\\r\\n]+\\))?!?: \\S[^\\r\\n]*$`,
+);
+/** The subject rules a commit message must follow, shared by the suggester prompt and the applied-run instruction. */
+export const CONVENTIONAL_RULES = `Conventional Commits: "<type>: <subject>" or "<type>(<scope>): <subject>", type one of ${CONVENTIONAL_TYPES.join(", ")}. One line, at most ${COMMIT_SUBJECT_MAX} characters, imperative mood, lowercase after the colon, no trailing period.`;
 /** Whether a finished run left edits in its work directory that nothing has committed yet. */
 export const needsCommit = <T extends Pick<Run, "reviewedAt" | "changes">>(
   run: T,

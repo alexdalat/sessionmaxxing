@@ -187,6 +187,34 @@ it("drops legacy budget estimates from saved tasks atomically without losing the
   }
 });
 
+it("loads tasks saved before the commit option as committing and writes the field back", async () => {
+  const temp = await temporary();
+  try {
+    const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    await queue.create({ ...taskInput(temp.path), commit: false });
+    const path = `${temp.path}/queue.json`;
+    const current = JSON.parse(await readFile(path, "utf8"));
+    await writeFile(
+      path,
+      JSON.stringify({
+        ...current,
+        tasks: current.tasks.map(({ commit: _commit, ...task }: Task) => task),
+      }),
+    );
+    const migrated = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    expect(migrated.snapshot().tasks.map((task) => task.commit)).toEqual([
+      true,
+    ]);
+    expect(
+      JSON.parse(await readFile(path, "utf8")).tasks.map(
+        (task: Task) => task.commit,
+      ),
+    ).toEqual([true]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
 it("converts tasks saved as a session percent or as output tokens into weighted tokens", async () => {
   const temp = await temporary();
   try {

@@ -70,6 +70,7 @@ export function TaskCard({
           {task.earliestStart && (
             <span>After {localTimestamp(task.earliestStart, timeZone)}</span>
           )}
+          {task.commit && <span>Commits</span>}
           {dependencies.length > 0 && (
             <span>Depends on {dependencies.join(", ")}</span>
           )}
