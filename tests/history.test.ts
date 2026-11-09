@@ -1,7 +1,11 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { expect, it } from "vitest";
-import { createHistoryReader, readSessionTokens } from "../server/history.js";
+import {
+  countUnfinishedSubagents,
+  createHistoryReader,
+  readSessionTokens,
+} from "../server/history.js";
 import { temporary } from "./helpers";
 
 const DISPATCHED_SESSION = "11111111-2222-4333-8444-555555555555";
@@ -302,5 +306,90 @@ it("reports no tokens for a session with no transcript", async () => {
       sonnet: 0,
       haiku: 0,
     });
+  });
+});
+
+const RUN_START = "2026-10-11T08:03:24.000Z";
+const subagentAssistant = (timestamp: string, stopReason: string | null) =>
+  `${JSON.stringify({
+    type: "assistant",
+    isSidechain: true,
+    agentId: "acec3aff7cecbd89a",
+    sessionId: DISPATCHED_SESSION,
+    timestamp,
+    message: {
+      id: `msg-${timestamp}`,
+      role: "assistant",
+      model: "claude-opus-4-6",
+      content: [{ type: "text", text: "PRIVATE TEXT" }],
+      stop_reason: stopReason,
+      usage: { output_tokens: 12 },
+    },
+  })}\n`;
+const interruptLine = (timestamp: string) =>
+  `${JSON.stringify({
+    type: "user",
+    isSidechain: true,
+    agentId: "acec3aff7cecbd89a",
+    sessionId: DISPATCHED_SESSION,
+    timestamp,
+    message: {
+      role: "user",
+      content: [{ type: "text", text: "[Request interrupted by user]" }],
+    },
+  })}\n`;
+const attachmentLine = (timestamp: string) =>
+  `${JSON.stringify({ type: "attachment", timestamp, attachment: {} })}\n`;
+
+it("counts the subagents a run left mid-turn when its CLI exited", async () => {
+  await withRoot(async (root) => {
+    const agents = `demo/${DISPATCHED_SESSION}/subagents`;
+    await transcript(root, `${agents}/agent-planner.jsonl`, [
+      subagentAssistant("2026-10-11T08:12:56.022Z", "tool_use"),
+      attachmentLine("2026-10-11T08:12:56.325Z"),
+      interruptLine("2026-10-11T08:13:36.215Z"),
+    ]);
+    await transcript(root, `${agents}/agent-streaming.jsonl`, [
+      subagentAssistant("2026-10-11T08:10:00.000Z", null),
+    ]);
+    await transcript(root, `${agents}/agent-checker.jsonl`, [
+      subagentAssistant("2026-10-11T08:05:00.000Z", "end_turn"),
+      attachmentLine("2026-10-11T08:05:00.100Z"),
+    ]);
+    await transcript(root, `${agents}/agent-researcher.jsonl`, [
+      subagentAssistant("2026-10-11T08:06:00.000Z", "stop_sequence"),
+    ]);
+    expect(
+      await countUnfinishedSubagents(root, DISPATCHED_SESSION, RUN_START),
+    ).toBe(2);
+  });
+});
+
+it("ignores a subagent a resumed session left unfinished before the run started", async () => {
+  await withRoot(async (root) => {
+    await transcript(
+      root,
+      `demo/${DISPATCHED_SESSION}/subagents/agent-old.jsonl`,
+      [interruptLine("2026-10-08T16:36:04.000Z")],
+    );
+    expect(
+      await countUnfinishedSubagents(root, DISPATCHED_SESSION, RUN_START),
+    ).toBe(0);
+  });
+});
+
+it("never counts the main transcript or another session's subagents", async () => {
+  await withRoot(async (root) => {
+    await transcript(root, `demo/${DISPATCHED_SESSION}.jsonl`, [
+      interruptLine("2026-10-11T08:13:36.215Z"),
+    ]);
+    await transcript(
+      root,
+      `demo/${OTHER_SESSION}/subagents/agent-other.jsonl`,
+      [interruptLine("2026-10-11T08:13:36.215Z")],
+    );
+    expect(
+      await countUnfinishedSubagents(root, DISPATCHED_SESSION, RUN_START),
+    ).toBe(0);
   });
 });

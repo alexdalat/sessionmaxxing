@@ -409,6 +409,7 @@ const SESSION_TOKENS: WeightedTokens = {
 async function runWithTokens(
   temp: string,
   sessionTokens: (sessionId: string) => Promise<WeightedTokens>,
+  unfinishedSubagents?: (sessionId: string, since: string) => Promise<number>,
 ) {
   const store = await QueueStore.open(temp, TEST_WORKDIR_ROOT);
   const task = await store.create(taskInput(temp));
@@ -417,6 +418,7 @@ async function runWithTokens(
     launch: () => child,
     now: () => RUN_TIME,
     sessionTokens,
+    unfinishedSubagents,
   });
   runner.setPlanner((load) =>
     planDispatch(
@@ -440,8 +442,9 @@ async function runWithTokens(
     await readFile(`${temp}/runs/${run.id}.json`, "utf8"),
   );
   const error = runner.error;
+  const taskStatus = store.snapshot().tasks[0].status;
   await runner.close();
-  return { run, persisted, error };
+  return { run, persisted, error, taskStatus };
 }
 
 it("records no provider on a new run", async () => {
@@ -501,6 +504,62 @@ it("pauses auto-dispatch when the tokens of a run cannot be read", async () => {
     expect(run.tokens).toBeNull();
     expect(run.status).toBe("completed");
     expect(error).toMatch(/tokens of the run/);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails a run whose CLI exited while a subagent was still working", async () => {
+  const temp = await temporary();
+  try {
+    const asked: string[] = [];
+    const { run, persisted, taskStatus } = await runWithTokens(
+      temp.path,
+      async () => SESSION_TOKENS,
+      async (_session, since) => {
+        asked.push(since);
+        return 1;
+      },
+    );
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("Exited with 1 subagent unfinished");
+    expect(persisted.status).toBe("failed");
+    expect(taskStatus).toBe("failed");
+    expect(asked).toEqual([RUN_TIME.toISOString()]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("completes a run whose subagents all finished", async () => {
+  const temp = await temporary();
+  try {
+    const { run, taskStatus } = await runWithTokens(
+      temp.path,
+      async () => SESSION_TOKENS,
+      async () => 0,
+    );
+    expect(run.status).toBe("completed");
+    expect(run.error).toBeNull();
+    expect(taskStatus).toBe("completed");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails a run whose subagents cannot be checked", async () => {
+  const temp = await temporary();
+  try {
+    const { run, taskStatus } = await runWithTokens(
+      temp.path,
+      async () => SESSION_TOKENS,
+      async () => {
+        throw new Error("transcripts are unreadable");
+      },
+    );
+    expect(run.status).toBe("failed");
+    expect(run.error).toBe("Could not check the run's subagents");
+    expect(taskStatus).toBe("failed");
   } finally {
     await temp.cleanup();
   }
@@ -647,6 +706,39 @@ it("appends the apply instruction to a dispatched prompt only while the override
     await temp.cleanup();
   }
 });
+it("tells an applied run the restart method of its work directory", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    const task = await store.create(taskInput(temp.path));
+    const launched: string[] = [];
+    let child = fakeChild();
+    const runner = await Runner.open(store, temp.path, {
+      launch: (dispatched: Task) => {
+        launched.push(dispatched.prompt);
+        child = fakeChild();
+        return child;
+      },
+      autoApply: () => true,
+      restart: { spawn: fakeCommand().spawn },
+    });
+    await runner.restartMethods.set(await realpath(temp.path), {
+      kind: "compose",
+    });
+    await runner.start(task.id);
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    expect(launched).toEqual([
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "compose" })}`,
+    ]);
+    expect(store.snapshot().tasks.find((t) => t.id === task.id)?.prompt).toBe(
+      task.prompt,
+    );
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
 const SESSION_LIMIT_RESULT =
   '{"type":"result","is_error":true,"num_turns":41,"result":"You\'ve hit your session limit · resets 5:50am (America/Chicago)"}\n';
 
@@ -706,39 +798,6 @@ it("starts a fresh Claude session when a retried task failed for another reason"
     await runner.waitForIdle();
     expect(store.snapshot().tasks[0].status).toBe("failed");
     await store.retry(task.id);
-it("tells an applied run the restart method of its work directory", async () => {
-  const temp = await temporary();
-  try {
-    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
-    const task = await store.create(taskInput(temp.path));
-    const launched: string[] = [];
-    let child = fakeChild();
-    const runner = await Runner.open(store, temp.path, {
-      launch: (dispatched: Task) => {
-        launched.push(dispatched.prompt);
-        child = fakeChild();
-        return child;
-      },
-      autoApply: () => true,
-      restart: { spawn: fakeCommand().spawn },
-    });
-    await runner.restartMethods.set(await realpath(temp.path), {
-      kind: "compose",
-    });
-    await runner.start(task.id);
-    child.emit("close", 0, null);
-    await runner.waitForIdle();
-    expect(launched).toEqual([
-      `${task.prompt}\n\n${autoApplyInstruction({ kind: "compose" })}`,
-    ]);
-    expect(store.snapshot().tasks.find((t) => t.id === task.id)?.prompt).toBe(
-      task.prompt,
-    );
-    await runner.close();
-  } finally {
-    await temp.cleanup();
-  }
-});
     await runner.start(task.id);
     const [first, second] = launch.mock.calls;
     expect(second[1]).toMatch(UUID);

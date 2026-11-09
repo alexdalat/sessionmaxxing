@@ -62,6 +62,7 @@ interface RunnerOptions {
   launch?: (task: Task, sessionId: string, resume: boolean) => ProviderProcess;
   autoApply?: () => boolean;
   sessionTokens?: (sessionId: string, since: string) => Promise<WeightedTokens>;
+  unfinishedSubagents?: (sessionId: string, since: string) => Promise<number>;
   now?: () => Date;
 }
 export type Planner = (load: DispatchLoad) => PlanningSnapshot;
@@ -121,6 +122,9 @@ const START_ERROR =
   "Run could not start. Check the work directory, CLI, and runtime file access.";
 export const LIMIT_STOP_ERROR =
   "Stopped at the usage limit · resumes after the reset";
+export const unfinishedSubagentsError = (count: number) =>
+  `Exited with ${count} subagent${count === 1 ? "" : "s"} unfinished`;
+export const SUBAGENT_CHECK_ERROR = "Could not check the run's subagents";
 
 export class Runner {
   private runs: StoredRun[] = [];
@@ -145,6 +149,20 @@ export class Runner {
     );
     // No recorded token means the transcript was not found, not that the run was free.
     return measured(tokens) ? tokens : null;
+  }
+  /** Why a run that exited cleanly is still unfinished; null when every subagent it ran finished. */
+  private async unfinishedReason(run: StoredRun) {
+    if (run.sessionId === null || !this.options.unfinishedSubagents)
+      return null;
+    try {
+      const count = await this.options.unfinishedSubagents(
+        run.sessionId,
+        run.startedAt,
+      );
+      return count === 0 ? null : unfinishedSubagentsError(count);
+    } catch {
+      return SUBAGENT_CHECK_ERROR;
+    }
   }
   /** End time of the most recently finished run, so usage fetched before it is not trusted. */
   lastRunEndedAt(): string | null {
@@ -606,14 +624,20 @@ export class Runner {
       this.error =
         "Could not stop processes left behind by a run. Check for stray provider children.";
     }
+    const exitedClean =
+      !active.cancelled && code === 0 && !error && !active.output.failed;
+    const unfinished = exitedClean
+      ? await this.unfinishedReason(active.run)
+      : null;
     active.run.status = active.cancelled
       ? "cancelled"
-      : code === 0 && !error && !active.output.failed
+      : exitedClean && unfinished === null
         ? "completed"
         : "failed";
     active.run.exitCode = code;
     active.run.error =
       error ??
+      unfinished ??
       (active.run.status === "failed"
         ? "Provider reported failure. Check CLI authentication, task settings, or retry."
         : null);

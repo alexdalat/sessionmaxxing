@@ -106,23 +106,24 @@ async function parseFile(path: string, isHistory: boolean) {
 async function sessionFiles(root: string, sessionId: string) {
   // The session id is matched against directory entries, never joined into a path.
   const transcript = `${sessionId}.jsonl`;
-  const files: string[] = [];
+  const main: string[] = [];
+  const subagents: string[] = [];
   for (const project of await entries(join(root, "projects"))) {
     if (!project.isDirectory()) continue;
     const directory = join(root, "projects", project.name);
     for (const file of await entries(directory)) {
       if (file.isFile() && file.name === transcript) {
-        files.push(join(directory, file.name));
+        main.push(join(directory, file.name));
         continue;
       }
       if (!file.isDirectory() || file.name !== sessionId) continue;
-      const subagents = join(directory, file.name, "subagents");
-      for (const agent of await entries(subagents))
+      const agents = join(directory, file.name, "subagents");
+      for (const agent of await entries(agents))
         if (agent.isFile() && agent.name.endsWith(".jsonl"))
-          files.push(join(subagents, agent.name));
+          subagents.push(join(agents, agent.name));
     }
   }
-  return files;
+  return { main, subagents };
 }
 
 /**
@@ -138,7 +139,8 @@ export async function readSessionTokens(
   const tokens = emptyWeightedTokens();
   const latest = new Map<string, ActivityEvent>();
   const anonymous: ActivityEvent[] = [];
-  for (const path of await sessionFiles(root, sessionId)) {
+  const { main, subagents } = await sessionFiles(root, sessionId);
+  for (const path of [...main, ...subagents]) {
     const parsed = await parseFile(path, false);
     if (!parsed) continue;
     for (const { messageId, event } of parsed.events)
@@ -152,6 +154,67 @@ export async function readSessionTokens(
     if (family !== null) tokens[family] += weightedTokens(event, family);
   }
   return tokens;
+}
+
+const FINISHED_STOP_REASONS = new Set(["end_turn", "stop_sequence"]);
+
+/** The last user or assistant record of a transcript; undefined when the file is gone or holds none. */
+async function lastTurn(path: string) {
+  let last:
+    | { type: string; timestamp?: string; stopReason?: unknown }
+    | undefined;
+  const stream = createReadStream(path, { encoding: "utf8" });
+  const lines = createInterface({ input: stream, crlfDelay: Infinity });
+  try {
+    for await (const line of lines) {
+      let record: unknown;
+      try {
+        record = JSON.parse(line);
+      } catch {
+        // A malformed line is a parser warning elsewhere; it cannot be a turn.
+        continue;
+      }
+      if (typeof record !== "object" || record === null) continue;
+      const { type, timestamp, message } = record as Record<string, unknown>;
+      if (type !== "user" && type !== "assistant") continue;
+      last = {
+        type,
+        timestamp: typeof timestamp === "string" ? timestamp : undefined,
+        stopReason: (message as { stop_reason?: unknown } | undefined)
+          ?.stop_reason,
+      };
+    }
+  } catch (error) {
+    if (missing(error)) return undefined;
+    throw error;
+  } finally {
+    lines.close();
+    stream.destroy();
+  }
+  return last;
+}
+
+/**
+ * Subagents of a session that wrote from `since` on and stopped mid-turn.
+ * `claude -p` exits when its own turn ends and interrupts any subagent still
+ * working, so the subagent transcript never reaches a final reply.
+ */
+export async function countUnfinishedSubagents(
+  root: string,
+  sessionId: string,
+  since: string,
+) {
+  let unfinished = 0;
+  for (const path of (await sessionFiles(root, sessionId)).subagents) {
+    const turn = await lastTurn(path);
+    if (turn === undefined || turn.timestamp === undefined) continue;
+    if (turn.timestamp < since) continue;
+    const finished =
+      turn.type === "assistant" &&
+      FINISHED_STOP_REASONS.has(String(turn.stopReason));
+    if (!finished) unfinished++;
+  }
+  return unfinished;
 }
 
 /** History reader that reparses only the transcript files whose size or mtime changed. */

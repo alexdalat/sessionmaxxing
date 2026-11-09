@@ -18,7 +18,7 @@ import {
   resolveTimeZone,
   resolveWorkdirRoot,
 } from "./environment.js";
-import { readSessionTokens } from "./history.js";
+import { countUnfinishedSubagents, readSessionTokens } from "./history.js";
 import { QueueStore } from "./queue.js";
 import { Runner } from "./runner.js";
 import { SessionKeeper } from "./session-keeper.js";
@@ -108,6 +108,8 @@ export async function startDashboard(
           ? (sessionId, since) =>
               readSessionTokens(join(homedir(), ".claude"), sessionId, since)
           : undefined,
+      unfinishedSubagents: (sessionId, since) =>
+        countUnfinishedSubagents(join(homedir(), ".claude"), sessionId, since),
       restart: { dockerInstall },
     });
     const keeper = await SessionKeeper.open(directory, {
@@ -118,9 +120,9 @@ export async function startDashboard(
     });
     app = await createApp({
       timeZone,
+      allowedHosts,
       queue,
       runner,
-      allowedHosts,
       settings,
       usage,
       keeper,
