@@ -11,6 +11,9 @@ import {
   needsReview,
   type PlanningSnapshot,
   type PublicTask,
+  RESTART_ARG_MAX,
+  RESTART_ARGV_MAX,
+  type RestartMethod,
   type Run,
   type SessionRates,
   type TaskInput,
@@ -20,9 +23,11 @@ import { modelSessionPercent } from "./calibration.js";
 import type { CommitMessageSuggester } from "./commit-message.js";
 import type { EstimateRun, EstimateTask, TokensEstimator } from "./estimate.js";
 import type { QueueStore, StoredTaskInput } from "./queue.js";
+import { validateRestartMethod } from "./restart-methods.js";
 import type { Runner } from "./runner.js";
 import type { SessionKeeper } from "./session-keeper.js";
 import { DomainError } from "./storage.js";
+import { validateWorkdir } from "./validation.js";
 import { suggestWorkdirs } from "./workdirs.js";
 
 const idSchema = { type: "string", pattern: "^[a-f0-9]{24}$" };
@@ -61,6 +66,48 @@ const properties = {
     maxItems: MAX_DEPENDENCIES,
     items: idSchema,
   },
+};
+const restartMethodSchema = {
+  oneOf: [
+    {
+      type: "object",
+      required: ["kind"],
+      additionalProperties: false,
+      properties: { kind: { const: "none" } },
+    },
+    {
+      type: "object",
+      required: ["kind"],
+      additionalProperties: false,
+      properties: { kind: { const: "compose" } },
+    },
+    {
+      type: "object",
+      required: ["kind", "argv"],
+      additionalProperties: false,
+      properties: {
+        kind: { const: "command" },
+        argv: {
+          type: "array",
+          minItems: 1,
+          maxItems: RESTART_ARGV_MAX,
+          items: { type: "string", minLength: 1, maxLength: RESTART_ARG_MAX },
+        },
+      },
+    },
+  ],
+};
+const restartMethodQuerySchema = {
+  type: "object",
+  required: ["workdir"],
+  additionalProperties: false,
+  properties: { workdir: properties.workdir },
+};
+const restartMethodBodySchema = {
+  type: "object",
+  required: ["workdir", "method"],
+  additionalProperties: false,
+  properties: { workdir: properties.workdir, method: restartMethodSchema },
 };
 const commitSchema = {
   type: "object",
@@ -397,6 +444,33 @@ export function registerQueueRoutes(
     async (request) => {
       await queue.setAutoDispatch(request.body.enabled);
       return { ok: true };
+    },
+  );
+  app.get<{ Querystring: { workdir: string } }>(
+    "/api/restart-methods",
+    { schema: { querystring: restartMethodQuerySchema } },
+    async (request) => {
+      const workdir = await validateWorkdir(
+        request.query.workdir,
+        queue.workdirRoot,
+      );
+      return { method: runner.restartMethods.get(workdir) };
+    },
+  );
+  app.put<{ Body: { workdir: string; method: RestartMethod } }>(
+    "/api/restart-methods",
+    { schema: { body: restartMethodBodySchema } },
+    async (request) => {
+      const workdir = await validateWorkdir(
+        request.body.workdir,
+        queue.workdirRoot,
+      );
+      return {
+        method: await runner.restartMethods.set(
+          workdir,
+          validateRestartMethod(request.body.method, 400),
+        ),
+      };
     },
   );
   app.addHook("onClose", async () => runner.close());

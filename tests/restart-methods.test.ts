@@ -64,7 +64,7 @@ async function dashboard(temp: string) {
       method: "GET",
       url: `/api/restart-methods?workdir=${encodeURIComponent(workdir)}`,
     });
-  const write = (payload: unknown) =>
+  const write = (payload: { workdir: string; method?: unknown }) =>
     app.inject({ method: "PUT", url: "/api/restart-methods", payload });
   const stored = () => readFile(join(data, RESTART_METHODS_FILE), "utf8");
   return {
