@@ -31,7 +31,7 @@ Work directories are accepted only under the running user's home; `SESSIONMAXXIN
 
 ## Data directory
 
-Runtime state lives in one directory, created with mode 0700: `SESSIONMAXXING_DATA_DIR` when set, else `$XDG_DATA_HOME/sessionmaxxing` when `XDG_DATA_HOME` is absolute, else `~/.local/share/sessionmaxxing`. Inside: `queue.json`, `dispatch-settings.json`, `session-keeper.json`, `usage-snapshot.json`, `usage-samples.jsonl`, `runs/`, `deploy/` and `server.lock`. The lock refuses a second server on the same directory.
+Runtime state lives in one directory, created with mode 0700: `SESSIONMAXXING_DATA_DIR` when set, else `$XDG_DATA_HOME/sessionmaxxing` when `XDG_DATA_HOME` is absolute, else `~/.local/share/sessionmaxxing`. Inside: `queue.json`, `dispatch-settings.json`, `restart-methods.json`, `session-keeper.json`, `usage-snapshot.json`, `usage-samples.jsonl`, `runs/`, `restarts/` and `server.lock`. The lock refuses a second server on the same directory.
 
 A native start finds a `data/` directory in its working directory and moves it to the data directory once, as one rename. Startup stops with a message naming both paths when the data directory already exists, a lock file is left inside `data`, `data` is a symlink or a file, the two paths are nested, or they sit on different filesystems; the last message carries the exact `mv` command. Nothing is merged, copied or deleted.
 
@@ -84,6 +84,7 @@ It prints session and weekly usage, the quiet start hours, and the Claude gate r
 - `GET|PUT /api/dispatch-settings` settings plus the planning snapshot (per-bucket gates and the Claude gate status and reason).
 - `GET /api/environment` `{ timeZone, workdirRoot }`.
 - `GET /api/queue`, `POST /api/tasks`, `PATCH|DELETE /api/tasks/:id`, `POST /api/tasks/:id/run|cancel|retry`, `PUT /api/queue/order`, `PUT /api/queue/auto`, `GET /api/runs`.
+- `GET|PUT /api/restart-methods` the restart method of one work directory: `GET ?workdir=<path>` returns `{ method }`, `PUT { workdir, method }` sets it.
 
 Hosts are limited to `localhost`, `127.0.0.1`, the bind address, and the entries of `SESSIONMAXXING_ALLOWED_HOSTS`; an Origin header must match `http://<Host>`. There is no dashboard authentication.
 
@@ -95,12 +96,13 @@ cp .env.example .env
 docker compose up -d --build
 ```
 
-`.env` holds eight fields; Compose refuses to start while a required one is empty.
+`.env` holds nine fields; Compose refuses to start while a required one is empty.
 
 | Field | Value |
 | --- | --- |
 | `SESSIONMAXXING_UID` | `id -u` |
 | `SESSIONMAXXING_GID` | `id -g` |
+| `SESSIONMAXXING_DOCKER_GID` | `stat -c %g /var/run/docker.sock` |
 | `SESSIONMAXXING_HOME` | Your home directory; mounted at the same path in the container |
 | `SESSIONMAXXING_BIND_ADDRESS` | Address Docker publishes on; `127.0.0.1` keeps the dashboard on this machine |
 | `SESSIONMAXXING_PORT` | Published port, `4317` |
@@ -136,20 +138,52 @@ docker compose up -d --build
 
 Starting first would create an empty data directory, which the move then refuses to overwrite. These paths assume `SESSIONMAXXING_HOME` is your home directory.
 
-## Host deploy watcher
+## Restart methods
 
-Runs happen inside the container, which has no docker CLI, so a run that changes a Compose project cannot redeploy it. When **Apply and deploy without review** is on and a run completes with changes in a directory holding a Compose file, the server writes a request into `deploy/requests/` in the data directory; a systemd user path unit runs `deploy/host-deploy.sh`, which builds the project, waits until no dashboard run is in flight before recreating the dashboard's own container, brings it up, and writes the result back. The run card shows **Deploy queued**, **Deploying**, **Deployed** or **Deploy failed**, and no new run starts until the deploy is finished. The path unit watches the default data location (`~/.local/share/sessionmaxxing`) only, and the units assume the repository at `~/workspace/claude-capacity-dashboard` until a later phase removes them. Install it once (requires `jq` and `curl`; replace the path with your checkout):
+Each work directory has a restart method, set in the **Restart** field of the task form and shared by every task in that directory. A directory without a method restarts nothing.
 
-```sh
-systemctl --user link ~/workspace/claude-capacity-dashboard/deploy/claude-dashboard-deploy.service
-systemctl --user enable --now ~/workspace/claude-capacity-dashboard/deploy/claude-dashboard-deploy.path
-```
+| Method | What the server runs |
+| --- | --- |
+| None | Nothing |
+| Docker Compose | `docker compose build`, then `docker compose up -d`, in the directory |
+| Command | One argument per line, run in the directory without a shell. The first line is the program, found through `PATH` or relative to the directory. Up to 64 arguments of 4096 characters each |
 
-`journalctl --user -u claude-dashboard-deploy.service` has the watcher's own log; each deploy's output is `deploy/results/<run id>.log` in the data directory.
+Methods live in `restart-methods.json`; `GET|PUT /api/restart-methods` reads and sets one.
+
+With **Apply and restart without review** on, a run that completes with commits or changed files gets its directory's method run by the server. The run card shows **Restart queued**, **Restarting**, **Restarted** or **Restart failed**, and a failed restart's last 64 KiB of output under **Restart output**. Nothing new starts until the restart ends. Restarts run one at a time, a step that runs past 30 minutes is stopped, and a dashboard stopped mid-restart records it as failed at the next start. Records live in `restarts/` in the data directory.
+
+The image carries the docker CLI with the compose and buildx plugins, and `compose.yaml` mounts `/var/run/docker.sock` with the group from `SESSIONMAXXING_DOCKER_GID`. Mounting the docker socket gives any dispatched prompt root on the host.
+
+### The dashboard's own project
+
+When the work directory is the dashboard's own Compose project, the server builds in place, waits until no task runs, then starts the container `sessionmaxxing-restart-<run id>` from its own image to run `docker compose up -d`. The recreated dashboard records the result and removes that container. Limits:
+
+- The sibling container sees only the work directory and the socket, so a Compose file that reaches outside the directory fails there.
+- A Command in the dashboard's own directory runs inside the dashboard. When it recreates the container, the restart shows as failed at the next start.
+- Native installs run the host's `docker` from `PATH`, and no directory counts as the dashboard's own.
+- The socket path is the Linux Docker Engine one.
+
+### Upgrading from the host deploy watcher
+
+Earlier versions redeployed Compose projects through a systemd user path unit. The first start of this version refuses to run while that watcher still has a request pending, and the message names the file. To upgrade:
+
+1. Add `SESSIONMAXXING_DOCKER_GID` to `.env` before any Compose command: `printf 'SESSIONMAXXING_DOCKER_GID=%s\n' "$(stat -c %g /var/run/docker.sock)" >> .env`.
+2. Disable and delete the user units:
+
+   ```sh
+   systemctl --user disable --now claude-dashboard-deploy.path
+   systemctl --user stop claude-dashboard-deploy.service
+   rm -f ~/.config/systemd/user/claude-dashboard-deploy.path ~/.config/systemd/user/claude-dashboard-deploy.service
+   systemctl --user daemon-reload && systemctl --user reset-failed
+   ```
+
+3. Rebuild and start once from the host: `docker compose up -d --build`.
+
+The first start gives every task directory that holds a Compose file the Docker Compose method, shows the old results on their run cards, and removes the old `deploy/` folder from the data directory.
 
 ## Privacy
 
-Transcript content is discarded at the parser boundary. Prompts and work directories stay on disk in `queue.json` and are never returned by the API. Run previews keep only allowlisted event labels and counters. Runtime state sits in the data directory described above.
+Transcript content is discarded at the parser boundary. The output of a failed restart is shown on its run card. Prompts and work directories stay on disk in `queue.json` and are never returned by the API. Run previews keep only allowlisted event labels and counters. Runtime state sits in the data directory described above.
 
 ## Layout
 
