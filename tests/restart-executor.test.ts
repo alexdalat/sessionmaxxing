@@ -1,4 +1,11 @@
-import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  realpath,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import {
@@ -10,7 +17,7 @@ import {
   RestartStore,
   STOPPED_BEFORE_FINISH,
 } from "../server/restarts.js";
-import { fakeCommand, temporary } from "./helpers";
+import { type CommandResponse, fakeCommand, temporary } from "./helpers";
 
 const NOW = "2026-09-06T12:00:00.000Z";
 const TITLE = "Fix a test";
@@ -24,8 +31,8 @@ const node = (script: string, ...args: string[]): RestartAction => ({
   argv: [process.execPath, "-e", script, ...args],
 });
 
-async function workdirIn(temp: string) {
-  const path = join(temp, "work");
+async function workdirIn(temp: string, name = "work") {
+  const path = join(temp, name);
   await mkdir(path, { recursive: true });
   return realpath(path);
 }
@@ -337,6 +344,296 @@ it("still runs a record requested while the previous restart finishes", async ()
     await executor.drain();
     expect(store.publicStatus(FIRST)?.status).toBe("succeeded");
     expect(store.publicStatus(SECOND)?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+const IMAGE_ID = `sha256:${"ab".repeat(32)}`;
+const WORKING_DIR_LABEL = "com.docker.compose.project.working_dir";
+const COMPOSE: RestartAction = { kind: "compose" };
+
+const verbOf = (command: string, args: string[]) => {
+  if (command !== "docker") return command;
+  if (args[0] === "compose") return `compose ${args[1]}`;
+  return args[0] === "rm" && args[1] === "--force" ? "rm --force" : args[0];
+};
+
+// Hand-written in the shape the executor reads: no daemon exists here to produce a real answer.
+const inspected = (
+  labels: Record<string, string> | null,
+  image = IMAGE_ID,
+) => ({
+  stdout: JSON.stringify([{ Image: image, Config: { Labels: labels } }]),
+});
+
+interface DockerCase {
+  /** The label the fake daemon reports for the dashboard container; defaults to the work directory. */
+  label?: (workdir: string) => string | Promise<string>;
+  answers?: Record<string, CommandResponse>;
+  options?: RestartOptions;
+  method?: RestartAction;
+  directory?: string;
+  inspect?: (workdir: string) => CommandResponse;
+}
+
+async function dockerRestart(temp: string, setup: DockerCase = {}) {
+  const workdir = await workdirIn(temp, setup.directory);
+  const socketPath = join(temp, "docker.sock");
+  await writeFile(socketPath, "");
+  const label = await (setup.label ?? ((path) => path))(workdir);
+  const command = fakeCommand((program, args) => {
+    const verb = verbOf(program, args);
+    if (verb === "inspect")
+      return (
+        setup.inspect?.(workdir) ?? inspected({ [WORKING_DIR_LABEL]: label })
+      );
+    return setup.answers?.[verb] ?? (verb === "wait" ? { stdout: "0\n" } : {});
+  });
+  const store = await openStore(temp);
+  await store.request({
+    runId: FIRST,
+    title: TITLE,
+    method: setup.method ?? COMPOSE,
+    workdir,
+    requestedAt: NOW,
+  });
+  const executor = new RestartExecutor(
+    store,
+    {
+      spawn: command.spawn,
+      dockerInstall: true,
+      socketPath,
+      killGraceMs: 50,
+      ...setup.options,
+    },
+    { idle: async () => {}, report: () => {} },
+  );
+  await executor.drain();
+  return {
+    store,
+    workdir,
+    command,
+    sibling: `sessionmaxxing-restart-${FIRST}`,
+    restart: store.publicStatus(FIRST),
+    verbs: command.calls.map(({ command, args }) => verbOf(command, args)),
+  };
+}
+
+it("restarts a Docker Compose directory in place without docker inspect when the server is a native install", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      options: { dockerInstall: undefined },
+    });
+    expect(verbs).toEqual(["compose build", "compose up"]);
+    expect(restart?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("restarts another project in place when the dashboard's label names a different directory", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      label: () => "/somewhere/else",
+    });
+    expect(verbs).toEqual(["inspect", "compose build", "compose up"]);
+    expect(restart?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("treats a work directory as the dashboard's own project when the label is a symlink to it", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      label: async (workdir) => {
+        const link = join(temp.path, "link");
+        await symlink(workdir, link);
+        return link;
+      },
+    });
+    expect(verbs).toContain("run");
+    expect(verbs).not.toContain("compose up");
+    expect(restart?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it.each([
+  { case: "an empty label set", labels: {} },
+  { case: "no label set at all", labels: null },
+])(
+  "fails naming the label when the dashboard container has $case",
+  async ({ labels }) => {
+    const temp = await temporary();
+    try {
+      const { verbs, restart } = await dockerRestart(temp.path, {
+        inspect: () => inspected(labels),
+      });
+      expect(restart?.status).toBe("failed");
+      expect(restart?.output).toContain(WORKING_DIR_LABEL);
+      expect(verbs).toEqual(["inspect"]);
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
+
+it("fails with docker's message when docker inspect fails", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      inspect: () => ({ code: 1, stderr: "Error: No such object: abc\n" }),
+    });
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("Error: No such object: abc");
+    expect(verbs).toEqual(["inspect"]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails when docker inspect prints something that is not JSON", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      inspect: () => ({ stdout: "not json" }),
+    });
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("cannot read");
+    expect(verbs).toEqual(["inspect"]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it.each([
+  "latest",
+  "sha256:abc",
+  `sha256:${"A".repeat(64)}`,
+  `sha256:${"a".repeat(65)}`,
+])(
+  "fails without building when docker reports the image id %j",
+  async (image) => {
+    const temp = await temporary();
+    try {
+      const { verbs, restart } = await dockerRestart(temp.path, {
+        inspect: (workdir) =>
+          inspected({ [WORKING_DIR_LABEL]: workdir }, image),
+      });
+      expect(restart?.status).toBe("failed");
+      expect(restart?.output).toContain(image);
+      expect(verbs).toEqual(["inspect"]);
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
+
+it.each(["a,b", 'a"b', "a\nb"])(
+  "fails naming the work directory when it contains %j, which a mount cannot carry",
+  async (directory) => {
+    const temp = await temporary();
+    try {
+      const { verbs, restart, workdir } = await dockerRestart(temp.path, {
+        directory,
+      });
+      expect(restart?.status).toBe("failed");
+      expect(restart?.output).toContain(workdir);
+      expect(verbs).toEqual(["inspect"]);
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
+
+it("fails with the build output and starts no sibling when the own project's build fails", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      answers: { "compose build": { code: 1, stderr: "build broke\n" } },
+    });
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("build broke");
+    expect(verbs).toEqual(["inspect", "compose build"]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails with docker's output and force-removes the sibling when docker run fails", async () => {
+  const temp = await temporary();
+  try {
+    const { command, verbs, restart, sibling } = await dockerRestart(
+      temp.path,
+      { answers: { run: { code: 1, stderr: "port already allocated\n" } } },
+    );
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("port already allocated");
+    expect(verbs).toEqual(["inspect", "compose build", "run", "rm --force"]);
+    expect(command.calls.at(-1)?.args).toEqual(["rm", "--force", sibling]);
+    expect(verbs).not.toContain("compose up");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails with the sibling's logs and its exit code, then removes it, when the sibling exits non-zero", async () => {
+  const temp = await temporary();
+  try {
+    const { command, verbs, restart, sibling } = await dockerRestart(
+      temp.path,
+      {
+        answers: {
+          wait: { stdout: "3\n" },
+          logs: { stdout: "bind: address already in use\n" },
+        },
+      },
+    );
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("bind: address already in use");
+    expect(restart?.output?.split("\n").at(-1)).toBe(
+      `Sibling ${sibling} exited with code 3`,
+    );
+    expect(verbs.slice(-3)).toEqual(["wait", "logs", "rm"]);
+    expect(command.calls.at(-1)?.args).toEqual(["rm", sibling]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails and force-removes the sibling when it does not finish within the limit", async () => {
+  const temp = await temporary();
+  try {
+    const { command, verbs, restart, sibling } = await dockerRestart(
+      temp.path,
+      {
+        answers: { wait: { hang: true } },
+        options: { siblingTimeoutMs: 200 },
+      },
+    );
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toMatch(/did not finish within/);
+    expect(verbs.slice(-2)).toEqual(["wait", "rm --force"]);
+    expect(command.calls.at(-1)?.args).toEqual(["rm", "--force", sibling]);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("runs a Command method in the dashboard's own directory in-process, without docker inspect", async () => {
+  const temp = await temporary();
+  try {
+    const { verbs, restart } = await dockerRestart(temp.path, {
+      method: { kind: "command", argv: ["./restart.sh"] },
+    });
+    expect(verbs).toEqual(["./restart.sh"]);
+    expect(restart?.status).toBe("succeeded");
   } finally {
     await temp.cleanup();
   }
