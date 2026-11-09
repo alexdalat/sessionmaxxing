@@ -62,10 +62,17 @@ export function paceSeries(
           ceiling: ceilingAt(fetchedAt),
         }
       : null;
+  const capT =
+    start + ((WEEKLY_HARD_CEILING_PERCENT - marginPercent) / 100) * WEEK_MS;
+  const capPoint: PacePoint | null =
+    capT > start && capT < reset
+      ? { t: capT, pace: paceAt(capT), ceiling: ceilingAt(capT) }
+      : null;
   return [
     { t: start, pace: 0, ceiling: ceilingAt(start) },
     ...points,
     ...(nowPoint ? [nowPoint] : []),
+    ...(capPoint ? [capPoint] : []),
     { t: reset, pace: 100, ceiling: ceilingAt(reset) },
   ].sort((a, b) => a.t - b.t);
 }
