@@ -5,6 +5,7 @@ import {
   DEFAULT_DISPATCH_SETTINGS,
   type DispatchLoad,
   type DispatchSettings,
+  type Edition,
   EMPTY_LOAD,
   MODEL_FAMILIES,
   needsCommit,
@@ -54,6 +55,8 @@ import { atomicJson, DomainError, id } from "./storage.js";
 import { validateWorkdir } from "./validation.js";
 
 interface RunnerOptions {
+  /** Defaults to full; startDashboard always passes it. */
+  edition?: Edition;
   restart?: RestartOptions;
   signal?: (pid: number, signal: NodeJS.Signals) => void;
   launch?: (task: Task, sessionId: string, resume: boolean) => ProviderProcess;
@@ -157,6 +160,21 @@ export class Runner {
   private rates(): SessionRates | null {
     return planningRates(this.getPlanning?.(EMPTY_LOAD));
   }
+  /**
+   * Session points a running Claude task holds: lite holds the fixed
+   * runSessionHoldPercent, full holds the task's expected cost and nothing
+   * without rates, where the Claude gate admits nothing either.
+   */
+  private sessionHold(
+    task: Task,
+    runs: Run[],
+    rates: SessionRates | null,
+    settings: DispatchSettings,
+  ) {
+    return this.edition === "lite"
+      ? settings.runSessionHoldPercent
+      : (expectedSessionCost(task, runs, rates) ?? 0);
+  }
   /** Slots held and quota reserved by every active run. */
   load(settings = this.settings()): DispatchLoad {
     const rates = this.rates();
@@ -165,12 +183,11 @@ export class Runner {
       ...EMPTY_LOAD,
       lastRunEndedAt: this.lastRunEndedAt(),
     };
-    // Without rates a run holds nothing, and the Claude gate admits nothing either.
     for (const { task } of this.active.values())
       load = withRun(
         load,
         task,
-        expectedSessionCost(task, runs, rates) ?? 0,
+        this.sessionHold(task, runs, rates, settings),
         settings,
       );
     return load;
@@ -183,11 +200,14 @@ export class Runner {
   private methods!: RestartMethodStore;
   private restarts!: RestartStore;
   private executor!: RestartExecutor;
+  private edition: Edition;
   private constructor(
     private store: QueueStore,
     private directory: string,
     private options: RunnerOptions,
-  ) {}
+  ) {
+    this.edition = options.edition ?? "full";
+  }
   static async open(
     store: QueueStore,
     directory: string,
@@ -734,7 +754,7 @@ export class Runner {
       load = withRun(
         load,
         task,
-        expectedSessionCost(task, runs, rates) ?? 0,
+        this.sessionHold(task, runs, rates, settings),
         settings,
       );
     }

@@ -101,9 +101,13 @@ export async function startDashboard(
     );
     const queue = await QueueStore.open(directory, workdirRoot, edition);
     const runner = await Runner.open(queue, directory, {
+      edition,
       autoApply: () => settings.snapshot().autoApply,
-      sessionTokens: (sessionId, since) =>
-        readSessionTokens(join(homedir(), ".claude"), sessionId, since),
+      sessionTokens:
+        edition === "full"
+          ? (sessionId, since) =>
+              readSessionTokens(join(homedir(), ".claude"), sessionId, since)
+          : undefined,
       restart: { dockerInstall },
     });
     const keeper = await SessionKeeper.open(directory, {
