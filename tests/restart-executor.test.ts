@@ -638,3 +638,163 @@ it("runs a Command method in the dashboard's own directory in-process, without d
     await temp.cleanup();
   }
 });
+
+async function ownProject(
+  temp: string,
+  answers: Record<string, CommandResponse> = {},
+) {
+  const workdir = await workdirIn(temp);
+  const socketPath = join(temp, "docker.sock");
+  await writeFile(socketPath, "");
+  const command = fakeCommand((program, args) => {
+    const verb = verbOf(program, args);
+    if (verb === "inspect") return inspected({ [WORKING_DIR_LABEL]: workdir });
+    return answers[verb] ?? (verb === "wait" ? { stdout: "0\n" } : {});
+  });
+  const store = await openStore(temp);
+  await store.request({
+    runId: FIRST,
+    title: TITLE,
+    method: COMPOSE,
+    workdir,
+    requestedAt: NOW,
+  });
+  const executorOn = (
+    on: RestartStore,
+    idle: () => Promise<void> = async () => {},
+  ) =>
+    new RestartExecutor(
+      on,
+      {
+        spawn: command.spawn,
+        dockerInstall: true,
+        socketPath,
+        killGraceMs: 50,
+      },
+      { idle, report: () => {} },
+    );
+  const file = join(temp, "data", "restarts", `${FIRST}.json`);
+  return {
+    command,
+    store,
+    executorOn,
+    verbs: () =>
+      command.calls.map(({ command, args }) => verbOf(command, args)),
+    stored: async () => JSON.parse(await readFile(file, "utf8")),
+    sibling: `sessionmaxxing-restart-${FIRST}`,
+    reopen: () => openStore(temp),
+  };
+}
+
+const leaveWithSibling = async (store: RestartStore, sibling: string) => {
+  await store.update(FIRST, { status: "restarting", sibling });
+};
+
+it("finishes a restart whose sibling outlived the dashboard, and removes the sibling", async () => {
+  const temp = await temporary();
+  try {
+    const { store, executorOn, verbs, sibling, reopen, command } =
+      await ownProject(temp.path);
+    await leaveWithSibling(store, sibling);
+    const after = await reopen();
+    await executorOn(after).drain();
+    expect(verbs()).toEqual(["wait", "logs", "rm"]);
+    expect(command.calls.map(({ args }) => args[1])).toEqual([
+      sibling,
+      sibling,
+      sibling,
+    ]);
+    expect(after.publicStatus(FIRST)).toMatchObject({
+      status: "succeeded",
+      output: null,
+    });
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("fails the resumed record with docker's message when the sibling is gone", async () => {
+  const temp = await temporary();
+  try {
+    const { store, executorOn, verbs, sibling, reopen } = await ownProject(
+      temp.path,
+      {
+        wait: { code: 1, stderr: "Error: No such container: gone\n" },
+      },
+    );
+    await leaveWithSibling(store, sibling);
+    const after = await reopen();
+    await executorOn(after).drain();
+    expect(verbs()).toEqual(["wait"]);
+    const restart = after.publicStatus(FIRST);
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("Error: No such container: gone");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("leaves the record requested and starts no sibling when it closes during the idle wait, and a new executor then restarts", async () => {
+  const temp = await temporary();
+  try {
+    const { store, executorOn, verbs, stored, reopen } = await ownProject(
+      temp.path,
+    );
+    let release = () => {};
+    const idle = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const first = executorOn(store, () => idle);
+    const drained = first.drain();
+    await vi.waitFor(() =>
+      expect(verbs()).toEqual(["inspect", "compose build"]),
+    );
+    const closing = first.close();
+    release();
+    await Promise.all([drained, closing]);
+    expect(verbs()).not.toContain("run");
+    expect((await stored()).status).toBe("requested");
+    expect((await stored()).sibling).toBeNull();
+
+    const after = await reopen();
+    await executorOn(after).drain();
+    expect(verbs().slice(2)).toEqual([
+      "inspect",
+      "compose build",
+      "run",
+      "wait",
+      "logs",
+      "rm",
+    ]);
+    expect(after.publicStatus(FIRST)?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("stops only the docker wait when it closes during the sibling wait, and a new executor resumes it", async () => {
+  const temp = await temporary();
+  try {
+    const answers: Record<string, CommandResponse> = { wait: { hang: true } };
+    const { executorOn, store, verbs, stored, sibling, reopen } =
+      await ownProject(temp.path, answers);
+    const first = executorOn(store);
+    const drained = first.drain();
+    await vi.waitFor(() => expect(verbs().at(-1)).toBe("wait"));
+    const before = await stored();
+    expect(before).toMatchObject({ status: "restarting", sibling });
+    await first.close();
+    await drained;
+    expect(await stored()).toEqual(before);
+    expect(verbs()).not.toContain("rm");
+    expect(verbs()).not.toContain("rm --force");
+
+    answers.wait = { stdout: "0\n" };
+    const after = await reopen();
+    await executorOn(after).drain();
+    expect(verbs().slice(-3)).toEqual(["wait", "logs", "rm"]);
+    expect(after.publicStatus(FIRST)?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
