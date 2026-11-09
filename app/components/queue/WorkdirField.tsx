@@ -16,7 +16,7 @@ import {
 import { api } from "@/app/lib/api";
 import type { WorkdirSuggestions } from "@/shared/types";
 
-const DEBOUNCE_MS = 150;
+export const DEBOUNCE_MS = 150;
 const LIST_KEYS = ["ArrowDown", "ArrowUp", "Enter"];
 
 export function WorkdirField({

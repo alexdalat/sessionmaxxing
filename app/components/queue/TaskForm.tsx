@@ -1,5 +1,5 @@
 "use client";
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Button } from "@/app/components/ui/button";
 import { Checkbox } from "@/app/components/ui/checkbox";
@@ -20,10 +20,19 @@ import {
 } from "@/app/components/ui/select";
 import { Textarea } from "@/app/components/ui/textarea";
 import { useClock } from "@/app/hooks/useClock";
+import { api } from "@/app/lib/api";
 import { modelOptions } from "@/app/lib/models";
+import {
+  RESTART_KIND_LABELS,
+  RESTART_KINDS,
+  type RestartKind,
+  restartDraft,
+  sameRestartMethod,
+  textFromArgv,
+} from "@/app/lib/restart-method";
 import { earliestStartFromInput, earliestStartInput } from "@/app/lib/schedule";
 import { zoneName } from "@/shared/local-time";
-import type { PublicTask, TaskInput } from "@/shared/types";
+import type { PublicTask, RestartMethod, TaskInput } from "@/shared/types";
 import {
   AUTO_TOKENS,
   DEFAULT_MAX_TURNS,
@@ -32,9 +41,18 @@ import {
   HOURS,
   hourLabel,
 } from "@/shared/types";
-import { WorkdirField } from "./WorkdirField";
+import { DEBOUNCE_MS, WorkdirField } from "./WorkdirField";
 
+const RESTART_METHODS_PATH = "/api/restart-methods";
 const ANY_WINDOW = "any";
+
+interface LoadedMethod {
+  workdir: string;
+  method: RestartMethod;
+}
+
+const failureMessage = (failure: unknown, fallback: string) =>
+  failure instanceof Error ? failure.message : fallback;
 const TOKEN_PRESETS = [50_000, 100_000, 250_000, 500_000, 1_000_000, 2_000_000];
 
 export function TaskFormDialog({
@@ -62,6 +80,48 @@ export function TaskFormDialog({
     task ? String(task.tokens) : AUTO_TOKENS,
   );
   const [dependsOn, setDependsOn] = useState<string[]>(task?.dependsOn ?? []);
+  const [probe, setProbe] = useState(workdir.trim());
+  const [loaded, setLoaded] = useState<LoadedMethod>();
+  const [restartKind, setRestartKind] = useState<RestartKind>("none");
+  const [commandText, setCommandText] = useState("");
+  const [restartError, setRestartError] = useState("");
+  const [savingMethod, setSavingMethod] = useState(false);
+  const methodReady = loaded?.workdir === workdir.trim();
+
+  useEffect(() => {
+    const timer = setTimeout(() => setProbe(workdir.trim()), DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [workdir]);
+
+  useEffect(() => {
+    setRestartKind("none");
+    setCommandText("");
+    if (!probe) return;
+    let live = true;
+    api<{ method: RestartMethod }>(
+      `${RESTART_METHODS_PATH}?workdir=${encodeURIComponent(probe)}`,
+    )
+      .then(({ method }) => {
+        if (!live) return;
+        setLoaded({ workdir: probe, method });
+        setRestartKind(method.kind);
+        setCommandText(
+          method.kind === "command" ? textFromArgv(method.argv) : "",
+        );
+        setRestartError("");
+      })
+      .catch((failure: unknown) => {
+        if (!live) return;
+        setLoaded(undefined);
+        setRestartError(
+          failureMessage(failure, "Could not load the restart method."),
+        );
+      });
+    return () => {
+      live = false;
+    };
+  }, [probe]);
+
   const dependencyOptions = tasks.filter(
     (candidate) =>
       candidate.id !== task?.id &&
@@ -112,6 +172,34 @@ export function TaskFormDialog({
                 windowStart === ANY_WINDOW ? null : Number(windowStart),
               dependsOn,
             };
+            const draft = restartDraft(restartKind, commandText);
+            if (
+              loaded?.workdir === input.workdir &&
+              !sameRestartMethod(draft, loaded.method)
+            ) {
+              setSavingMethod(true);
+              try {
+                const saved = await api<{ method: RestartMethod }>(
+                  RESTART_METHODS_PATH,
+                  {
+                    method: "PUT",
+                    body: JSON.stringify({
+                      workdir: input.workdir,
+                      method: draft,
+                    }),
+                  },
+                );
+                setLoaded({ workdir: input.workdir, method: saved.method });
+                setRestartError("");
+              } catch (failure) {
+                setRestartError(
+                  failureMessage(failure, "Could not save the restart method."),
+                );
+                return;
+              } finally {
+                setSavingMethod(false);
+              }
+            }
             if (await onSave(input)) onClose();
           }}
         >
@@ -148,6 +236,43 @@ export function TaskFormDialog({
                 defaultToRecent={!task}
               />
             </div>
+            <div className="full grid gap-1.5">
+              <Label htmlFor={`${fieldId}-restart`}>Restart</Label>
+              <Select
+                value={restartKind}
+                disabled={!methodReady}
+                onValueChange={(next) => setRestartKind(next as RestartKind)}
+              >
+                <SelectTrigger id={`${fieldId}-restart`} className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {RESTART_KINDS.map((kind) => (
+                    <SelectItem key={kind} value={kind}>
+                      {RESTART_KIND_LABELS[kind]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {restartError && (
+                <p className="error mb-0" role="alert">
+                  {restartError}
+                </p>
+              )}
+            </div>
+            {restartKind === "command" && (
+              <div className="full grid gap-1.5">
+                <Label htmlFor={`${fieldId}-command`}>Command</Label>
+                <Textarea
+                  id={`${fieldId}-command`}
+                  className="font-mono"
+                  rows={3}
+                  disabled={!methodReady}
+                  value={commandText}
+                  onChange={(event) => setCommandText(event.target.value)}
+                />
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-model`}>Model</Label>
               <Select
@@ -276,7 +401,7 @@ export function TaskFormDialog({
             )}
           </div>
           <div className="actions">
-            <Button type="submit" disabled={busy}>
+            <Button type="submit" disabled={busy || savingMethod}>
               {busy ? "Saving…" : task ? "Save changes" : "Add task"}
             </Button>
             <Button type="button" variant="outline" onClick={onClose}>
