@@ -26,15 +26,17 @@ export default function RootLayout({ children }: { children: ReactNode }) {
     <html lang="en" className="dark">
       <body>
         <TooltipProvider>
-          <div className="app-shell">
-            <a className="skip-link" href="#main">
-              Skip to content
-            </a>
-            <Sidebar />
-            <main id="main" tabIndex={-1}>
-              <EnvironmentProvider>{children}</EnvironmentProvider>
-            </main>
-          </div>
+          <EnvironmentProvider>
+            <div className="app-shell">
+              <a className="skip-link" href="#main">
+                Skip to content
+              </a>
+              <Sidebar />
+              <main id="main" tabIndex={-1}>
+                {children}
+              </main>
+            </div>
+          </EnvironmentProvider>
         </TooltipProvider>
       </body>
     </html>

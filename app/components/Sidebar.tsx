@@ -2,19 +2,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { usePolling } from "@/app/hooks/usePolling";
 import { ACTIVE_QUEUE_PATH, QUEUE_CHANGED } from "@/app/lib/api";
+import { navItems } from "@/app/lib/nav";
 import { PRODUCT_NAME } from "@/shared/product";
 import type { PendingReview, QueueSnapshot } from "@/shared/types";
 
 const NAV_POLL_MS = 10_000;
-
-const NAV_ITEMS = [
-  { label: "Overview", href: "/" },
-  { label: "Analytics", href: "/analytics/" },
-  { label: "Task queue", href: "/queue/" },
-  { label: "Runs", href: "/runs/" },
-];
 
 const normalize = (pathname: string) =>
   pathname === "" || pathname === "/"
@@ -25,6 +20,7 @@ const normalize = (pathname: string) =>
 
 export function Sidebar() {
   const current = normalize(usePathname());
+  const { edition } = useEnvironment();
   const { data: review } = usePolling<PendingReview>(
     "/api/runs/pending-review",
     NAV_POLL_MS,
@@ -50,7 +46,7 @@ export function Sidebar() {
       </div>
       <p className="sidebar-caption">CLAUDE · LOCAL</p>
       <nav aria-label="Main navigation">
-        {NAV_ITEMS.map((item) => (
+        {navItems(edition).map((item) => (
           <Link
             key={item.href}
             href={item.href}
