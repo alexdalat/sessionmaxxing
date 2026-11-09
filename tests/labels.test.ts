@@ -74,12 +74,13 @@ describe("ACTION_LABELS", () => {
 });
 
 describe("FIELD_LABELS", () => {
-  it("names the four field controls", () => {
+  it("names the five field controls", () => {
     expect(FIELD_LABELS).toEqual({
       range: "Range",
       breakdown: "Breakdown",
       model: "Model",
       filterTasks: "Filter tasks",
+      darkMode: "Dark mode",
     });
   });
 });

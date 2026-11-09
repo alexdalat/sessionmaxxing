@@ -1,4 +1,3 @@
-import { INK, PAPER } from "@/app/lib/palette";
 import { BLOCK_MINUTES, hourLabel, type SessionWindow } from "@/shared/types";
 import { localDay } from "./time";
 
@@ -18,10 +17,10 @@ export function clockOfFraction(fraction: number) {
 const PERCENT_SCALE = 100;
 
 export const WINDOW_ALPHA_STEPS = [
-  { from: 0, alpha: 0.18, label: INK },
-  { from: 25, alpha: 0.4, label: INK },
-  { from: 50, alpha: 0.75, label: PAPER },
-  { from: 75, alpha: 1, label: PAPER },
+  { from: 0, alpha: 0.18, label: "ink" },
+  { from: 25, alpha: 0.4, label: "ink" },
+  { from: 50, alpha: 0.75, label: "paper" },
+  { from: 75, alpha: 1, label: "paper" },
 ] as const;
 
 export function quantizeWindowAlpha(percent: number) {

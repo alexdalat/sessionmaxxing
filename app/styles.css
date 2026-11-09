@@ -6,51 +6,93 @@
 
 :root {
   font-family: var(--font-sans);
-  color: #111111;
-  background: #0a0a0a;
+  color: var(--ink);
+  background: var(--frame);
   font-synthesis: none;
   color-scheme: light;
   font-size: 16px;
   line-height: 1.5;
   --font-sans: "Geist Variable", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "Courier Prime", "Courier New", ui-monospace, monospace;
-  --frame: #0a0a0a;
-  --background: #f4f1ee;
-  --foreground: #111111;
-  --card: #f4f1ee;
-  --card-foreground: #111111;
-  --popover: #f4f1ee;
-  --popover-foreground: #111111;
-  --primary: #111111;
-  --primary-foreground: #f4f1ee;
-  --secondary: #e9e3dd;
-  --secondary-foreground: #111111;
-  --muted: #e9e3dd;
-  --muted-foreground: #5c5550;
-  --accent: #f2d3d0;
-  --accent-foreground: #111111;
-  --destructive: #961a14;
+  --frame: #e9e4df;
+  --paper: #f4f1ee;
+  --pink: #f2d3d0;
+  --ink: #111111;
+  --ink-muted: #5c5550;
+  --ink-muted-on-pink: #4f4945;
+  --inset: #e9e3dd;
+  --inset-on-pink: #e0c3c1;
+  --field-border: #77706b;
+  --primary-hover: #2b2b2b;
+  --cobalt: #2a3fd1;
+  --plum: #8e2f8e;
+  --teal: #0b6e66;
+  --olive: #5a6410;
+  --subtle: #6f6761;
+  --now-line: #838180;
   --success: #176b33;
   --warning: #7a4f00;
-  --info: #2a3fd1;
-  --border: #111111;
-  --input: #77706b;
-  --ring: #2a3fd1;
-  --chart-1: #111111;
-  --chart-2: #2a3fd1;
-  --chart-3: #0b6e66;
-  --chart-4: #5a6410;
-  --chart-5: #8e2f8e;
+  --destructive: #961a14;
+  --overlay: rgb(10 10 10 / 0.72);
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--paper);
+  --card-foreground: var(--ink);
+  --popover: var(--paper);
+  --popover-foreground: var(--ink);
+  --primary: var(--ink);
+  --primary-foreground: var(--paper);
+  --secondary: var(--inset);
+  --secondary-foreground: var(--ink);
+  --muted: var(--inset);
+  --muted-foreground: var(--ink-muted);
+  --accent: var(--pink);
+  --accent-foreground: var(--ink);
+  --info: var(--cobalt);
+  --border: var(--ink);
+  --input: var(--field-border);
+  --ring: var(--cobalt);
+  --chart-1: var(--ink);
+  --chart-2: var(--cobalt);
+  --chart-3: var(--teal);
+  --chart-4: var(--olive);
+  --chart-5: var(--plum);
   --radius: 12px;
   --mobile-nav-height: 64px;
-  --sidebar: #0a0a0a;
-  --sidebar-foreground: #f4f1ee;
-  --sidebar-primary: #f2d3d0;
-  --sidebar-primary-foreground: #111111;
-  --sidebar-accent: #1c1c1b;
-  --sidebar-accent-foreground: #f4f1ee;
-  --sidebar-border: #3a3837;
-  --sidebar-ring: #f2d3d0;
+  --sidebar: var(--frame);
+  --sidebar-foreground: var(--ink);
+  --sidebar-muted: var(--ink-muted);
+  --sidebar-primary: var(--pink);
+  --sidebar-primary-foreground: var(--ink);
+  --sidebar-accent: var(--inset);
+  --sidebar-accent-foreground: var(--ink);
+  --sidebar-border: color-mix(in srgb, var(--ink) 40%, transparent);
+  --sidebar-ring: var(--cobalt);
+}
+
+/* Set before first paint by the inline script in app/layout.tsx; shadcn's `.dark` variant stays unused so ui/ keeps one look. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --frame: #0a0a0a;
+  --paper: #181614;
+  --pink: #36222a;
+  --ink: #f4f1ee;
+  --ink-muted: #b3aca6;
+  --ink-muted-on-pink: #c7bcba;
+  --inset: #2c2826;
+  --inset-on-pink: #4c3337;
+  --field-border: #8a827c;
+  --primary-hover: #ddd6d0;
+  --cobalt: #8e9cff;
+  --plum: #e28ce2;
+  --teal: #4fc4b9;
+  --olive: #b7c25b;
+  --subtle: #9c938c;
+  --now-line: #8a8785;
+  --success: #62c988;
+  --warning: #e2aa4e;
+  --destructive: #ff8077;
+  --overlay: rgb(0 0 0 / 0.72);
 }
 
 @theme inline {
@@ -131,7 +173,7 @@
     scrollbar-width: thin;
   }
   :root {
-    scrollbar-color: rgb(17 17 17 / 0.4) transparent;
+    scrollbar-color: color-mix(in srgb, var(--ink) 40%, transparent) transparent;
   }
   input[type="number"] {
     appearance: textfield;
@@ -193,7 +235,6 @@
     min-height: 100vh;
   }
   .sidebar {
-    --ring: #f2d3d0;
     width: 200px;
     padding: 24px 16px;
     display: flex;
@@ -239,7 +280,7 @@
     border: 1px solid transparent;
     border-radius: 9999px;
     background: transparent;
-    color: #b3aca6;
+    color: var(--sidebar-muted);
     font-size: 12px;
     font-weight: 400;
     text-align: left;
@@ -249,7 +290,7 @@
   }
   .sidebar nav a:hover {
     color: var(--sidebar-foreground);
-    border-color: rgba(244, 241, 238, 0.4);
+    border-color: var(--sidebar-border);
   }
   .sidebar nav [aria-current="page"] {
     background: var(--sidebar-primary);
@@ -258,6 +299,29 @@
     font-weight: 500;
   }
   .sidebar a:focus-visible {
+    outline: 2px solid var(--ring);
+  }
+  .theme-toggle {
+    flex: none;
+    margin-top: auto;
+    height: 32px;
+    padding: 0 16px;
+    border: 1px solid var(--sidebar-border);
+    border-radius: 9999px;
+    background: transparent;
+    color: var(--sidebar-muted);
+    font-size: 12px;
+    text-align: left;
+    transition:
+      color 120ms ease,
+      border-color 120ms ease;
+  }
+  .theme-toggle:hover,
+  .theme-toggle[aria-pressed="true"] {
+    color: var(--sidebar-foreground);
+    border-color: var(--sidebar-foreground);
+  }
+  .theme-toggle:focus-visible {
     outline: 2px solid var(--ring);
   }
   .nav-count {
@@ -269,7 +333,7 @@
     border: 1px solid var(--sidebar-foreground);
     border-radius: 9999px;
     background: var(--sidebar-foreground);
-    color: var(--foreground);
+    color: var(--sidebar);
     font-family: var(--font-mono);
     font-size: 12px;
     font-weight: 400;
@@ -277,7 +341,7 @@
   }
   .nav-count-muted {
     background: transparent;
-    border-color: rgba(244, 241, 238, 0.4);
+    border-color: var(--sidebar-border);
     color: var(--sidebar-foreground);
   }
   main {
@@ -337,7 +401,7 @@
     }
   }
   .panel {
-    --panel-fill: #f4f1ee;
+    --panel-fill: var(--paper);
     position: relative;
     min-width: 0;
     padding: 12px 16px 16px;
@@ -346,9 +410,9 @@
     color: var(--foreground);
   }
   .panel[data-tone="pink"] {
-    --panel-fill: #f2d3d0;
-    --muted: #e0c3c1;
-    --muted-foreground: #4f4945;
+    --panel-fill: var(--pink);
+    --muted: var(--inset-on-pink);
+    --muted-foreground: var(--ink-muted-on-pink);
   }
   .panel::before,
   .panel::after {
@@ -484,7 +548,7 @@
   }
   meter::-webkit-meter-bar {
     height: 8px;
-    background: rgba(17, 17, 17, 0.1);
+    background: color-mix(in srgb, var(--ink) 10%, transparent);
     border: 0;
     border-radius: 9999px;
   }
@@ -740,6 +804,9 @@
     }
     .brand-name {
       display: none;
+    }
+    .theme-toggle {
+      margin: 0 0 0 auto;
     }
     .sidebar nav {
       display: flex;
@@ -1031,7 +1098,7 @@
     transform: translateX(-1px);
   }
   .usage-pace {
-    background: #6f6761;
+    background: var(--subtle);
   }
   .usage-ceiling {
     background: var(--info);
@@ -1063,7 +1130,7 @@
     height: 12px;
   }
   .key-pace::before {
-    background: #6f6761;
+    background: var(--subtle);
   }
   .key-ceiling::before {
     background: var(--info);
@@ -1117,7 +1184,7 @@
     max-height: 136px;
     overflow-y: auto;
     scrollbar-gutter: stable;
-    scrollbar-color: rgba(17, 17, 17, 0.4) transparent;
+    scrollbar-color: color-mix(in srgb, var(--ink) 40%, transparent) transparent;
   }
   .dispatch-task {
     display: flex;
@@ -1188,7 +1255,7 @@
     min-height: 24px;
     background: transparent;
     border: 0;
-    border-bottom: 1px solid rgba(17, 17, 17, 0.12);
+    border-bottom: 1px solid color-mix(in srgb, var(--ink) 12%, transparent);
   }
   .windows-block {
     position: absolute;
@@ -1216,7 +1283,7 @@
     top: -4px;
     bottom: -4px;
     width: 1px;
-    background: #838180;
+    background: var(--now-line);
     pointer-events: none;
   }
   .windows-axis .windows-track .windows-hover-label {
@@ -1302,7 +1369,7 @@
   font-weight: 500;
 }
 [data-slot="button"][data-variant="default"]:hover {
-  background: #2b2b2b;
+  background: var(--primary-hover);
 }
 [data-slot="button"][data-variant="destructive"] {
   background: transparent;
@@ -1421,10 +1488,10 @@
   border-radius: 12px;
 }
 [data-slot="dialog-overlay"] {
-  background: rgba(10, 10, 10, 0.72);
+  background: var(--overlay);
 }
 [data-slot="dialog-content"] {
-  --ring: #2a3fd1;
+  --ring: var(--cobalt);
   padding: 16px;
   border-radius: 20px;
   background: var(--popover);

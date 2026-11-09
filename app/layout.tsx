@@ -7,6 +7,8 @@ import { EnvironmentProvider } from "@/app/components/EnvironmentProvider";
 import { Sidebar } from "@/app/components/Sidebar";
 import { TooltipProvider } from "@/app/components/ui/tooltip";
 import { ACTION_LABELS } from "@/app/lib/labels";
+import { DARK, LIGHT } from "@/app/lib/palette";
+import { DARK_QUERY, THEME_INIT_SCRIPT } from "@/app/lib/theme";
 import { PRODUCT_NAME } from "@/shared/product";
 
 export const metadata: Metadata = {
@@ -14,7 +16,10 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0A0A0A",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: LIGHT.frame },
+    { media: DARK_QUERY, color: DARK.frame },
+  ],
   // Shrink the layout viewport when the phone keyboard opens so dialogs sized in
   // dvh keep their submit row above it.
   interactiveWidget: "resizes-content",
@@ -22,7 +27,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script
+          // biome-ignore lint/security/noDangerouslySetInnerHtml: constant pre-paint theme script, see app/lib/theme.ts
+          dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }}
+        />
+      </head>
       <body>
         <TooltipProvider>
           <EnvironmentProvider>

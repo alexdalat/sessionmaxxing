@@ -2,29 +2,15 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  COBALT,
-  DESTRUCTIVE,
-  FIELD_BORDER,
-  FRAME,
+  DARK,
   INK,
-  INK_MUTED,
-  INK_MUTED_ON_PINK,
-  INSET,
-  INSET_ON_PINK,
   inkAlpha,
-  NOW_LINE,
-  OLIVE,
-  PAPER,
-  PINK,
-  PLUM,
-  PRIMARY_HOVER,
+  LIGHT,
+  PALETTES,
+  type Palette,
   paperAlpha,
-  SIDEBAR_ACCENT,
-  SIDEBAR_BORDER,
-  SUBTLE,
-  SUCCESS,
-  TEAL,
-  WARNING,
+  type Theme,
+  tokenName,
 } from "../app/lib/palette";
 import {
   quantizeWindowAlpha,
@@ -38,6 +24,7 @@ const TEXT_FLOOR = 4.5;
 const MARK_FLOOR = 3;
 const HEX_RADIX = 16;
 const CHANNEL_MAX = 255;
+const THEMES = Object.keys(PALETTES) as Theme[];
 
 type Rgb = [number, number, number];
 
@@ -64,14 +51,11 @@ function ratio(foreground: string, background: string) {
   return ratioOfRgb(hexToRgb(foreground), hexToRgb(background));
 }
 
-function blendOverPaper(rgba: string): Rgb {
-  const match = rgba.match(/^rgba\((\d+), (\d+), (\d+), ([\d.]+)\)$/);
-  if (!match) throw new Error(`not an rgba string: ${rgba}`);
-  const alpha = Number(match[4]);
-  const paper = hexToRgb(PAPER);
-  const source: Rgb = [Number(match[1]), Number(match[2]), Number(match[3])];
+function blend(foreground: string, alpha: number, background: string): Rgb {
+  const source = hexToRgb(foreground);
+  const base = hexToRgb(background);
   return source.map((channel, i) =>
-    Math.round(channel * alpha + paper[i] * (1 - alpha)),
+    Math.round(channel * alpha + base[i] * (1 - alpha)),
   ) as Rgb;
 }
 
@@ -81,111 +65,145 @@ function expectRatio(foreground: string, background: string, expected: number) {
   ).toBeLessThanOrEqual(CONTRAST_TOLERANCE);
 }
 
-describe("palette contrast on paper", () => {
+describe("light palette contrast on paper", () => {
   it.each([
-    ["ink", INK, 16.78],
-    ["plum", PLUM, 6.33],
-    ["subtle", SUBTLE, 4.93],
-    ["cobalt", COBALT, 6.84],
-    ["now line", NOW_LINE, 3.45],
-    ["teal", TEAL, 5.43],
-    ["olive", OLIVE, 5.72],
-    ["success", SUCCESS, 5.86],
-    ["waiting", WARNING, 6.34],
-    ["error", DESTRUCTIVE, 7.6],
-    ["muted ink", INK_MUTED, 6.5],
+    ["ink", LIGHT.ink, 16.78],
+    ["plum", LIGHT.plum, 6.33],
+    ["subtle", LIGHT.subtle, 4.93],
+    ["cobalt", LIGHT.cobalt, 6.84],
+    ["now line", LIGHT.nowLine, 3.45],
+    ["teal", LIGHT.teal, 5.43],
+    ["olive", LIGHT.olive, 5.72],
+    ["success", LIGHT.success, 5.86],
+    ["waiting", LIGHT.warning, 6.34],
+    ["error", LIGHT.destructive, 7.6],
+    ["muted ink", LIGHT.inkMuted, 6.5],
   ])("%s matches the spec ratio", (_name, color, expected) => {
-    expectRatio(color, PAPER, expected);
+    expectRatio(color, LIGHT.paper, expected);
   });
 });
 
-describe("palette contrast on pink", () => {
+describe("light palette contrast on pink", () => {
   it.each([
-    ["ink", INK, 13.49],
-    ["plum", PLUM, 5.09],
-    ["subtle", SUBTLE, 3.96],
-    ["cobalt", COBALT, 5.5],
-    ["success", SUCCESS, 4.71],
-    ["waiting", WARNING, 5.09],
-    ["error", DESTRUCTIVE, 6.11],
-    ["muted ink on pink", INK_MUTED_ON_PINK, 6.33],
+    ["ink", LIGHT.ink, 13.49],
+    ["plum", LIGHT.plum, 5.09],
+    ["subtle", LIGHT.subtle, 3.96],
+    ["cobalt", LIGHT.cobalt, 5.5],
+    ["success", LIGHT.success, 4.71],
+    ["waiting", LIGHT.warning, 5.09],
+    ["error", LIGHT.destructive, 6.11],
+    ["muted ink on pink", LIGHT.inkMutedOnPink, 6.33],
   ])("%s matches the spec ratio", (_name, color, expected) => {
-    expectRatio(color, PINK, expected);
+    expectRatio(color, LIGHT.pink, expected);
   });
 });
 
-describe("palette contrast pairs", () => {
-  it("pink reads against the page frame at 14.15", () => {
-    expectRatio(PINK, FRAME, 14.15);
+describe.each(THEMES)("%s palette floors", (theme) => {
+  const palette = PALETTES[theme];
+  const textRoles: (keyof Palette)[] = [
+    "ink",
+    "inkMuted",
+    "success",
+    "warning",
+    "destructive",
+    "cobalt",
+  ];
+  const markRoles: (keyof Palette)[] = [
+    "subtle",
+    "plum",
+    "teal",
+    "olive",
+    "nowLine",
+    "fieldBorder",
+  ];
+
+  it.each(textRoles)("text role %s reaches 4.5 on paper and pink", (role) => {
+    expect(ratio(palette[role], palette.paper)).toBeGreaterThanOrEqual(
+      TEXT_FLOOR,
+    );
+    expect(ratio(palette[role], palette.pink)).toBeGreaterThanOrEqual(
+      TEXT_FLOOR,
+    );
   });
 
-  it("paper text on the primary hover fill reads at 12.58", () => {
-    expectRatio(PAPER, PRIMARY_HOVER, 12.58);
+  it.each(markRoles)("mark %s reaches 3 on paper", (role) => {
+    expect(ratio(palette[role], palette.paper)).toBeGreaterThanOrEqual(
+      MARK_FLOOR,
+    );
   });
+
+  it("muted ink on pink reaches 4.5", () => {
+    expect(ratio(palette.inkMutedOnPink, palette.pink)).toBeGreaterThanOrEqual(
+      TEXT_FLOOR,
+    );
+  });
+
+  it("muted ink reads on the page frame for inactive navigation", () => {
+    expect(ratio(palette.inkMuted, palette.frame)).toBeGreaterThanOrEqual(
+      TEXT_FLOOR,
+    );
+  });
+
+  it("paper text reads on the primary hover fill", () => {
+    expect(ratio(palette.paper, palette.primaryHover)).toBeGreaterThanOrEqual(
+      TEXT_FLOOR,
+    );
+  });
+
+  it.each(WINDOW_ALPHA_STEPS.map((step) => [step.alpha, step.label] as const))(
+    "window label on the %s step reaches 4.5 against its blend over paper",
+    (alpha, label) => {
+      const background = blend(palette.ink, alpha, palette.paper);
+      expect(
+        ratioOfRgb(hexToRgb(palette[label]), background),
+      ).toBeGreaterThanOrEqual(TEXT_FLOOR);
+    },
+  );
 });
 
-describe("palette contrast floors", () => {
-  it.each([
-    ["ink", INK],
-    ["muted ink", INK_MUTED],
-    ["success", SUCCESS],
-    ["waiting", WARNING],
-    ["error", DESTRUCTIVE],
-    ["cobalt", COBALT],
-  ])("text role %s reaches 4.5 on paper and pink", (_name, color) => {
-    expect(ratio(color, PAPER)).toBeGreaterThanOrEqual(TEXT_FLOOR);
-    expect(ratio(color, PINK)).toBeGreaterThanOrEqual(TEXT_FLOOR);
+describe("palette tokens", () => {
+  it("names a camel-case key as a kebab-case custom property", () => {
+    expect(tokenName("inkMutedOnPink")).toBe("--ink-muted-on-pink");
   });
 
-  it.each([
-    ["subtle", SUBTLE],
-    ["plum", PLUM],
-    ["teal", TEAL],
-    ["olive", OLIVE],
-    ["now line", NOW_LINE],
-  ])("mark %s reaches 3 on paper", (_name, color) => {
-    expect(ratio(color, PAPER)).toBeGreaterThanOrEqual(MARK_FLOOR);
-  });
-});
-
-describe("alpha helpers", () => {
-  it("builds an ink rgba string", () => {
-    expect(inkAlpha(0.12)).toBe("rgba(17, 17, 17, 0.12)");
+  it("reads a palette color through its custom property", () => {
+    expect(INK).toBe("var(--ink)");
   });
 
-  it("builds a paper rgba string", () => {
-    expect(paperAlpha(0.24)).toBe("rgba(244, 241, 238, 0.24)");
+  it("mixes ink at the given alpha", () => {
+    expect(inkAlpha(0.12)).toBe(
+      "color-mix(in srgb, var(--ink) 12%, transparent)",
+    );
+  });
+
+  it("mixes paper at the given alpha", () => {
+    expect(paperAlpha(0.24)).toBe(
+      "color-mix(in srgb, var(--paper) 24%, transparent)",
+    );
   });
 });
 
 describe("quantizeWindowAlpha", () => {
   it.each([
-    [0, 0.18, INK],
-    [24.9, 0.18, INK],
-    [25, 0.4, INK],
-    [49.9, 0.4, INK],
-    [50, 0.75, PAPER],
-    [74.9, 0.75, PAPER],
-    [75, 1, PAPER],
-    [100, 1, PAPER],
-    [130, 1, PAPER],
+    [0, 0.18, "ink"],
+    [24.9, 0.18, "ink"],
+    [25, 0.4, "ink"],
+    [49.9, 0.4, "ink"],
+    [50, 0.75, "paper"],
+    [74.9, 0.75, "paper"],
+    [75, 1, "paper"],
+    [100, 1, "paper"],
+    [130, 1, "paper"],
   ])("maps %s percent to alpha %s", (percent, alpha, label) => {
     expect(quantizeWindowAlpha(percent)).toMatchObject({ alpha, label });
   });
 
   it("uses the lightest step for a negative percent", () => {
-    expect(quantizeWindowAlpha(-5)).toMatchObject({ alpha: 0.18, label: INK });
+    expect(quantizeWindowAlpha(-5)).toMatchObject({
+      alpha: 0.18,
+      label: "ink",
+    });
   });
-
-  it.each(WINDOW_ALPHA_STEPS.map((step) => [step.alpha, step.label] as const))(
-    "label on the %s step reaches 4.5 against its blend over paper",
-    (alpha, label) => {
-      const background = blendOverPaper(inkAlpha(alpha));
-      expect(ratioOfRgb(hexToRgb(label), background)).toBeGreaterThanOrEqual(
-        TEXT_FLOOR,
-      );
-    },
-  );
 });
 
 describe("windowPercent", () => {
@@ -239,61 +257,65 @@ function expectTokens(selector: string, expected: Record<string, string>) {
   }
 }
 
+const SHADCN_TOKENS = {
+  "--background": "var(--paper)",
+  "--foreground": "var(--ink)",
+  "--card": "var(--paper)",
+  "--card-foreground": "var(--ink)",
+  "--popover": "var(--paper)",
+  "--popover-foreground": "var(--ink)",
+  "--primary": "var(--ink)",
+  "--primary-foreground": "var(--paper)",
+  "--secondary": "var(--inset)",
+  "--secondary-foreground": "var(--ink)",
+  "--muted": "var(--inset)",
+  "--muted-foreground": "var(--ink-muted)",
+  "--accent": "var(--pink)",
+  "--accent-foreground": "var(--ink)",
+  "--border": "var(--ink)",
+  "--input": "var(--field-border)",
+  "--ring": "var(--cobalt)",
+  "--info": "var(--cobalt)",
+  "--chart-1": "var(--ink)",
+  "--chart-2": "var(--cobalt)",
+  "--chart-3": "var(--teal)",
+  "--chart-4": "var(--olive)",
+  "--chart-5": "var(--plum)",
+  "--sidebar": "var(--frame)",
+  "--sidebar-foreground": "var(--ink)",
+};
+
+const paletteTokens = (palette: Palette) =>
+  Object.fromEntries(
+    (Object.keys(palette) as (keyof Palette)[]).map((key) => [
+      tokenName(key),
+      palette[key],
+    ]),
+  );
+
 describe("styles.css tokens match the palette", () => {
-  it("sets every shadcn token in :root", () => {
-    expectTokens(":root", {
-      "--frame": FRAME,
-      "--background": PAPER,
-      "--foreground": INK,
-      "--card": PAPER,
-      "--card-foreground": INK,
-      "--popover": PAPER,
-      "--popover-foreground": INK,
-      "--primary": INK,
-      "--primary-foreground": PAPER,
-      "--secondary": INSET,
-      "--secondary-foreground": INK,
-      "--muted": INSET,
-      "--muted-foreground": INK_MUTED,
-      "--accent": PINK,
-      "--accent-foreground": INK,
-      "--destructive": DESTRUCTIVE,
-      "--border": INK,
-      "--input": FIELD_BORDER,
-      "--ring": COBALT,
-      "--success": SUCCESS,
-      "--warning": WARNING,
-      "--info": COBALT,
-      "--chart-1": INK,
-      "--chart-2": COBALT,
-      "--chart-3": TEAL,
-      "--chart-4": OLIVE,
-      "--chart-5": PLUM,
-      "--sidebar": FRAME,
-      "--sidebar-foreground": PAPER,
-      "--sidebar-primary": PINK,
-      "--sidebar-primary-foreground": INK,
-      "--sidebar-accent": SIDEBAR_ACCENT,
-      "--sidebar-accent-foreground": PAPER,
-      "--sidebar-border": SIDEBAR_BORDER,
-      "--sidebar-ring": PINK,
-    });
+  it("sets the light palette on :root", () => {
+    expectTokens(":root", paletteTokens(LIGHT));
+  });
+
+  it("sets the dark palette on the dark theme root", () => {
+    expectTokens(':root[data-theme="dark"]', paletteTokens(DARK));
+  });
+
+  it("derives every shadcn token from the palette", () => {
+    expectTokens(":root", SHADCN_TOKENS);
   });
 
   it("sets the panel fill on paper", () => {
-    expectTokens(".panel", { "--panel-fill": PAPER });
+    expectTokens(".panel", { "--panel-fill": "var(--paper)" });
   });
 
   it("sets the pink panel scope", () => {
     expectTokens('.panel[data-tone="pink"]', {
-      "--panel-fill": PINK,
-      "--muted": INSET_ON_PINK,
-      "--muted-foreground": INK_MUTED_ON_PINK,
+      "--panel-fill": "var(--pink)",
+      "--muted": "var(--inset-on-pink)",
+      "--muted-foreground": "var(--ink-muted-on-pink)",
     });
-  });
-
-  it("sets the sidebar focus ring to pink", () => {
-    expectTokens(".sidebar", { "--ring": PINK });
   });
 
   it("names the missing block in the failure", () => {

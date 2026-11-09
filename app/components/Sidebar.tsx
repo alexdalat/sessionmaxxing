@@ -3,6 +3,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
+import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { usePolling } from "@/app/hooks/usePolling";
 import { ACTIVE_QUEUE_PATH, QUEUE_CHANGED } from "@/app/lib/api";
 import { navItems } from "@/app/lib/nav";
@@ -41,10 +42,9 @@ export function Sidebar() {
       <div className="brand">
         <span className="brand-mark" aria-hidden="true">
           {PRODUCT_NAME[0]}
-        </span>{" "}
-        {PRODUCT_NAME}
+        </span>
+        <span className="brand-name">{PRODUCT_NAME}</span>
       </div>
-      <p className="sidebar-caption">CLAUDE · LOCAL</p>
       <nav aria-label="Main navigation">
         {navItems(edition).map((item) => (
           <Link
@@ -68,6 +68,7 @@ export function Sidebar() {
           </Link>
         ))}
       </nav>
+      <ThemeToggle />
     </aside>
   );
 }

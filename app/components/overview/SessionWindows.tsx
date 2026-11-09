@@ -9,7 +9,7 @@ import {
 } from "@/app/components/ui/tooltip";
 import { TOOLTIP_CLASS } from "@/app/lib/chart";
 import { formatRemaining } from "@/app/lib/duration";
-import { inkAlpha } from "@/app/lib/palette";
+import { inkAlpha, tokenVar } from "@/app/lib/palette";
 import {
   clockOfFraction,
   daySegments,
@@ -119,7 +119,7 @@ export function SessionWindows({
                             left: pct(segment.from),
                             width: pct(segment.to - segment.from),
                             background: inkAlpha(step.alpha),
-                            color: step.label,
+                            color: tokenVar(step.label),
                           }}
                           role="img"
                           aria-label={blockDescription(
