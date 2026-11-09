@@ -12,7 +12,19 @@ import {
 } from "recharts";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Skeleton } from "@/app/components/ui/skeleton";
-import { FABLE_COLOR, TOOLTIP_STYLE, WEEKLY_COLOR } from "@/app/lib/chart";
+import {
+  AXIS_TEXT_COLOR,
+  CHART_MARGIN,
+  CUTOFF_COLOR,
+  FABLE_COLOR,
+  GRID_COLOR,
+  NOW_LINE_COLOR,
+  PACE_COLOR,
+  TOOLTIP_ITEM_STYLE,
+  TOOLTIP_LABEL_STYLE,
+  TOOLTIP_STYLE,
+  WEEKLY_COLOR,
+} from "@/app/lib/chart";
 import { dayTicks, paceSeries } from "@/app/lib/pace";
 import { localTimestamp } from "@/shared/local-time";
 import {
@@ -21,8 +33,7 @@ import {
   WEEKLY_HARD_CEILING_PERCENT,
 } from "@/shared/types";
 
-const PACE_COLOR = "#8a8f98";
-const CEILING_COLOR = "#f7f8f8";
+const AXIS_TICK = { fill: AXIS_TEXT_COLOR, fontSize: 12 };
 
 export function WeeklyPace({
   samples,
@@ -40,13 +51,17 @@ export function WeeklyPace({
     ? dayTicks(series[0].t, series[series.length - 1].t, timeZone)
     : [];
   return (
-    <figure className="panel" aria-label="Weekly usage against pace">
-      <div className="section-heading">
-        <h2>Weekly usage vs pace</h2>
+    <figure
+      className="panel span-12"
+      data-tone="paper"
+      aria-label="Weekly usage against pace"
+    >
+      <h2 className="panel-label">Weekly usage vs pace</h2>
+      <div className="panel-tools">
         {samples === undefined ? (
           <Skeleton className="h-3 w-64" />
         ) : (
-          <span className="muted">
+          <span className="panel-meta">
             {snapshot?.weekly.resetsAt
               ? `Queue cutoff pace + ${marginPercent}%, max ${WEEKLY_HARD_CEILING_PERCENT}% · resets ${localTimestamp(snapshot.weekly.resetsAt, timeZone)}`
               : "No weekly window reported"}
@@ -60,8 +75,8 @@ export function WeeklyPace({
             height={240}
             initialDimension={{ width: 700, height: 240 }}
           >
-            <LineChart data={series} accessibilityLayer>
-              <CartesianGrid stroke="#ffffff10" vertical={false} />
+            <LineChart data={series} margin={CHART_MARGIN} accessibilityLayer>
+              <CartesianGrid stroke={GRID_COLOR} vertical={false} />
               <XAxis
                 dataKey="t"
                 type="number"
@@ -74,25 +89,34 @@ export function WeeklyPace({
                     timeZone,
                   })
                 }
-                stroke="#8a8f98"
+                stroke={AXIS_TEXT_COLOR}
+                tick={AXIS_TICK}
               />
-              <YAxis domain={[0, 100]} unit="%" stroke="#8a8f98" width={45} />
+              <YAxis
+                domain={[0, 100]}
+                unit="%"
+                stroke={AXIS_TEXT_COLOR}
+                tick={AXIS_TICK}
+                width={45}
+              />
               <Tooltip
                 labelFormatter={(t) => localTimestamp(Number(t), timeZone)}
                 formatter={(value) => `${value}%`}
                 contentStyle={TOOLTIP_STYLE}
+                itemStyle={TOOLTIP_ITEM_STYLE}
+                labelStyle={TOOLTIP_LABEL_STYLE}
                 separator=": "
               />
               <Legend itemSorter={() => 0} />
               <ReferenceLine
                 x={Date.parse(snapshot.fetchedAt)}
-                stroke="#f7f8f8"
-                strokeOpacity={0.5}
+                stroke={NOW_LINE_COLOR}
+                strokeWidth={1}
                 label={{
                   value: "now",
                   position: "insideTopRight",
-                  fill: "#8a8f98",
-                  fontSize: 10,
+                  fill: AXIS_TEXT_COLOR,
+                  fontSize: 12,
                 }}
               />
               <Line
@@ -105,16 +129,18 @@ export function WeeklyPace({
                 activeDot={{ r: 4 }}
                 connectNulls
               />
-              <Line
-                type="monotone"
-                dataKey="fable"
-                name="Fable weekly"
-                stroke={FABLE_COLOR}
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 4 }}
-                connectNulls
-              />
+              {snapshot.fable && (
+                <Line
+                  type="monotone"
+                  dataKey="fable"
+                  name="Fable weekly"
+                  stroke={FABLE_COLOR}
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4 }}
+                  connectNulls
+                />
+              )}
               <Line
                 type="linear"
                 dataKey="pace"
@@ -128,9 +154,8 @@ export function WeeklyPace({
                 type="linear"
                 dataKey="ceiling"
                 name="Queue cutoff"
-                stroke={CEILING_COLOR}
-                strokeOpacity={0.7}
-                strokeWidth={1}
+                stroke={CUTOFF_COLOR}
+                strokeWidth={1.5}
                 dot={false}
               />
             </LineChart>

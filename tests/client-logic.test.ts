@@ -1,11 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { activitySeries, type Breakdown } from "../app/lib/activitySeries";
 import { heatmapTotals, sourceRows } from "../app/lib/analyticsRows";
-import {
-  describeHours,
-  quietSummary,
-  usageHue,
-} from "../app/lib/dispatchSummary";
+import { describeHours, quietSummary } from "../app/lib/dispatchSummary";
 import { modelOptions } from "../app/lib/models";
 import { dayTicks, paceSeries } from "../app/lib/pace";
 import { scoreSeries } from "../app/lib/planScore";
@@ -98,18 +94,26 @@ it("pace series keeps samples whose weekly reset differs from the snapshot by su
   ]);
 });
 
+it("pace series bends the queue cutoff where pace plus margin reaches the hard ceiling", () => {
+  const points = paceSeries(
+    [],
+    usageSnapshot({
+      fetchedAt: "2026-09-07T08:00:00.000Z",
+      weekly: { percent: 10, resetsAt: "2026-09-13T08:00:00.000Z" },
+    }),
+    10,
+  );
+  const capT = Date.parse("2026-09-06T08:00:00.000Z") + 0.85 * 7 * 86_400_000;
+  expect(points?.find((point) => point.t === capT)).toMatchObject({
+    pace: 85,
+    ceiling: 95,
+  });
+});
+
 it("describes quiet start hours as wrapped ranges", () => {
   expect(describeHours([0, 1, 2, 3, 20, 21, 22, 23])).toBe("8 PM–3 AM");
   expect(describeHours([1, 2, 5, 12])).toBe("1 AM–2 AM, 5 AM, 12 PM");
   expect(describeHours([])).toBe("none");
-});
-
-it("usage hue runs from green at zero to red at the ceiling and clamps past it", () => {
-  expect(usageHue(0, 80)).toBe(145);
-  expect(usageHue(40, 80)).toBe(73);
-  expect(usageHue(80, 80)).toBe(0);
-  expect(usageHue(120, 80)).toBe(0);
-  expect(usageHue(5, 0)).toBe(0);
 });
 
 it("quiet summary names the ranges, when they open, and the two session reserves", () => {

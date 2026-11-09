@@ -1,13 +1,12 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
-import "@fontsource/inter/400.css";
-import "@fontsource/inter/500.css";
-import "@fontsource/inter/600.css";
-import "@fontsource/jetbrains-mono/400.css";
+import "@fontsource-variable/geist";
+import "@fontsource/courier-prime/400.css";
 import "./styles.css";
 import { EnvironmentProvider } from "@/app/components/EnvironmentProvider";
 import { Sidebar } from "@/app/components/Sidebar";
 import { TooltipProvider } from "@/app/components/ui/tooltip";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import { PRODUCT_NAME } from "@/shared/product";
 
 export const metadata: Metadata = {
@@ -15,7 +14,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#08090a",
+  themeColor: "#0A0A0A",
   // Shrink the layout viewport when the phone keyboard opens so dialogs sized in
   // dvh keep their submit row above it.
   interactiveWidget: "resizes-content",
@@ -23,13 +22,13 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en" className="dark">
+    <html lang="en">
       <body>
         <TooltipProvider>
           <EnvironmentProvider>
             <div className="app-shell">
               <a className="skip-link" href="#main">
-                Skip to content
+                {ACTION_LABELS.skipToContent}
               </a>
               <Sidebar />
               <main id="main" tabIndex={-1}>

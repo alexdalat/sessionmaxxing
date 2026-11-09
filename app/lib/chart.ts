@@ -1,26 +1,42 @@
+import {
+  COBALT,
+  INK,
+  INK_MUTED,
+  inkAlpha,
+  NOW_LINE,
+  OLIVE,
+  PAPER,
+  PLUM,
+  paperAlpha,
+  SUBTLE,
+  TEAL,
+} from "@/app/lib/palette";
 import type { ActivitySource } from "@/shared/types";
 
-export const WEEKLY_COLOR = "#7170ff";
-export const FABLE_COLOR = "#b8893f";
-export const MUTED_COLOR = "#8a8f98";
-export const accentAlpha = (alpha: number) => `rgba(113, 112, 255, ${alpha})`;
+export const WEEKLY_COLOR = INK;
+export const FABLE_COLOR = PLUM;
+export const MUTED_COLOR = SUBTLE;
 export const ACTIVITY_SOURCE_COLORS: Record<ActivitySource, string> = {
-  local: WEEKLY_COLOR,
-  dispatched: accentAlpha(0.45),
-  unknown: MUTED_COLOR,
+  local: INK,
+  dispatched: COBALT,
+  unknown: SUBTLE,
 };
-export const MODEL_SERIES_COLORS = [
-  WEEKLY_COLOR,
-  "#4f7cff",
-  "#3aa7a0",
-  MUTED_COLOR,
-];
-export const CHART_CURSOR_FILL = "#ffffff0a";
-/** shadcn TooltipContent on the panel surface, stacked rows. */
-export const TOOLTIP_CLASS =
-  "flex-col items-start gap-0.5 bg-popover text-popover-foreground ring-1 ring-foreground/10 [&_svg]:bg-popover [&_svg]:fill-popover";
+export const MODEL_SERIES_COLORS = [INK, COBALT, TEAL, OLIVE];
+export const PACE_COLOR = SUBTLE;
+export const CUTOFF_COLOR = COBALT;
+export const NOW_LINE_COLOR = NOW_LINE;
+export const GRID_COLOR = inkAlpha(0.12);
+export const AXIS_TEXT_COLOR = INK_MUTED;
+export const CHART_CURSOR_FILL = inkAlpha(0.06);
+export const CHART_MARGIN = { top: 8, right: 8, bottom: 8, left: 8 };
+export const BAR_SEPARATOR = { stroke: PAPER, strokeWidth: 1 };
+export const TOOLTIP_CLASS = "flex-col items-start gap-1";
 export const TOOLTIP_STYLE = {
-  background: "#191a1b",
-  border: "1px solid #ffffff20",
-  borderRadius: 8,
+  background: INK,
+  border: `1px solid ${paperAlpha(0.24)}`,
+  borderRadius: 12,
+  padding: "8px 12px",
+  color: PAPER,
 };
+export const TOOLTIP_ITEM_STYLE = { color: PAPER };
+export const TOOLTIP_LABEL_STYLE = { color: PAPER };

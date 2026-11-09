@@ -5,7 +5,8 @@ import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { QueueBadges } from "@/app/components/QueueBadges";
 import { Badge } from "@/app/components/ui/badge";
 import { Button } from "@/app/components/ui/button";
-import { quietSummary, usageHue } from "@/app/lib/dispatchSummary";
+import { quietSummary } from "@/app/lib/dispatchSummary";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import { queuePreview } from "@/app/lib/queuePreview";
 import { localClock } from "@/shared/local-time";
 import type {
@@ -19,13 +20,7 @@ function Bucket({ name, gate }: { name: string; gate: BucketGate }) {
   const percent = gate.percent ?? 0;
   return (
     <>
-      {name}{" "}
-      <strong
-        className="metric"
-        style={{ color: `hsl(${usageHue(percent, gate.ceiling)} 45% 66%)` }}
-      >
-        {percent}%
-      </strong>
+      {name} <strong className="metric">{percent}%</strong>
       {gate.reserved > 0 && (
         <>
           {" "}
@@ -72,21 +67,25 @@ export function DispatchPanel({
     queueOn === undefined ? "…" : queueOn ? "Queue on" : "Queue off";
   const rows = tasks ? queuePreview(tasks, now) : null;
   return (
-    <section className="panel dispatch-panel" aria-label="Queue">
-      <div className="section-heading">
-        <h2>Queue</h2>
-        <div className="gate-row">
+    <section
+      className="panel span-5 dispatch-panel"
+      data-tone="pink"
+      aria-label="Queue"
+    >
+      <h2 className="panel-label">Queue</h2>
+      <div className="panel-tools">
+        <div className="tool-group">
           <Badge variant={queueOn ? "success" : "warning"}>{queueLabel}</Badge>
           <QueueBadges planning={planning} />
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setSettingsOpen(true)}
-          >
-            Settings
-          </Button>
         </div>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setSettingsOpen(true)}
+        >
+          {ACTION_LABELS.editSettings}
+        </Button>
       </div>
       <p className="dispatch-reason">
         {gate.status === "ready" ? (

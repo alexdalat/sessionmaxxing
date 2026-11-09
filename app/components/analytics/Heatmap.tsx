@@ -8,6 +8,7 @@ import {
 import { useClock } from "@/app/hooks/useClock";
 import { formatNumber, heatmapTotals } from "@/app/lib/analyticsRows";
 import { TOOLTIP_CLASS } from "@/app/lib/chart";
+import { INSET, inkAlpha } from "@/app/lib/palette";
 import { allowedStartHours } from "@/app/lib/quietHours";
 import { localCell, WEEKDAYS } from "@/app/lib/time";
 import type { Analytics, HeatCell, HeatShare } from "@/shared/types";
@@ -21,14 +22,12 @@ import {
 } from "@/shared/types";
 
 const HOURS_PER_DAY = 24;
-const CELL_BASE_ALPHA = 0.2;
-const CELL_RANGE_ALPHA = 0.8;
+const CELL_BASE_ALPHA = 0.12;
+const CELL_RANGE_ALPHA = 0.88;
 const TOTAL_BASE_ALPHA = 0.04;
 const TOTAL_RANGE_ALPHA = 0.28;
-const EMPTY_CELL = "#191a1b";
-const accent = (alpha: number) => `rgb(113 112 255 / ${alpha})`;
 const shade = (value: number, max: number, base: number, range: number) =>
-  value ? accent(base + (range * value) / max) : EMPTY_CELL;
+  value ? inkAlpha(base + (range * value) / max) : INSET;
 const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
 const minutes = (value: number) => `${formatNumber(Math.round(value))} min`;
 const cellTitle = (cell: HeatCell) =>
@@ -116,9 +115,9 @@ export function Heatmap({
       .filter(Boolean)
       .join(" ");
   return (
-    <section className="panel">
-      <div className="section-heading">
-        <h2>Busy hours by weekday</h2>
+    <section className="panel span-12" data-tone="paper">
+      <h2 className="panel-label">Busy hours by weekday</h2>
+      <div className="panel-tools">
         <ul className="heat-legend" aria-label="Legend">
           <li>
             <span className="heat-key now" /> Now

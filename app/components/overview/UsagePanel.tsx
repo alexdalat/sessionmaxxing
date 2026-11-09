@@ -2,6 +2,8 @@ import { ClockIcon } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import { Skeleton } from "@/app/components/ui/skeleton";
 import { formatRemaining } from "@/app/lib/duration";
+import { ACTION_LABELS } from "@/app/lib/labels";
+import { fetchedLabel } from "@/app/lib/usageStrip";
 import {
   CLAUDE_BUCKET_LABELS,
   CLAUDE_BUCKETS,
@@ -132,34 +134,37 @@ export function UsagePanel({
         fable: planning.fable,
       }
     : undefined;
+  const fetched = fetchedLabel(snapshot, now);
   const heading = `${planLabel(snapshot?.plan ?? null)} usage`;
   const buckets = CLAUDE_BUCKETS.filter(
     (bucket) => bucket !== "fable" || (snapshot?.fable ?? null) !== null,
   );
   return (
-    <section className="panel usage-panel" aria-label={heading}>
-      <div className="section-heading">
-        <h2>{heading}</h2>
-        <span className="usage-meta">
-          {usage === undefined ? (
-            <Skeleton className="h-3 w-24" />
-          ) : (
-            <span className="muted">
-              {snapshot
-                ? `Fetched ${formatRemaining(now - Date.parse(snapshot.fetchedAt))} ago`
-                : "Not fetched yet"}
-            </span>
-          )}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={onRefresh}
-            disabled={busy}
+    <section
+      className="panel span-7 usage-panel"
+      data-tone="pink"
+      aria-label={heading}
+    >
+      <h2 className="panel-label">{heading}</h2>
+      <div className="panel-tools">
+        {usage === undefined ? (
+          <Skeleton className="h-3 w-24" />
+        ) : (
+          <span
+            className={fetched.stale ? "panel-meta usage-over" : "panel-meta"}
           >
-            {busy ? "Refreshing…" : "Refresh"}
-          </Button>
-        </span>
+            {fetched.text}
+          </span>
+        )}
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={onRefresh}
+          disabled={busy}
+        >
+          {busy ? ACTION_LABELS.refreshingUsage : ACTION_LABELS.refreshUsage}
+        </Button>
       </div>
       {usage?.error && (
         <p className="error" role="alert">

@@ -1,10 +1,12 @@
 "use client";
+import { XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Button } from "@/app/components/ui/button";
 import { Checkbox } from "@/app/components/ui/checkbox";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -21,6 +23,7 @@ import {
 import { Textarea } from "@/app/components/ui/textarea";
 import { useClock } from "@/app/hooks/useClock";
 import { api } from "@/app/lib/api";
+import { ACTION_LABELS, FIELD_LABELS } from "@/app/lib/labels";
 import { modelOptions } from "@/app/lib/models";
 import {
   RESTART_KIND_LABELS,
@@ -146,6 +149,7 @@ export function TaskFormDialog({
     >
       <DialogContent
         aria-describedby={undefined}
+        showCloseButton={false}
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[640px]"
       >
         <DialogHeader>
@@ -207,7 +211,7 @@ export function TaskFormDialog({
           }}
         >
           <div className="form-grid">
-            <div className="full grid gap-1.5">
+            <div className="full grid gap-2">
               <Label htmlFor={`${fieldId}-title`}>Title</Label>
               <Input
                 id={`${fieldId}-title`}
@@ -218,7 +222,7 @@ export function TaskFormDialog({
                 placeholder="Task name"
               />
             </div>
-            <div className="full grid gap-1.5">
+            <div className="full grid gap-2">
               <Label htmlFor={`${fieldId}-prompt`}>Prompt</Label>
               <Textarea
                 id={`${fieldId}-prompt`}
@@ -230,7 +234,7 @@ export function TaskFormDialog({
                 placeholder="What Claude Code should do"
               />
             </div>
-            <div className="full grid gap-1.5">
+            <div className="full grid gap-2">
               <Label htmlFor={`${fieldId}-workdir`}>Work directory</Label>
               <WorkdirField
                 id={`${fieldId}-workdir`}
@@ -239,7 +243,7 @@ export function TaskFormDialog({
                 defaultToRecent={!task}
               />
             </div>
-            <div className="full grid gap-1.5">
+            <div className="full grid gap-2">
               <Label htmlFor={`${fieldId}-restart`}>Restart</Label>
               <Select
                 value={restartKind}
@@ -264,7 +268,7 @@ export function TaskFormDialog({
               )}
             </div>
             {restartKind === "command" && (
-              <div className="full grid gap-1.5">
+              <div className="full grid gap-2">
                 <Label htmlFor={`${fieldId}-command`}>Command</Label>
                 <Textarea
                   id={`${fieldId}-command`}
@@ -276,8 +280,8 @@ export function TaskFormDialog({
                 />
               </div>
             )}
-            <div className="grid gap-1.5">
-              <Label htmlFor={`${fieldId}-model`}>Model</Label>
+            <div className="grid gap-2">
+              <Label htmlFor={`${fieldId}-model`}>{FIELD_LABELS.model}</Label>
               <Select
                 name="model"
                 required
@@ -296,7 +300,7 @@ export function TaskFormDialog({
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-1.5">
+            <div className="grid gap-2">
               <Label htmlFor={`${fieldId}-priority`}>
                 Priority (lower runs first)
               </Label>
@@ -310,7 +314,7 @@ export function TaskFormDialog({
                 defaultValue={task?.priority ?? 0}
               />
             </div>
-            <div className="grid gap-1.5">
+            <div className="grid gap-2">
               <Label htmlFor={`${fieldId}-max-turns`}>Maximum turns</Label>
               <Input
                 id={`${fieldId}-max-turns`}
@@ -323,7 +327,7 @@ export function TaskFormDialog({
               />
             </div>
             {edition === "full" && (
-              <div className="grid gap-1.5">
+              <div className="grid gap-2">
                 <Label htmlFor={`${fieldId}-tokens`}>Tokens</Label>
                 <Select name="tokens" value={tokens} onValueChange={setTokens}>
                   <SelectTrigger id={`${fieldId}-tokens`} className="w-full">
@@ -340,7 +344,7 @@ export function TaskFormDialog({
                 </Select>
               </div>
             )}
-            <div className="grid gap-1.5">
+            <div className="grid gap-2">
               <Label htmlFor={`${fieldId}-earliest-start`}>
                 Earliest start ({zoneLabel})
               </Label>
@@ -354,7 +358,7 @@ export function TaskFormDialog({
                 )}
               />
             </div>
-            <div className="grid gap-1.5">
+            <div className="grid gap-2">
               <Label htmlFor={`${fieldId}-window`}>
                 Preferred five-hour window ({zoneLabel})
               </Label>
@@ -377,7 +381,7 @@ export function TaskFormDialog({
               </Select>
             </div>
             {dependencyOptions.length > 0 && (
-              <div className="full grid gap-1.5">
+              <div className="full grid gap-2">
                 <Label>Depends on</Label>
                 <div className="grid max-h-40 gap-2 overflow-y-auto rounded-md border border-input p-3">
                   {dependencyOptions.map((option) => (
@@ -406,14 +410,29 @@ export function TaskFormDialog({
             )}
           </div>
           <div className="actions">
-            <Button type="submit" disabled={busy || savingMethod}>
-              {busy ? "Saving…" : task ? "Save changes" : "Add task"}
-            </Button>
             <Button type="button" variant="outline" onClick={onClose}>
-              Cancel
+              {ACTION_LABELS.discardChanges}
+            </Button>
+            <Button type="submit" disabled={busy || savingMethod}>
+              {busy
+                ? ACTION_LABELS.savingTask
+                : task
+                  ? ACTION_LABELS.saveChanges
+                  : ACTION_LABELS.addTask}
             </Button>
           </div>
         </form>
+        <DialogClose asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="dialog-close"
+            aria-label={ACTION_LABELS.closeDialog}
+          >
+            <XIcon aria-hidden="true" />
+          </Button>
+        </DialogClose>
       </DialogContent>
     </Dialog>
   );

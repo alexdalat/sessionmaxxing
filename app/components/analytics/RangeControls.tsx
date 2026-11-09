@@ -7,6 +7,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/app/components/ui/select";
+import { ACTION_LABELS, FIELD_LABELS } from "@/app/lib/labels";
 import type { RangeDays } from "@/shared/types";
 import { RANGE_DAYS } from "@/shared/types";
 
@@ -20,10 +21,10 @@ export function RangeControls({
   onRefresh: () => void;
 }) {
   return (
-    <div className="header-controls">
-      <div className="grid gap-1.5">
+    <div className="panel-tools">
+      <div className="grid gap-2">
         <Label htmlFor="range-days" className="sr-only">
-          Range
+          {FIELD_LABELS.range}
         </Label>
         <Select
           value={String(days)}
@@ -41,8 +42,8 @@ export function RangeControls({
           </SelectContent>
         </Select>
       </div>
-      <Button type="button" variant="outline" onClick={onRefresh}>
-        Refresh
+      <Button type="button" variant="outline" size="sm" onClick={onRefresh}>
+        {ACTION_LABELS.refreshAnalytics}
       </Button>
     </div>
   );

@@ -7,9 +7,15 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@/app/components/ui/tooltip";
-import { accentAlpha, TOOLTIP_CLASS } from "@/app/lib/chart";
+import { TOOLTIP_CLASS } from "@/app/lib/chart";
 import { formatRemaining } from "@/app/lib/duration";
-import { clockOfFraction, daySegments } from "@/app/lib/sessionWindows";
+import { inkAlpha } from "@/app/lib/palette";
+import {
+  clockOfFraction,
+  daySegments,
+  quantizeWindowAlpha,
+  windowPercent,
+} from "@/app/lib/sessionWindows";
 import { localDay, weekdayOf } from "@/app/lib/time";
 import { localClock, shiftDate } from "@/shared/local-time";
 import type { SessionWindow } from "@/shared/types";
@@ -27,12 +33,6 @@ const blockLabel = (window: SessionWindow) =>
   window.peakPercent === null
     ? activeLabel(window)
     : `${Math.round(window.peakPercent)}%`;
-const blockAlpha = (window: SessionWindow) =>
-  0.3 +
-  0.7 *
-    (window.peakPercent === null
-      ? window.activeMinutes / BLOCK_MINUTES
-      : window.peakPercent / 100);
 const blockDescription = (window: SessionWindow, timeZone: string) =>
   `${localClock(window.start, timeZone)} – ${localClock(window.end, timeZone)} · ${
     window.peakPercent === null
@@ -79,15 +79,16 @@ export function SessionWindows({
   ].join(" · ");
   return (
     <section
-      className="panel"
+      className="panel span-7"
+      data-tone="paper"
       aria-label="Session windows over the last 7 days"
     >
-      <div className="section-heading">
-        <h2>Session windows · last 7 days</h2>
+      <h2 className="panel-label">Session windows · last 7 days</h2>
+      <div className="panel-tools">
         {windows === undefined ? (
           <Skeleton className="h-3 w-64" />
         ) : (
-          <span className="muted">
+          <span className="panel-meta">
             {used ? summary : "No windows recorded yet"}
           </span>
         )}
@@ -105,40 +106,49 @@ export function SessionWindows({
             <div className="windows-track">
               {segments
                 .filter((segment) => segment.date === date)
-                .map((segment) => (
-                  <Tooltip key={`${segment.window.start}-${segment.from}`}>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="windows-block"
-                        style={{
-                          left: pct(segment.from),
-                          width: pct(segment.to - segment.from),
-                          background: accentAlpha(blockAlpha(segment.window)),
-                        }}
-                        role="img"
-                        aria-label={blockDescription(segment.window, timeZone)}
-                      >
-                        {segment.to - segment.from > 0.08 &&
-                          blockLabel(segment.window)}
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent className={TOOLTIP_CLASS}>
-                      <strong className="font-medium">
-                        {weekdayOf(
-                          localDay(segment.window.start, timeZone).date,
-                        )}{" "}
-                        {localClock(segment.window.start, timeZone)} –{" "}
-                        {localClock(segment.window.end, timeZone)}
-                      </strong>
-                      <span>
-                        {segment.window.peakPercent === null
-                          ? "From local transcripts"
-                          : `Peak ${Math.round(segment.window.peakPercent)}% · ${segment.window.samples} sample${segment.window.samples === 1 ? "" : "s"}`}
-                      </span>
-                      <span>Active {activeLabel(segment.window)}</span>
-                    </TooltipContent>
-                  </Tooltip>
-                ))}
+                .map((segment) => {
+                  const step = quantizeWindowAlpha(
+                    windowPercent(segment.window),
+                  );
+                  return (
+                    <Tooltip key={`${segment.window.start}-${segment.from}`}>
+                      <TooltipTrigger asChild>
+                        <div
+                          className="windows-block"
+                          style={{
+                            left: pct(segment.from),
+                            width: pct(segment.to - segment.from),
+                            background: inkAlpha(step.alpha),
+                            color: step.label,
+                          }}
+                          role="img"
+                          aria-label={blockDescription(
+                            segment.window,
+                            timeZone,
+                          )}
+                        >
+                          {segment.to - segment.from > 0.08 &&
+                            blockLabel(segment.window)}
+                        </div>
+                      </TooltipTrigger>
+                      <TooltipContent className={TOOLTIP_CLASS}>
+                        <strong className="font-medium">
+                          {weekdayOf(
+                            localDay(segment.window.start, timeZone).date,
+                          )}{" "}
+                          {localClock(segment.window.start, timeZone)} –{" "}
+                          {localClock(segment.window.end, timeZone)}
+                        </strong>
+                        <span>
+                          {segment.window.peakPercent === null
+                            ? "From local transcripts"
+                            : `Peak ${Math.round(segment.window.peakPercent)}% · ${segment.window.samples} sample${segment.window.samples === 1 ? "" : "s"}`}
+                        </span>
+                        <span>Active {activeLabel(segment.window)}</span>
+                      </TooltipContent>
+                    </Tooltip>
+                  );
+                })}
               {date === today.date && (
                 <div
                   className="windows-now"

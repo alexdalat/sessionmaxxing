@@ -31,10 +31,3 @@ export function quietSummary(quiet: QuietHours, settings: DispatchSettings) {
   if (quiet.active) return `${list} · open now`;
   return `${list} · opens ${quiet.nextStartHour === null ? "never" : hourLabel(quiet.nextStartHour)}`;
 }
-
-const GREEN_HUE = 145;
-/** Green at zero, amber midway, red at or past the ceiling. */
-export function usageHue(percent: number, ceiling: number) {
-  const ratio = ceiling > 0 ? Math.min(1, Math.max(0, percent / ceiling)) : 1;
-  return Math.round(GREEN_HUE * (1 - ratio));
-}

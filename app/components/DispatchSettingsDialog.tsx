@@ -1,9 +1,11 @@
 "use client";
+import { XIcon } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Button } from "@/app/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogHeader,
   DialogTitle,
@@ -15,6 +17,7 @@ import {
   writeCachedAnalytics,
 } from "@/app/lib/analyticsCache";
 import { api } from "@/app/lib/api";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import {
   type Analytics,
   type DispatchSettings,
@@ -200,6 +203,7 @@ export function DispatchSettingsDialog({
     >
       <DialogContent
         aria-describedby={undefined}
+        showCloseButton={false}
         className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-[640px]"
       >
         <DialogHeader>
@@ -243,7 +247,7 @@ export function DispatchSettingsDialog({
           <fieldset disabled={busy} className="guardrail-fields">
             <div className="form-grid">
               {(edition === "full" ? FULL_FIELDS : LITE_FIELDS).map((field) => (
-                <div key={field.key} className="grid gap-1.5">
+                <div key={field.key} className="grid gap-2">
                   <Label htmlFor={`${fieldId}-${field.key}`}>
                     {field.label}
                   </Label>
@@ -270,7 +274,6 @@ export function DispatchSettingsDialog({
                   role="switch"
                   aria-checked={draft.autoApply}
                   variant={draft.autoApply ? "default" : "outline"}
-                  className="rounded-full"
                   onClick={() =>
                     setDraft({ ...draft, autoApply: !draft.autoApply })
                   }
@@ -279,15 +282,12 @@ export function DispatchSettingsDialog({
                 </Button>
               </div>
               <div className="full">
-                <span className="field-label">
-                  Start each 5-hour session automatically
-                </span>
+                <span className="field-label">Keep session active</span>
                 <Button
                   type="button"
                   role="switch"
                   aria-checked={draft.keepSessionActive}
                   variant={draft.keepSessionActive ? "default" : "outline"}
-                  className="rounded-full"
                   onClick={() =>
                     setDraft({
                       ...draft,
@@ -307,19 +307,30 @@ export function DispatchSettingsDialog({
             </div>
           </fieldset>
           <div className="actions">
-            <Button type="submit" disabled={busy}>
-              {busy ? "Saving…" : "Save"}
-            </Button>
             <Button
               type="button"
               variant="outline"
               onClick={onClose}
               disabled={busy}
             >
-              Cancel
+              {ACTION_LABELS.discardChanges}
+            </Button>
+            <Button type="submit" disabled={busy}>
+              {busy ? ACTION_LABELS.savingSettings : ACTION_LABELS.saveSettings}
             </Button>
           </div>
         </form>
+        <DialogClose asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="dialog-close"
+            aria-label={ACTION_LABELS.closeDialog}
+          >
+            <XIcon aria-hidden="true" />
+          </Button>
+        </DialogClose>
       </DialogContent>
     </Dialog>
   );

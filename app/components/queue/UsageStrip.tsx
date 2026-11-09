@@ -3,6 +3,7 @@ import { ClockIcon } from "lucide-react";
 import { useState } from "react";
 import { Button } from "@/app/components/ui/button";
 import { api } from "@/app/lib/api";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import {
   fetchedLabel,
   NOT_STARTED,
@@ -77,36 +78,42 @@ export function UsageStrip({
   const heading = stripHeading(planning.usage);
   const fetched = fetchedLabel(planning.usage, now);
   return (
-    <section className="panel usage-panel" aria-label={heading}>
-      <div className="section-heading">
-        <h2>{heading}</h2>
-        <span className="usage-meta">
-          <span className={fetched.stale ? "muted usage-over" : "muted"}>
-            {fetched.text}
-          </span>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={refreshing}
-            onClick={async () => {
-              setRefreshing(true);
-              setRefreshError("");
-              try {
-                await api("/api/usage/refresh", { method: "POST" });
-                onRefreshed();
-              } catch (error) {
-                setRefreshError(
-                  error instanceof Error ? error.message : String(error),
-                );
-              } finally {
-                setRefreshing(false);
-              }
-            }}
-          >
-            {refreshing ? "Refreshing…" : "Refresh usage"}
-          </Button>
+    <section
+      className="panel span-12 usage-panel"
+      data-tone="pink"
+      aria-label={heading}
+    >
+      <h2 className="panel-label">{heading}</h2>
+      <div className="panel-tools">
+        <span
+          className={fetched.stale ? "panel-meta usage-over" : "panel-meta"}
+        >
+          {fetched.text}
         </span>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={refreshing}
+          onClick={async () => {
+            setRefreshing(true);
+            setRefreshError("");
+            try {
+              await api("/api/usage/refresh", { method: "POST" });
+              onRefreshed();
+            } catch (error) {
+              setRefreshError(
+                error instanceof Error ? error.message : String(error),
+              );
+            } finally {
+              setRefreshing(false);
+            }
+          }}
+        >
+          {refreshing
+            ? ACTION_LABELS.refreshingUsage
+            : ACTION_LABELS.refreshUsage}
+        </Button>
       </div>
       {refreshError && (
         <p className="error" role="alert">
@@ -118,9 +125,11 @@ export function UsageStrip({
           {planning.usageError}
         </p>
       )}
-      {usageStripRows(planning, now).map((row) => (
-        <Row key={row.bucket} row={row} />
-      ))}
+      <div className="strip-rows">
+        {usageStripRows(planning, now).map((row) => (
+          <Row key={row.bucket} row={row} />
+        ))}
+      </div>
       <ul className="usage-legend" aria-hidden="true">
         <li className="key-pace">Pace</li>
         <li className="key-ceiling">Queue cutoff</li>

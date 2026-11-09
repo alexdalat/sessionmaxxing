@@ -2,6 +2,7 @@
 import type { ReactNode } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Badge } from "@/app/components/ui/badge";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import {
   type PreviewState,
   previewState,
@@ -12,9 +13,9 @@ import { windowRangeLabel } from "@/app/lib/schedule";
 import { localTimestamp } from "@/shared/local-time";
 import { formatTokens, type PublicTask } from "@/shared/types";
 
-const stateVariants: Record<PreviewState, "success" | "info" | "warning"> = {
+const stateVariants: Record<PreviewState, "success" | "warning"> = {
   running: "success",
-  ready: "info",
+  ready: "success",
   waiting: "warning",
 };
 
@@ -50,7 +51,7 @@ export function TaskCard({
         <p>{task.model}</p>
         <p className="muted task-workdir">{task.workdir}</p>
         <details>
-          <summary>Prompt</summary>
+          <summary>{ACTION_LABELS.showPrompt}</summary>
           <pre className="task-prompt">{task.prompt}</pre>
         </details>
         <div className="task-schedule">

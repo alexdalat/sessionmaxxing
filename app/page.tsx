@@ -5,6 +5,7 @@ import { Button } from "@/app/components/ui/button";
 import { useAnalytics } from "@/app/hooks/useAnalytics";
 import { usePolling } from "@/app/hooks/usePolling";
 import { ACTIVE_QUEUE_PATH } from "@/app/lib/api";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import type { QueueSnapshot } from "@/shared/types";
 
 export default function OverviewPage() {
@@ -12,19 +13,20 @@ export default function OverviewPage() {
   const queue = usePolling<QueueSnapshot>(ACTIVE_QUEUE_PATH);
   return (
     <>
-      <header className="page-header">
-        <h1>Overview</h1>
-      </header>
-      {error && (
-        <div className="error" role="alert">
-          {error}{" "}
-          <Button type="button" variant="outline" size="sm" onClick={refresh}>
-            Try again
-          </Button>
-        </div>
-      )}
-      {loading && <OverviewSkeleton />}
-      {analytics && <Overview data={analytics} queue={queue} />}
+      <h1 className="sr-only">Overview</h1>
+      <div className="bento">
+        {error && (
+          <section className="panel span-12" data-tone="paper" role="alert">
+            <h2 className="panel-label">Error</h2>
+            <p className="error-message">{error}</p>
+            <Button type="button" variant="outline" size="sm" onClick={refresh}>
+              {ACTION_LABELS.reloadOverview}
+            </Button>
+          </section>
+        )}
+        {loading && <OverviewSkeleton />}
+        {analytics && <Overview data={analytics} queue={queue} />}
+      </div>
     </>
   );
 }

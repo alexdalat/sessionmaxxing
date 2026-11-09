@@ -28,9 +28,10 @@ export function Overview({
   return (
     <>
       {usage.error && (
-        <p className="error" role="alert">
-          {usage.error}
-        </p>
+        <section className="panel span-12" data-tone="paper" role="alert">
+          <h2 className="panel-label">Error</h2>
+          <p className="error-message">{usage.error}</p>
+        </section>
       )}
       <UsagePanel
         usage={usage.data}
@@ -50,21 +51,19 @@ export function Overview({
         }}
       />
       <QuickAdd onQueued={queue.reload} />
-      <div className="two-column">
-        <SessionWindows windows={usage.data?.windows} now={now} />
-        {planning ? (
-          <DispatchPanel
-            planning={planning}
-            keeper={queue.data?.sessionKeeper}
-            tasks={queue.data?.tasks}
-            queueOn={queue.data?.autoDispatch}
-            now={now}
-            onSaved={queue.reload}
-          />
-        ) : (
-          <QueueSkeleton />
-        )}
-      </div>
+      <SessionWindows windows={usage.data?.windows} now={now} />
+      {planning ? (
+        <DispatchPanel
+          planning={planning}
+          keeper={queue.data?.sessionKeeper}
+          tasks={queue.data?.tasks}
+          queueOn={queue.data?.autoDispatch}
+          now={now}
+          onSaved={queue.reload}
+        />
+      ) : (
+        <QueueSkeleton />
+      )}
       <WeeklyPace
         samples={usage.data?.samples}
         snapshot={usage.data?.snapshot ?? null}

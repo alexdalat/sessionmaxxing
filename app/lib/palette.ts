@@ -1,0 +1,25 @@
+export const FRAME = "#0A0A0A";
+export const PAPER = "#F4F1EE";
+export const PINK = "#F2D3D0";
+export const INK = "#111111";
+export const INK_MUTED = "#5C5550";
+export const INK_MUTED_ON_PINK = "#4F4945";
+export const FRAME_TEXT_INACTIVE = "#B3ACA6";
+export const INSET = "#E9E3DD";
+export const INSET_ON_PINK = "#E0C3C1";
+export const FIELD_BORDER = "#77706B";
+export const PRIMARY_HOVER = "#2B2B2B";
+export const COBALT = "#2A3FD1";
+export const PLUM = "#8E2F8E";
+export const TEAL = "#0B6E66";
+export const OLIVE = "#5A6410";
+export const SUBTLE = "#6F6761";
+export const NOW_LINE = "#838180";
+export const SUCCESS = "#176B33";
+export const WARNING = "#7A4F00";
+export const DESTRUCTIVE = "#961A14";
+export const SIDEBAR_ACCENT = "#1C1C1B";
+export const SIDEBAR_BORDER = "#3A3837";
+
+export const inkAlpha = (alpha: number) => `rgba(17, 17, 17, ${alpha})`;
+export const paperAlpha = (alpha: number) => `rgba(244, 241, 238, ${alpha})`;

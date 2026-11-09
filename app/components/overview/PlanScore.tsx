@@ -29,14 +29,25 @@ import {
   seriesColor,
   seriesLabel,
 } from "@/app/lib/activitySeries";
-import { CHART_CURSOR_FILL, TOOLTIP_STYLE } from "@/app/lib/chart";
+import {
+  AXIS_TEXT_COLOR,
+  BAR_SEPARATOR,
+  CHART_CURSOR_FILL,
+  CHART_MARGIN,
+  GRID_COLOR,
+  PACE_COLOR,
+  TOOLTIP_ITEM_STYLE,
+  TOOLTIP_LABEL_STYLE,
+  TOOLTIP_STYLE,
+  WEEKLY_COLOR,
+} from "@/app/lib/chart";
+import { FIELD_LABELS } from "@/app/lib/labels";
 import { type ScoreRow, scoreSeries } from "@/app/lib/planScore";
 import type { PlanScore as PlanScoreData } from "@/shared/types";
 
 const USAGE_POLL_MS = 30_000;
 const CHART_HEIGHT = 240;
-const PACE_COLOR = "#8a8f98";
-const WEEKLY_LINE_COLOR = "#d0d6e0";
+const AXIS_TICK = { fill: AXIS_TEXT_COLOR, fontSize: 12 };
 const dash = (value: number | null) => (value === null ? "–" : String(value));
 
 export function PlanScore() {
@@ -46,15 +57,16 @@ export function PlanScore() {
   const series = plan.data ? scoreSeries(plan.data, breakdown, timeZone) : null;
   return (
     <section
-      className="panel"
+      className="panel span-12"
+      data-tone="paper"
       aria-label={`Plan score over the last 28 days by ${breakdown}`}
     >
-      <div className="section-heading">
-        <h2>Plan score · last 28 days</h2>
+      <h2 className="panel-label">Plan score · last 28 days</h2>
+      <div className="panel-tools">
         <div className="flex flex-wrap items-center gap-3">
           {plan.data ? (
             <div className="flex flex-wrap items-baseline gap-3">
-              <strong className="metric text-2xl font-normal">
+              <strong className="metric display-value">
                 {dash(plan.data.score)}
               </strong>
               <span className="muted">
@@ -68,9 +80,9 @@ export function PlanScore() {
           ) : (
             <Skeleton className="h-3 w-64" />
           )}
-          <div className="grid gap-1.5">
+          <div className="grid gap-2">
             <Label htmlFor="plan-breakdown" className="sr-only">
-              Breakdown
+              {FIELD_LABELS.breakdown}
             </Label>
             <Select
               value={breakdown}
@@ -105,15 +117,26 @@ export function PlanScore() {
             height={CHART_HEIGHT}
             initialDimension={{ width: 700, height: CHART_HEIGHT }}
           >
-            <ComposedChart data={series.rows} accessibilityLayer>
-              <CartesianGrid stroke="#ffffff10" vertical={false} />
+            <ComposedChart
+              data={series.rows}
+              margin={CHART_MARGIN}
+              accessibilityLayer
+            >
+              <CartesianGrid stroke={GRID_COLOR} vertical={false} />
               <XAxis
                 dataKey="date"
                 tickFormatter={(date: string) => date.slice(5)}
                 minTickGap={25}
-                stroke="#8a8f98"
+                stroke={AXIS_TEXT_COLOR}
+                tick={AXIS_TICK}
               />
-              <YAxis domain={[0, 100]} unit="%" stroke="#8a8f98" width={40} />
+              <YAxis
+                domain={[0, 100]}
+                unit="%"
+                stroke={AXIS_TEXT_COLOR}
+                tick={AXIS_TICK}
+                width={40}
+              />
               <Tooltip
                 formatter={(value, name) => [`${value}%`, name]}
                 labelFormatter={(date, payload) => {
@@ -123,6 +146,8 @@ export function PlanScore() {
                     : date;
                 }}
                 contentStyle={TOOLTIP_STYLE}
+                itemStyle={TOOLTIP_ITEM_STYLE}
+                labelStyle={TOOLTIP_LABEL_STYLE}
                 cursor={{ fill: CHART_CURSOR_FILL }}
                 separator=": "
               />
@@ -139,6 +164,7 @@ export function PlanScore() {
                   dataKey={key}
                   name={seriesLabel(breakdown, key)}
                   fill={seriesColor(breakdown, key, index)}
+                  {...BAR_SEPARATOR}
                   isAnimationActive={false}
                 />
               ))}
@@ -146,7 +172,7 @@ export function PlanScore() {
                 type="stepAfter"
                 dataKey="weekly"
                 name="Week score"
-                stroke={WEEKLY_LINE_COLOR}
+                stroke={WEEKLY_COLOR}
                 strokeWidth={2}
                 dot={false}
                 connectNulls={false}

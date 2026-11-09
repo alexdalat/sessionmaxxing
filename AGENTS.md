@@ -46,6 +46,8 @@ With the session keeper on (`keepSessionActive`, off by default), `server/sessio
 
 A Claude run that ends with Claude Code's usage-limit message (`You've hit your session limit` or `… weekly limit`) is not a failure of the task: the run is stored as failed with the reason "Stopped at the usage limit", the task goes back to pending with no retry cap, and the normal gates hold it until the window resets. Its next run resumes the same Claude session (`--resume <session id>` with a continue prompt instead of the task prompt), so the session id and its *Dispatched tasks* attribution carry over; each run's tokens count only the transcript records written after that run started.
 
+A Claude run that exits cleanly is completed only when every subagent its session wrote to during the run ended on a final reply (`stop_reason` `end_turn` or `stop_sequence`). `claude -p` exits when the lead agent's turn ends and interrupts any subagent still working, so a run that ends while it waits on a background subagent is stored as failed with the reason "Exited with N subagent(s) unfinished", and tasks that depend on it stay blocked until it is retried. A run whose subagent transcripts cannot be read fails the same way.
+
 **Run now** overrides the usage gate and the schedule, never the slot bound or the locks. Settings persist in `dispatch-settings.json`.
 
 A task can **depend on** other queued tasks (`dependsOn`, up to 20 ids). It waits until every one of them has completed, ahead of every other gate, and Run now refuses while one is unfinished. A dependency that failed or was cancelled keeps the task blocked with that reason until it is retried; deleting a task drops it from the tasks that depended on it, and a cycle is rejected when the task is saved.
@@ -104,7 +106,7 @@ A dispatched run cannot restart its own project: it lives inside the dashboard c
 
 ## Visual direction
 
-Linear-inspired dark UI: page `#08090a`, panels `#0f1011`, elevated `#191a1b`; text `#f7f8f8` / `#d0d6e0` / `#8a8f98`; accent `#7170ff`; Fable amber `#b8893f`; green only for success/running, amber for waiting. Inter for UI, JetBrains Mono for numbers. No gradients or marketing copy.
+Light bento UI on a dark page frame: frame `#0A0A0A`; panels pink `#F2D3D0` or paper `#F4F1EE` with 16px radius and 8px gaps; ink `#111111` for text, corner dots, hairlines and primary buttons; muted ink `#5C5550`. Each panel opens with a small centered label between two 8px black corner dots. Rows divide with 1px ink hairlines, buttons are outlined pills, and the primary button is ink-filled. Geist for UI text, Courier Prime for every number, with tabular figures. Series colors: ink (weekly, session, local), cobalt `#2A3FD1` (dispatched, queue cutoff), plum `#8E2F8E` (Fable only), teal and olive for further models, `#6F6761` for pace and unattributed; cobalt also marks quiet hours. Green `#176B33` only for success, ready and running, ochre `#7A4F00` for waiting and attention, red `#961A14` for errors. Single light theme, no dark mode, no gradients or shadows. `app/components/ui/` stays untouched; colors come from tokens in `app/styles.css` and shape from `[data-slot]` rules in its unlayered block. The full contract is `.planning/phases/05-bento-visual-restyle/05-UI-SPEC.md`.
 
 ## Checks
 

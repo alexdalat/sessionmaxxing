@@ -4,10 +4,10 @@ import { TaskQueue } from "@/app/components/queue/TaskQueue";
 export default function QueuePage() {
   return (
     <>
-      <header className="page-header">
-        <h1>Task queue</h1>
-      </header>
-      <TaskQueue />
+      <h1 className="sr-only">Task queue</h1>
+      <div className="bento">
+        <TaskQueue />
+      </div>
     </>
   );
 }

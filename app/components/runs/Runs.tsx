@@ -8,6 +8,7 @@ import { Input } from "@/app/components/ui/input";
 import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
 import { api, QUEUE_CHANGED } from "@/app/lib/api";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import { localTimestamp } from "@/shared/local-time";
 import {
   COMMIT_MESSAGE_MAX,
@@ -30,11 +31,11 @@ const tokenTotal = (tokens: WeightedTokens | null) =>
 const PAGE_SIZE = 20;
 const SCROLL_MARGIN = "600px";
 
-type BadgeVariant = "success" | "warning" | "info";
+type BadgeVariant = "success" | "warning" | "info" | "destructive";
 const statusVariants: Record<Run["status"], BadgeVariant> = {
   running: "success",
   completed: "success",
-  failed: "warning",
+  failed: "destructive",
   cancelled: "warning",
 };
 const restartBadges: Record<
@@ -44,7 +45,7 @@ const restartBadges: Record<
   requested: { label: "Restart queued", variant: "info" },
   restarting: { label: "Restarting", variant: "info" },
   succeeded: { label: "Restarted", variant: "success" },
-  failed: { label: "Restart failed", variant: "warning" },
+  failed: { label: "Restart failed", variant: "destructive" },
 };
 function CommitForm({
   run,
@@ -93,7 +94,7 @@ function CommitForm({
         onChange={(event) => setMessage(event.target.value)}
       />
       <Button type="submit" size="sm" disabled={busy || message.trim() === ""}>
-        Commit
+        {ACTION_LABELS.commitChanges}
       </Button>
     </form>
   );
@@ -168,17 +169,30 @@ export function Runs() {
   return (
     <>
       {pending > 0 && (
-        <p className="review-summary" role="status">
-          <Badge variant="warning">{pending}</Badge> need review
-        </p>
+        <section
+          className="panel span-12"
+          data-tone="pink"
+          role="status"
+          aria-labelledby="review-label"
+        >
+          <h2 className="panel-label" id="review-label">
+            Review
+          </h2>
+          <p>
+            <Badge variant="warning">{pending}</Badge> need review
+          </p>
+        </section>
       )}
       {(error || actionError || data?.runnerError) && (
-        <div role="alert" className="error">
-          {error || actionError || data?.runnerError}{" "}
-          <Button type="button" variant="outline" onClick={reload}>
-            Try again
+        <section className="panel span-12" data-tone="paper" role="alert">
+          <h2 className="panel-label">Error</h2>
+          <p className="error-message">
+            {error || actionError || data?.runnerError}
+          </p>
+          <Button type="button" variant="outline" size="sm" onClick={reload}>
+            {ACTION_LABELS.reloadRuns}
           </Button>
-        </div>
+        </section>
       )}
       {notice && (
         <p role="status" className="toast">
@@ -187,46 +201,24 @@ export function Runs() {
       )}
       {!data && !error && <ListSkeleton />}
       {data && data.runs.length === 0 && (
-        <div className="empty">
-          <h2>No runs yet</h2>
-          <p>Queued tasks appear here once they start.</p>
-        </div>
+        <section className="panel span-12" data-tone="pink">
+          <h2 className="empty-heading">No runs yet</h2>
+        </section>
       )}
       {data?.runs.map((run) => (
         <article
-          className={`panel${needsReview(run) ? " panel-review" : ""}`}
+          className="panel span-12"
+          data-tone={needsReview(run) ? "pink" : "paper"}
           key={run.id}
         >
-          <div className="section-heading">
-            <h2>{run.title}</h2>
-            <span className="run-heading-tools">
+          <h2 className="panel-label" title={run.title}>
+            {run.title}
+          </h2>
+          <div className="panel-tools">
+            <span className="tool-group">
               {needsReview(run) && (
-                <>
-                  <Badge variant="warning">Needs review</Badge>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busyRun === run.id}
-                    onClick={() => void markReviewed(run)}
-                  >
-                    Mark reviewed
-                  </Button>
-                </>
+                <Badge variant="warning">Needs review</Badge>
               )}
-              {(run.status === "failed" || run.status === "cancelled") &&
-                !retried.has(run.id) && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={busyRun === run.id}
-                    aria-label={`Retry ${run.title}`}
-                    onClick={() => void retry(run)}
-                  >
-                    Retry
-                  </Button>
-                )}
               <Badge
                 variant={statusVariants[run.status]}
                 className="capitalize"
@@ -238,6 +230,32 @@ export function Runs() {
                   {restartBadges[run.restart.status].label}
                 </Badge>
               )}
+            </span>
+            <span className="tool-group">
+              {needsReview(run) && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={busyRun === run.id}
+                  onClick={() => void markReviewed(run)}
+                >
+                  {ACTION_LABELS.markRunReviewed}
+                </Button>
+              )}
+              {(run.status === "failed" || run.status === "cancelled") &&
+                !retried.has(run.id) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busyRun === run.id}
+                    aria-label={`${ACTION_LABELS.retryRun}: ${run.title}`}
+                    onClick={() => void retry(run)}
+                  >
+                    {ACTION_LABELS.retryRun}
+                  </Button>
+                )}
             </span>
           </div>
           {needsCommit(run) && (
@@ -287,23 +305,23 @@ export function Runs() {
               Ended {localTimestamp(run.endedAt, timeZone)}
             </p>
           )}
-          {run.error && <p className="warning">{run.error}</p>}
+          {run.error && <p className="error">{run.error}</p>}
           {run.summary && <pre className="summary">{run.summary}</pre>}
           {run.prompt && (
             <details>
-              <summary>Prompt</summary>
+              <summary>{ACTION_LABELS.showPrompt}</summary>
               <pre className="task-prompt">{run.prompt}</pre>
             </details>
           )}
           {run.restart?.output && (
             <details>
-              <summary>Restart output</summary>
+              <summary>{ACTION_LABELS.showRestartOutput}</summary>
               <pre className="task-prompt">{run.restart.output}</pre>
             </details>
           )}
           {run.changes && run.changes.files.length > 0 && (
             <details>
-              <summary>Changed files</summary>
+              <summary>{ACTION_LABELS.showChangedFiles}</summary>
               {run.changes.commits > 0 && (
                 <p className="muted">
                   {run.changes.branch} · {run.changes.commits} commits
@@ -326,7 +344,7 @@ export function Runs() {
           )}
         </article>
       ))}
-      {hasMore && <div ref={sentinel} />}
+      {hasMore && <div className="span-12" ref={sentinel} />}
     </>
   );
 }

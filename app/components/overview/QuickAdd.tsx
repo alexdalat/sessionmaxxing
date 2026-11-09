@@ -13,6 +13,7 @@ import {
 import { Textarea } from "@/app/components/ui/textarea";
 import { useNotice } from "@/app/hooks/useNotice";
 import { api, QUEUE_CHANGED } from "@/app/lib/api";
+import { ACTION_LABELS, FIELD_LABELS } from "@/app/lib/labels";
 import { modelOptions } from "@/app/lib/models";
 import { quickTask } from "@/app/lib/quickTask";
 import { DEFAULT_MODEL } from "@/shared/types";
@@ -28,10 +29,8 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
   const [notice, setNotice] = useNotice();
   const input = quickTask(prompt, { workdir, model });
   return (
-    <section className="panel" aria-label="Quick add">
-      <div className="section-heading">
-        <h2>Quick add</h2>
-      </div>
+    <section className="panel span-5" data-tone="paper" aria-label="Quick add">
+      <h2 className="panel-label">Quick add</h2>
       <form
         ref={formRef}
         className="form-grid"
@@ -59,7 +58,7 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
           }
         }}
       >
-        <div className="full grid gap-1.5">
+        <div className="full grid gap-2">
           <Label htmlFor={`${fieldId}-prompt`}>Prompt</Label>
           <Textarea
             id={`${fieldId}-prompt`}
@@ -76,7 +75,7 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
             }}
           />
         </div>
-        <div className="grid gap-1.5">
+        <div className="grid gap-2">
           <Label htmlFor={`${fieldId}-workdir`}>Work directory</Label>
           <WorkdirField
             id={`${fieldId}-workdir`}
@@ -85,8 +84,8 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
             defaultToRecent
           />
         </div>
-        <div className="grid gap-1.5">
-          <Label htmlFor={`${fieldId}-model`}>Model</Label>
+        <div className="grid gap-2">
+          <Label htmlFor={`${fieldId}-model`}>{FIELD_LABELS.model}</Label>
           <Select name="model" value={model} onValueChange={setModel}>
             <SelectTrigger id={`${fieldId}-model`} className="w-full">
               <SelectValue />
@@ -102,7 +101,7 @@ export function QuickAdd({ onQueued }: { onQueued: () => void }) {
         </div>
         <div className="actions full">
           <Button type="submit" disabled={busy || !input}>
-            {busy ? "Queuing…" : "Queue"}
+            {busy ? ACTION_LABELS.queuingTask : ACTION_LABELS.queueTask}
           </Button>
         </div>
         {error && (

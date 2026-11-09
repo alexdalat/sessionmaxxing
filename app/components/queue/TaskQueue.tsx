@@ -20,6 +20,7 @@ import { useClock } from "@/app/hooks/useClock";
 import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
 import { ACTIVE_QUEUE_PATH, api } from "@/app/lib/api";
+import { ACTION_LABELS, FIELD_LABELS } from "@/app/lib/labels";
 import { displayOrder, movedPast, moveTarget } from "@/app/lib/queueOrder";
 import type { PublicTask, QueueSnapshot, TaskInput } from "@/shared/types";
 import { TaskCard } from "./TaskCard";
@@ -174,24 +175,24 @@ export function TaskQueue() {
                   isLeaving ||
                   task.gate?.blockedBy !== undefined
                 }
-                aria-label={`Run ${task.title} now`}
+                aria-label={`${ACTION_LABELS.runTask}: ${task.title}`}
                 onClick={() => setConfirm({ kind: "run", task })}
               >
-                Run now
+                {ACTION_LABELS.runTask}
               </Button>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 disabled={busy || isLeaving}
-                aria-label={`Edit ${task.title}`}
+                aria-label={`${ACTION_LABELS.editTask}: ${task.title}`}
                 onClick={() => {
                   setEditing(task);
                   setNotice("");
                   setFormOpen(true);
                 }}
               >
-                Edit
+                {ACTION_LABELS.editTask}
               </Button>
               <Button
                 type="button"
@@ -221,7 +222,7 @@ export function TaskQueue() {
               variant="outline"
               size="sm"
               disabled={busy || isLeaving}
-              aria-label={`Cancel ${task.title}`}
+              aria-label={`${ACTION_LABELS.cancelTask}: ${task.title}`}
               onClick={() =>
                 void mutate(
                   `/api/tasks/${task.id}/cancel`,
@@ -230,7 +231,7 @@ export function TaskQueue() {
                 )
               }
             >
-              Cancel
+              {ACTION_LABELS.cancelTask}
             </Button>
           )}
           {task.status !== "running" && (
@@ -239,10 +240,10 @@ export function TaskQueue() {
               variant="outline"
               size="sm"
               disabled={busy || isLeaving}
-              aria-label={`Delete ${task.title}`}
+              aria-label={`${ACTION_LABELS.deleteTask}: ${task.title}`}
               onClick={() => setConfirm({ kind: "delete", task })}
             >
-              Delete
+              {ACTION_LABELS.deleteTask}
             </Button>
           )}
         </div>
@@ -252,12 +253,17 @@ export function TaskQueue() {
   return (
     <>
       {(error || loadError || data?.runnerError) && (
-        <div role="alert" className="error">
-          {error || loadError || data?.runnerError}{" "}
-          <Button type="button" variant="outline" onClick={reload}>
-            Refresh queue
-          </Button>
-        </div>
+        <section className="panel span-12" data-tone="paper" role="alert">
+          <h2 className="panel-label">Error</h2>
+          <p className="error-message">
+            {error || loadError || data?.runnerError}
+          </p>
+          <div className="panel-tools">
+            <Button type="button" variant="outline" size="sm" onClick={reload}>
+              {ACTION_LABELS.refreshQueue}
+            </Button>
+          </div>
+        </section>
       )}
       {notice && (
         <p role="status" className="toast">
@@ -270,28 +276,30 @@ export function TaskQueue() {
         ) : (
           !data && !loadError && <UsageStripSkeleton />
         ))}
-      <section className="panel">
-        <div className="section-heading queue-heading">
-          <h2>Queued tasks</h2>
-          <Button
-            type="button"
-            role="switch"
-            aria-checked={data?.autoDispatch ?? false}
-            disabled={!data || busy}
-            variant={data?.autoDispatch ? "default" : "outline"}
-            className="rounded-full"
-            onClick={() =>
-              void mutate("/api/queue/auto", "PUT", "", {
-                enabled: !(data?.autoDispatch ?? false),
-              })
-            }
-          >
-            {data?.autoDispatch ? "Queue on" : "Queue off"}
-          </Button>
-          <QueueBadges planning={data?.planning} />
-          <span className="queue-tools">
+      <section className="panel span-12" data-tone="paper">
+        <h2 className="panel-label">Queued tasks</h2>
+        <div className="panel-tools">
+          <div className="tool-group">
+            <Button
+              type="button"
+              role="switch"
+              aria-checked={data?.autoDispatch ?? false}
+              disabled={!data || busy}
+              variant={data?.autoDispatch ? "default" : "outline"}
+              size="sm"
+              onClick={() =>
+                void mutate("/api/queue/auto", "PUT", "", {
+                  enabled: !(data?.autoDispatch ?? false),
+                })
+              }
+            >
+              {ACTION_LABELS.runQueue}
+            </Button>
+            <QueueBadges planning={data?.planning} />
+          </div>
+          <div className="tool-group">
             <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger aria-label="Task filter">
+              <SelectTrigger aria-label={FIELD_LABELS.filterTasks}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -303,26 +311,25 @@ export function TaskQueue() {
             <Button
               type="button"
               variant="outline"
+              size="sm"
               disabled={!data?.planning}
               onClick={() => setSettingsOpen(true)}
             >
-              Settings
+              {ACTION_LABELS.editSettings}
             </Button>
-            <Button type="button" onClick={openAdd}>
-              Add task
+            <Button type="button" size="sm" onClick={openAdd}>
+              {ACTION_LABELS.addTask}
             </Button>
-          </span>
+          </div>
         </div>
         {!data && !loadError ? (
           <TaskListSkeleton />
         ) : visibleTasks.length ? (
           visibleTasks.map(taskCard)
         ) : (
-          <div className="empty">
-            <h2>
-              {ordered.length ? "No tasks match this filter" : "No tasks yet"}
-            </h2>
-          </div>
+          <h3 className="empty-heading">
+            {ordered.length ? "No tasks match this filter" : "No tasks yet"}
+          </h3>
         )}
       </section>
       <TaskFormDialog
@@ -348,7 +355,16 @@ export function TaskQueue() {
         open={Boolean(confirm)}
         title={confirm?.kind === "run" ? "Run task now?" : "Delete task?"}
         detail={confirm?.task.title ?? ""}
-        confirmLabel={confirm?.kind === "run" ? "Run now" : "Delete"}
+        confirmLabel={
+          confirm?.kind === "run"
+            ? ACTION_LABELS.runTask
+            : ACTION_LABELS.deleteTask
+        }
+        dismissLabel={
+          confirm?.kind === "run"
+            ? ACTION_LABELS.keepWaiting
+            : ACTION_LABELS.keepTask
+        }
         danger={confirm?.kind === "delete"}
         busy={busy}
         onConfirm={() => confirm && runConfirmed(confirm)}

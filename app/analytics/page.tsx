@@ -5,6 +5,7 @@ import { AnalyticsSkeleton } from "@/app/components/Skeletons";
 import { Button } from "@/app/components/ui/button";
 import { useAnalytics } from "@/app/hooks/useAnalytics";
 import { usePolling } from "@/app/hooks/usePolling";
+import { ACTION_LABELS } from "@/app/lib/labels";
 import type { PlanningSnapshot } from "@/shared/types";
 
 const SETTINGS_POLL_MS = 60_000;
@@ -17,30 +18,35 @@ export default function AnalyticsPage() {
   );
   return (
     <>
-      <header className="page-header">
-        <h1>Analytics</h1>
-        <RangeControls days={days} onChange={setDays} onRefresh={refresh} />
-      </header>
-      {error && (
-        <div className="error" role="alert">
-          {error}{" "}
-          <Button type="button" variant="outline" size="sm" onClick={refresh}>
-            Try again
-          </Button>
-        </div>
-      )}
-      {planning.error && (
-        <p className="error" role="alert">
-          {planning.error}
-        </p>
-      )}
-      {loading && <AnalyticsSkeleton />}
-      {analytics && (
-        <AnalyticsView
-          data={analytics}
-          quietStartHours={planning.data?.settings.quietStartHours}
-        />
-      )}
+      <h1 className="sr-only">Analytics</h1>
+      <div className="bento">
+        {error && (
+          <section className="panel span-12" data-tone="paper" role="alert">
+            <h2 className="panel-label">Error</h2>
+            <p className="error-message">{error}</p>
+            <Button type="button" variant="outline" size="sm" onClick={refresh}>
+              {ACTION_LABELS.reloadAnalytics}
+            </Button>
+          </section>
+        )}
+        {planning.error && (
+          <section className="panel span-12" data-tone="paper" role="alert">
+            <h2 className="panel-label">Error</h2>
+            <p className="error-message">{planning.error}</p>
+          </section>
+        )}
+        <section className="panel span-4" data-tone="pink">
+          <h2 className="panel-label">Range · local Claude Code</h2>
+          <RangeControls days={days} onChange={setDays} onRefresh={refresh} />
+        </section>
+        {loading && <AnalyticsSkeleton />}
+        {analytics && (
+          <AnalyticsView
+            data={analytics}
+            quietStartHours={planning.data?.settings.quietStartHours}
+          />
+        )}
+      </div>
     </>
   );
 }

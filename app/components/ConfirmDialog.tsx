@@ -1,18 +1,22 @@
 "use client";
+import { XIcon } from "lucide-react";
 import { Button } from "@/app/components/ui/button";
 import {
   Dialog,
+  DialogClose,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/app/components/ui/dialog";
+import { ACTION_LABELS } from "@/app/lib/labels";
 
 export function ConfirmDialog({
   open,
   title,
   detail,
   confirmLabel,
+  dismissLabel,
   danger,
   busy,
   onConfirm,
@@ -22,6 +26,7 @@ export function ConfirmDialog({
   title: string;
   detail: string;
   confirmLabel: string;
+  dismissLabel: string;
   danger?: boolean;
   busy: boolean;
   onConfirm: () => void;
@@ -34,7 +39,7 @@ export function ConfirmDialog({
         if (!next) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-[400px]">
+      <DialogContent className="sm:max-w-[400px]" showCloseButton={false}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription className="wrap-anywhere">
@@ -43,7 +48,7 @@ export function ConfirmDialog({
         </DialogHeader>
         <div className="actions">
           <Button type="button" variant="outline" onClick={onClose}>
-            Cancel
+            {dismissLabel}
           </Button>
           <Button
             type="button"
@@ -54,6 +59,17 @@ export function ConfirmDialog({
             {confirmLabel}
           </Button>
         </div>
+        <DialogClose asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="dialog-close"
+            aria-label={ACTION_LABELS.closeDialog}
+          >
+            <XIcon aria-hidden="true" />
+          </Button>
+        </DialogClose>
       </DialogContent>
     </Dialog>
   );
