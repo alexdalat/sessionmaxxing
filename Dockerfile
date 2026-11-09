@@ -24,6 +24,19 @@ RUN apt-get update \
         @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
     && npm cache clean --force
 
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends curl \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && printf 'Types: deb\nURIs: https://download.docker.com/linux/debian\nSuites: %s\nComponents: stable\nArchitectures: %s\nSigned-By: /etc/apt/keyrings/docker.asc\n' \
+        "$(. /etc/os-release && echo "$VERSION_CODENAME")" "$(dpkg --print-architecture)" \
+        > /etc/apt/sources.list.d/docker.sources \
+    && apt-get update \
+    && apt-get install --yes --no-install-recommends docker-ce-cli docker-compose-plugin docker-buildx-plugin \
+    && apt-get purge --yes --auto-remove curl \
+    && rm -rf /var/lib/apt/lists/*
+
 ARG RUNTIME_UID
 ARG RUNTIME_GID
 ARG RUNTIME_HOME
@@ -45,7 +58,8 @@ ENV NODE_ENV=production \
     HOME=${RUNTIME_HOME} \
     SESSIONMAXXING_HOST=0.0.0.0 \
     SESSIONMAXXING_PORT=4317 \
-    DISABLE_AUTOUPDATER=1
+    DISABLE_AUTOUPDATER=1 \
+    SESSIONMAXXING_IN_DOCKER=1
 WORKDIR /app
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
@@ -53,5 +67,6 @@ COPY package.json ./
 
 USER ${RUNTIME_UID}:${RUNTIME_GID}
 RUN claude --version
+RUN docker --version && docker compose version && docker buildx version
 EXPOSE 4317
 CMD ["node", "dist/server/server/main.js"]

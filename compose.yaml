@@ -17,6 +17,8 @@ services:
       TZ: "${TZ:?Set TZ in .env to an IANA zone name}"
       SESSIONMAXXING_EDITION: "${SESSIONMAXXING_EDITION:?Set SESSIONMAXXING_EDITION in .env}"
       SESSIONMAXXING_ALLOWED_HOSTS: "${SESSIONMAXXING_BIND_ADDRESS:?Set SESSIONMAXXING_BIND_ADDRESS in .env},${SESSIONMAXXING_ALLOWED_HOSTS:-}"
+    group_add:
+      - "${SESSIONMAXXING_DOCKER_GID:?Set SESSIONMAXXING_DOCKER_GID in .env to the output of stat -c %g /var/run/docker.sock}"
     ports:
       - target: 4317
         published: "${SESSIONMAXXING_PORT:?Set SESSIONMAXXING_PORT in .env}"
@@ -28,5 +30,11 @@ services:
       - type: bind
         source: "${SESSIONMAXXING_HOME:?Set SESSIONMAXXING_HOME in .env}"
         target: "${SESSIONMAXXING_HOME:?Set SESSIONMAXXING_HOME in .env}"
+        bind:
+          create_host_path: false
+      # The server runs restart methods through the host docker daemon.
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
         bind:
           create_host_path: false
