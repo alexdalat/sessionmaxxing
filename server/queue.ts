@@ -39,6 +39,9 @@ const MILLION = 1_000_000;
  */
 const MIGRATION_WEIGHTED_PER_OUTPUT = 4.8;
 
+const LITE_DATA_MESSAGE =
+  "queue.json holds a task written by the lite edition, which has no token cost. Start with SESSIONMAXXING_EDITION=lite or restore a full-edition queue.json.";
+
 interface QueueState {
   version: 1;
   autoDispatch: boolean;
@@ -174,6 +177,8 @@ export class QueueStore {
         persisted.finishedAt = null;
         migrated = true;
       }
+      if (edition === "full" && persisted.tokens === null)
+        throw new DomainError(LITE_DATA_MESSAGE, 500);
       validateFields(task, edition);
       if (
         !TASK_ID.test(task.id) ||

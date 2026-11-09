@@ -386,6 +386,8 @@ export function registerQueueRoutes(
     },
     async (request) => {
       const { tokens, ...patch } = request.body;
+      if (edition === "lite" && tokens !== undefined)
+        throw new DomainError(LITE_TOKENS_REFUSED, 400);
       const stored: Partial<StoredTaskInput> =
         tokens === undefined
           ? patch

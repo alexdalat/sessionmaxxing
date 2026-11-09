@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { createApp } from "../server/app.js";
+import { type AppOptions, createApp } from "../server/app.js";
 import { DispatchSettingsStore } from "../server/dispatch-settings.js";
 import { startDashboard } from "../server/main.js";
 import { QueueStore } from "../server/queue.js";
@@ -10,6 +10,8 @@ import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
 import type { Edition, HistoryData } from "../shared/types.js";
 import {
+  SESSION_RATES,
+  sessionRates,
   TEST_TIME_ZONE,
   TEST_WORKDIR_ROOT,
   taskInput,
@@ -44,7 +46,11 @@ const fetchUsage = async (at: Date) =>
 const { tokens: _tokens, ...liteFields } = taskInput("");
 const liteInput = (workdir: string) => ({ ...liteFields, workdir });
 
-async function editionApp(edition: Edition | undefined, directory: string) {
+async function editionApp(
+  edition: Edition | undefined,
+  directory: string,
+  extra: Partial<AppOptions> = {},
+) {
   const queue = await QueueStore.open(directory, TEST_WORKDIR_ROOT, edition);
   const runner = await Runner.open(queue, directory);
   const usage = new UsageMonitor(
@@ -59,6 +65,7 @@ async function editionApp(edition: Edition | undefined, directory: string) {
     usage,
     settings: await DispatchSettingsStore.open(directory),
     loadHistory: vi.fn(emptyHistory),
+    ...extra,
   });
   return { app, queue };
 }
@@ -193,6 +200,102 @@ it("keeps the full analytics and plan-score routes", async () => {
   try {
     expect((await app.inject("/api/analytics")).statusCode).toBe(200);
     expect((await app.inject("/api/plan-score")).statusCode).toBe(200);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it.each([50_000, "auto"])(
+  "refuses tokens %j when a lite task is edited and leaves the task alone",
+  async (tokens) => {
+    const temp = await temporary();
+    const estimate = vi.fn();
+    const { app, queue } = await editionApp("lite", temp.path, { estimate });
+    try {
+      const { id } = await queue.create({
+        ...liteInput(temp.path),
+        tokens: null,
+      });
+      const response = await app.inject({
+        method: "PATCH",
+        url: `/api/tasks/${id}`,
+        payload: { tokens },
+      });
+      expect(response.statusCode).toBe(400);
+      expect(response.json().error).toContain("lite");
+      expect(queue.snapshot().tasks[0]?.tokens).toBeNull();
+      expect(estimate).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+      await temp.cleanup();
+    }
+  },
+);
+
+it("edits a lite task title and keeps its tokens null", async () => {
+  const temp = await temporary();
+  const { app, queue } = await editionApp("lite", temp.path);
+  try {
+    const { id } = await queue.create({
+      ...liteInput(temp.path),
+      tokens: null,
+    });
+    const response = await app.inject({
+      method: "PATCH",
+      url: `/api/tasks/${id}`,
+      payload: { title: "Renamed" },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ title: "Renamed", tokens: null });
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("refuses to start the full edition on a queue.json holding a lite task and leaves the file unchanged", async () => {
+  const temp = await temporary();
+  try {
+    const lite = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT, "lite");
+    await lite.create({ ...liteInput(temp.path), tokens: null });
+    const path = join(temp.path, "queue.json");
+    const before = await readFile(path);
+    await expect(
+      QueueStore.open(temp.path, TEST_WORKDIR_ROOT, "full"),
+    ).rejects.toThrow(/queue\.json.*lite/);
+    expect((await readFile(path)).equals(before)).toBe(true);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("loads a full queue.json in lite with its token numbers and keeps them through an edit", async () => {
+  const temp = await temporary();
+  try {
+    const full = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT, "full");
+    const { id } = await full.create({ ...taskInput(temp.path) });
+    const lite = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT, "lite");
+    expect(lite.snapshot().tasks[0]?.tokens).toBe(100_000);
+    await lite.update(id, { title: "Renamed" });
+    expect(lite.snapshot().tasks[0]).toMatchObject({
+      title: "Renamed",
+      tokens: 100_000,
+    });
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("prices a stored token number in full at the fitted session rates", async () => {
+  const temp = await temporary();
+  const { app, queue } = await editionApp("full", temp.path, { sessionRates });
+  try {
+    await queue.create({ ...taskInput(temp.path) });
+    const [listed] = (await app.inject("/api/queue")).json().tasks;
+    expect(listed.sessionCostPercent).toBe(
+      Math.round((100_000 / 1_000_000) * SESSION_RATES.opus * 10) / 10,
+    );
   } finally {
     await app.close();
     await temp.cleanup();
