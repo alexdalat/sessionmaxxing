@@ -23,6 +23,21 @@ const RECORD_KEYS = [
   "sibling",
 ];
 const FINISHED: readonly RestartStatus[] = ["succeeded", "failed"];
+export const OUTPUT_CAP_BYTES = 64 * 1024;
+const CONTINUATION_MASK = 0xc0;
+const CONTINUATION_BITS = 0x80;
+
+/** The last `limit` bytes of `bytes` as text, starting on a whole UTF-8 character. */
+export function utf8Tail(bytes: Buffer, limit = OUTPUT_CAP_BYTES) {
+  let start = Math.max(0, bytes.length - limit);
+  while (
+    start < bytes.length &&
+    (bytes[start] & CONTINUATION_MASK) === CONTINUATION_BITS
+  )
+    start++;
+  return bytes.subarray(start).toString("utf8");
+}
+export const capOutput = (text: string) => utf8Tail(Buffer.from(text, "utf8"));
 
 /** A restart method that restarts something. */
 export type RestartAction = Exclude<RestartMethod, { kind: "none" }>;

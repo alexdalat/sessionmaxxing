@@ -291,6 +291,12 @@ export function Runs() {
               <pre className="task-prompt">{run.prompt}</pre>
             </details>
           )}
+          {run.restart?.output && (
+            <details>
+              <summary>Restart output</summary>
+              <pre className="task-prompt">{run.restart.output}</pre>
+            </details>
+          )}
           {run.changes && run.changes.files.length > 0 && (
             <details>
               <summary>Changed files</summary>

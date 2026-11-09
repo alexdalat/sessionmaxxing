@@ -11,6 +11,7 @@ import { expect, it, vi } from "vitest";
 import { planDispatch } from "../server/dispatch.js";
 import { gitIn } from "../server/git.js";
 import { QueueStore } from "../server/queue.js";
+import { capOutput, OUTPUT_CAP_BYTES } from "../server/restarts.js";
 import { Runner, restartReason } from "../server/runner.js";
 import {
   DEFAULT_DISPATCH_SETTINGS,
@@ -401,6 +402,103 @@ it("refuses to open with a restart record that lacks a field", async () => {
     await expect(Runner.open(store, temp.path)).rejects.toThrow(
       `restarts/${runId}.json`,
     );
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+const KIB = 1024;
+const failedOutput = async (
+  temp: string,
+  method: RestartMethod,
+  respond: Setup["respond"],
+) => {
+  const fixture = await dashboard(temp, { method, respond });
+  const started = await fixture.run();
+  await fixture.settled(started.id);
+  return { ...fixture, started, restart: fixture.restartOf(started.id) };
+};
+
+it("shows a failed restart's output followed by the line naming the failed program", async () => {
+  const temp = await temporary();
+  try {
+    const { workdir, runner, restart } = await failedOutput(
+      temp.path,
+      COMMAND,
+      () => ({ code: 1, stdout: "building\n", stderr: "boom\n" }),
+    );
+    expect(restart?.status).toBe("failed");
+    const lines = restart?.output?.split("\n") ?? [];
+    expect(lines).toContain("building");
+    expect(lines).toContain("boom");
+    expect(lines.at(-1)).toBe(`./restart.sh exited with code 1 in ${workdir}`);
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("keeps no output for a restart that succeeds", async () => {
+  const temp = await temporary();
+  try {
+    const { runner, started, restart, record } = await failedOutput(
+      temp.path,
+      COMMAND,
+      () => ({ stdout: "restarted\n" }),
+    );
+    expect(restart).toMatchObject({ status: "succeeded", output: null });
+    expect((await record(started.id)).output).toBeNull();
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("keeps only the last 64 KiB of a failed restart's output", async () => {
+  const temp = await temporary();
+  try {
+    const { workdir, runner, restart } = await failedOutput(
+      temp.path,
+      COMMAND,
+      () => ({ code: 1, stdout: `${"x".repeat(100 * KIB)}END\n` }),
+    );
+    const output = restart?.output ?? "";
+    expect(Buffer.byteLength(output)).toBeLessThanOrEqual(OUTPUT_CAP_BYTES);
+    expect(output).toContain("END");
+    expect(
+      output.endsWith(`./restart.sh exited with code 1 in ${workdir}`),
+    ).toBe(true);
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("cuts capped output on a whole character", () => {
+  const euro = "€";
+  const euroBytes = Buffer.byteLength(euro);
+  const text = euro.repeat(30_000);
+  expect((Buffer.byteLength(text) - OUTPUT_CAP_BYTES) % euroBytes).not.toBe(0);
+  const capped = capOutput(text);
+  expect(capped).not.toContain("�");
+  expect(capped).toBe(euro.repeat(Math.floor(OUTPUT_CAP_BYTES / euroBytes)));
+});
+
+it("keeps the output of both Docker Compose steps in arrival order", async () => {
+  const temp = await temporary();
+  try {
+    const { workdir, runner, restart } = await failedOutput(
+      temp.path,
+      COMPOSE,
+      (_command, args) =>
+        args.includes("build")
+          ? { stdout: "built image\n" }
+          : { code: 1, stderr: "port is taken\n" },
+    );
+    expect(restart?.output).toBe(
+      `built image\nport is taken\ndocker compose up -d exited with code 1 in ${workdir}`,
+    );
+    await runner.close();
   } finally {
     await temp.cleanup();
   }

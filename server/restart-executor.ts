@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import type { LaunchOptions, ProviderProcess } from "./providers.js";
-import type { RestartAction, RestartRecord, RestartStore } from "./restarts.js";
+import {
+  capOutput,
+  OUTPUT_CAP_BYTES,
+  type RestartAction,
+  type RestartRecord,
+  type RestartStore,
+  utf8Tail,
+} from "./restarts.js";
 
 export interface RestartSpawnOptions extends LaunchOptions {
   env: NodeJS.ProcessEnv;
@@ -65,6 +72,24 @@ const restartSteps = (method: RestartAction): Step[] =>
         },
       ];
 
+/** The last OUTPUT_CAP_BYTES of every step's stdout and stderr, in arrival order. */
+class OutputTail {
+  private bytes = Buffer.alloc(0);
+  push(chunk: Buffer | string) {
+    const joined = Buffer.concat([this.bytes, Buffer.from(chunk)]);
+    this.bytes =
+      joined.length > OUTPUT_CAP_BYTES
+        ? Buffer.from(joined.subarray(joined.length - OUTPUT_CAP_BYTES))
+        : joined;
+  }
+  /** The captured text, then `failure` on its own line, within the cap. */
+  withFailure(failure: string) {
+    const text = utf8Tail(this.bytes);
+    const separator = text === "" || text.endsWith("\n") ? "" : "\n";
+    return capOutput(`${text}${separator}${failure}`);
+  }
+}
+
 /** Runs requested restarts one at a time, in request order, without a shell. */
 export class RestartExecutor {
   private running: Promise<void> | null = null;
@@ -104,21 +129,26 @@ export class RestartExecutor {
     if (workdir === null)
       throw new Error("A pending restart has no work directory.");
     await this.store.update(record.runId, { status: "restarting" });
+    const tail = new OutputTail();
     let failure: string | null = null;
     for (const step of restartSteps(record.method)) {
       if (this.closed) return;
-      failure = await this.runStep(step, workdir);
+      failure = await this.runStep(step, workdir, tail);
       if (failure !== null) break;
     }
     await this.store.update(
       record.runId,
       failure === null
         ? { status: "succeeded", output: null }
-        : { status: "failed", output: failure },
+        : { status: "failed", output: tail.withFailure(failure) },
     );
   }
   /** Resolves with the line naming why the step failed, or null when it exited 0. */
-  private runStep(step: Step, workdir: string): Promise<string | null> {
+  private runStep(
+    step: Step,
+    workdir: string,
+    tail: OutputTail,
+  ): Promise<string | null> {
     return new Promise((resolve) => {
       let settled = false;
       const settle = (failure: string | null) => {
@@ -141,9 +171,10 @@ export class RestartExecutor {
         couldNotStart(error as Error);
         return;
       }
-      // A pipe nobody reads fills up and stalls the process.
       for (const channel of ["stdout", "stderr"] as const)
-        child[channel]?.resume();
+        child[channel]?.on("data", (chunk: Buffer | string) =>
+          tail.push(chunk),
+        );
       child.once("error", couldNotStart);
       child.once("close", (code: number | null, signal: NodeJS.Signals) =>
         settle(
