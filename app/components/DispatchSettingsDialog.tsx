@@ -254,7 +254,7 @@ export function DispatchSettingsDialog({
               </div>
               <div className="full">
                 <span className="field-label">
-                  Apply and deploy without review
+                  Apply and restart without review
                 </span>
                 <Button
                   type="button"

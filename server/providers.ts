@@ -1,7 +1,8 @@
 import { spawn } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import type { Readable } from "node:stream";
-import type { Task } from "../shared/types.js";
+import { PRODUCT_NAME } from "../shared/product.js";
+import type { RestartMethod, Task } from "../shared/types.js";
 export interface ProviderProcess extends EventEmitter {
   stdout: Readable | null;
   stderr: Readable | null;
@@ -20,12 +21,34 @@ export type SpawnProvider = (
   options: LaunchOptions,
 ) => ProviderProcess;
 const CLAUDE_COMMAND = "claude";
-/** Appended to a dispatched prompt while the queue's apply override is on. */
-export const AUTO_APPLY_INSTRUCTION =
-  "Apply this work yourself instead of leaving it for review. Edit the files directly in this work directory and ignore git entirely: do not check git status, commit, stash, branch, or create a worktree, and never skip or refuse a change because of uncommitted changes. This run has no docker. When the work directory has a Compose file, the dashboard redeploys it on the host after the run ends, so do not attempt `docker compose` yourself. Run any other deploy (a Coolify deploy, the project's own deploy command) before you finish. If that tooling is unavailable, report the blocker and the command.";
-export const withAutoApply = (task: Task): Task => ({
+const APPLY_IN_PLACE =
+  "Apply this work yourself instead of leaving it for review. Edit the files directly in this work directory and ignore git entirely: do not check git status, commit, stash, branch, or create a worktree, and never skip or refuse a change because of uncommitted changes.";
+const OTHER_DEPLOYS =
+  "Run any other deploy the project needs (a Coolify deploy, the project's own deploy command) before you finish.";
+const KEEP_DASHBOARD = `Never restart, recreate or stop the ${PRODUCT_NAME} container: it hosts this run.`;
+const REPORT_BLOCKER =
+  "If that tooling is unavailable, report the blocker and the command.";
+const restartSentence = (method: RestartMethod) => {
+  switch (method.kind) {
+    case "none":
+      return `This work directory has no restart method, so the dashboard restarts nothing after the run ends. ${OTHER_DEPLOYS}`;
+    case "compose":
+      return `After the run ends the dashboard restarts this work directory with \`docker compose build\` and \`docker compose up -d\`, so do not run them or redeploy the project yourself. ${OTHER_DEPLOYS}`;
+    case "command":
+      return `After the run ends the dashboard runs the restart command ${method.argv[0]} in this work directory, so do not run it or redeploy the project yourself. ${OTHER_DEPLOYS}`;
+  }
+};
+/** Appended to a dispatched prompt while the queue's apply override is on; names what the dashboard restarts afterwards. */
+export const autoApplyInstruction = (method: RestartMethod) =>
+  [
+    APPLY_IN_PLACE,
+    restartSentence(method),
+    KEEP_DASHBOARD,
+    REPORT_BLOCKER,
+  ].join(" ");
+export const withAutoApply = (task: Task, method: RestartMethod): Task => ({
   ...task,
-  prompt: `${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`,
+  prompt: `${task.prompt}\n\n${autoApplyInstruction(method)}`,
 });
 /** The final message Claude Code prints when a usage limit ends a run. */
 const LIMIT_STOP = /^You['’]ve hit your (?:session|weekly) limit\b/;

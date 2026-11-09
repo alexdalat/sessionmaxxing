@@ -1,12 +1,13 @@
 import { expect, it, vi } from "vitest";
 import {
-  AUTO_APPLY_INSTRUCTION,
+  autoApplyInstruction,
   isLimitStop,
   launchProvider,
   RESUME_PROMPT,
   type SpawnProvider,
   withAutoApply,
 } from "../server/providers.js";
+import type { RestartMethod } from "../shared/types.js";
 import { fakeChild, taskInput } from "./helpers";
 
 it("launches the exact claude argv with no shell and the whole prompt as one argument", () => {
@@ -109,32 +110,53 @@ it("keeps plain stdout out of the summary and the preview", async () => {
   expect(preview.lines()).toEqual(["[redacted stdout]"]);
 });
 
-it("tells an auto-apply run to ignore git and still deploy", () => {
-  const task = {
-    ...taskInput("/home/user"),
-    id: "a".repeat(24),
-    status: "pending" as const,
-    createdAt: new Date().toISOString(),
-    finishedAt: null,
-    model: "opus",
-  };
-
-  expect(AUTO_APPLY_INSTRUCTION).toContain(
-    "ignore git entirely: do not check git status, commit, stash, branch, or create a worktree",
-  );
-  expect(AUTO_APPLY_INSTRUCTION).toContain(
-    "never skip or refuse a change because of uncommitted changes",
-  );
-  expect(AUTO_APPLY_INSTRUCTION).toContain(
-    "do not attempt `docker compose` yourself",
-  );
-  expect(AUTO_APPLY_INSTRUCTION).toContain(
-    "the dashboard redeploys it on the host after the run ends",
-  );
-  expect(withAutoApply(task).prompt).toBe(
-    `${task.prompt}\n\n${AUTO_APPLY_INSTRUCTION}`,
-  );
-});
+const applyTask = {
+  ...taskInput("/home/user"),
+  id: "a".repeat(24),
+  status: "pending" as const,
+  createdAt: new Date().toISOString(),
+  finishedAt: null,
+  model: "opus",
+};
+const APPLY_METHODS: [string, RestartMethod, string][] = [
+  [
+    "none",
+    { kind: "none" },
+    "the dashboard restarts nothing after the run ends",
+  ],
+  [
+    "compose",
+    { kind: "compose" },
+    "`docker compose build` and `docker compose up -d`",
+  ],
+  [
+    "command",
+    { kind: "command", argv: ["./restart.sh", "--secret-flag"] },
+    "the restart command ./restart.sh",
+  ],
+];
+it.each(APPLY_METHODS)(
+  "tells an auto-apply run about a %s restart method",
+  (_kind, method, sentence) => {
+    const instruction = autoApplyInstruction(method);
+    expect(instruction).toContain(
+      "ignore git entirely: do not check git status, commit, stash, branch, or create a worktree",
+    );
+    expect(instruction).toContain(
+      "never skip or refuse a change because of uncommitted changes",
+    );
+    expect(instruction).toContain(sentence);
+    expect(instruction).toContain(
+      "Never restart, recreate or stop the SessionMaxxing container",
+    );
+    expect(instruction).not.toContain("no docker");
+    expect(instruction).not.toContain("on the host");
+    expect(instruction).not.toContain("--secret-flag");
+    expect(withAutoApply(applyTask, method).prompt).toBe(
+      `${applyTask.prompt}\n\n${instruction}`,
+    );
+  },
+);
 it("resumes the stopped Claude session with the resume prompt instead of the task prompt", () => {
   const child = fakeChild();
   const spawn = vi.fn<SpawnProvider>(() => child);

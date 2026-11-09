@@ -525,7 +525,9 @@ export class Runner {
       }
       active.applied = this.options.autoApply?.() ?? false;
       const child = (this.options.launch ?? launchProvider)(
-        active.applied ? withAutoApply(task) : task,
+        active.applied
+          ? withAutoApply(task, this.restartMethods.get(task.workdir))
+          : task,
         sessionId,
         resume,
       );
