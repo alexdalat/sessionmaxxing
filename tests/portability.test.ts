@@ -8,6 +8,7 @@ import { FORBIDDEN_VALUES } from "./forbidden-values";
 const ENV_KEYS = [
   "SESSIONMAXXING_UID",
   "SESSIONMAXXING_GID",
+  "SESSIONMAXXING_DOCKER_GID",
   "SESSIONMAXXING_HOME",
   "SESSIONMAXXING_BIND_ADDRESS",
   "SESSIONMAXXING_PORT",
@@ -73,13 +74,34 @@ describe("compose.yaml", () => {
     expect(text).not.toMatch(/^\s*SESSIONMAXXING_PORT:/m);
   });
 
-  it("mounts only the home directory and no data directory", async () => {
+  it("mounts only the home directory and the docker socket, with no data directory", async () => {
     const text = await read("compose.yaml");
-    expect(text.match(/type: bind/g)).toHaveLength(1);
+    expect(text.match(/type: bind/g)).toHaveLength(2);
+    expect(text.match(/create_host_path: false/g)).toHaveLength(2);
     expect(text).not.toContain("./data");
     expect(text).not.toContain("/app/data");
     expect(text).toMatch(/source: "\$\{SESSIONMAXXING_HOME:\?[^}]+\}"/);
     expect(text).toMatch(/target: "\$\{SESSIONMAXXING_HOME:\?[^}]+\}"/);
+    expect(text).toMatch(/^\s*source: \/var\/run\/docker\.sock$/m);
+    expect(text).toMatch(/^\s*target: \/var\/run\/docker\.sock$/m);
+  });
+
+  it("adds the socket group through one quoted group_add entry that names the command printing it", async () => {
+    const text = await read("compose.yaml");
+    const entries = lines(text).filter((line) =>
+      line.includes("SESSIONMAXXING_DOCKER_GID"),
+    );
+    expect(entries).toHaveLength(1);
+    expect(text).toMatch(/^\s*group_add:\s*$/m);
+    expect(entries[0]).toMatch(
+      /^\s*- "\$\{SESSIONMAXXING_DOCKER_GID:\?[^}]*stat -c %g \/var\/run\/docker\.sock[^}]*\}"$/,
+    );
+  });
+
+  it("adds no proxy, privileged mode or capability", async () => {
+    const text = await read("compose.yaml");
+    for (const option of ["privileged", "cap_add", "docker-socket-proxy"])
+      expect(text).not.toContain(option);
   });
 
   it("takes the container user and the build args from the same fields", async () => {
@@ -105,7 +127,7 @@ describe("compose.yaml", () => {
 });
 
 describe(".env.example", () => {
-  it("lists exactly the eight Compose fields", async () => {
+  it("lists exactly the nine Compose fields", async () => {
     const keys = lines(await read(".env.example"))
       .map((line) => line.match(/^([A-Z][A-Z0-9_]*)=/)?.[1])
       .filter((key): key is string => key !== undefined);
@@ -123,6 +145,12 @@ describe(".env.example", () => {
     expect(await read(".env.example")).toMatch(
       /^SESSIONMAXXING_ALLOWED_HOSTS=$/m,
     );
+  });
+
+  it("leaves the docker group empty and names the command that prints it", async () => {
+    const text = await read(".env.example");
+    expect(text).toMatch(/^SESSIONMAXXING_DOCKER_GID=$/m);
+    expect(text).toContain("stat -c %g /var/run/docker.sock");
   });
 });
 
@@ -195,6 +223,35 @@ describe("Dockerfile", () => {
     ])
       expect(text, entry).toContain(entry);
     expect(text).toMatch(/HOME=\$\{RUNTIME_HOME\}/);
+  });
+
+  it("installs the docker CLI, compose and buildx from Docker's signed repository before the ids are declared", async () => {
+    const text = await runtimeStage();
+    expect(text).toContain("download.docker.com/linux/debian");
+    expect(text).toContain("Signed-By: /etc/apt/keyrings/docker.asc");
+    for (const pkg of [
+      "docker-ce-cli",
+      "docker-compose-plugin",
+      "docker-buildx-plugin",
+    ])
+      expect(text, pkg).toContain(pkg);
+    const layer = text.indexOf("docker-ce-cli");
+    expect(layer).toBeGreaterThan(text.indexOf("apt-get install"));
+    expect(layer).toBeLessThan(text.indexOf("ARG RUNTIME_UID"));
+  });
+
+  it("marks the image as a Docker install", async () => {
+    expect(await runtimeStage()).toMatch(/SESSIONMAXXING_IN_DOCKER=1/);
+  });
+
+  it("fails the build unless docker, compose and buildx run as the runtime user", async () => {
+    const text = await runtimeStage();
+    const guard = text.indexOf(
+      "RUN docker --version && docker compose version && docker buildx version",
+    );
+    expect(guard).toBeGreaterThan(
+      text.search(/USER \$\{RUNTIME_UID\}:\$\{RUNTIME_GID\}/),
+    );
   });
 
   it("switches to the runtime user before running claude", async () => {
