@@ -77,8 +77,9 @@ export class UsageMonitor {
     this.timer.unref();
   }
 
-  stop() {
+  async stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = undefined;
+    await this.inflight;
   }
 }
