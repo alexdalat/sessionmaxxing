@@ -8,6 +8,7 @@ export const HOST_VARIABLE = "SESSIONMAXXING_HOST";
 export const EDITION_VARIABLE = "SESSIONMAXXING_EDITION";
 export const ALLOWED_HOSTS_VARIABLE = "SESSIONMAXXING_ALLOWED_HOSTS";
 export const WORKDIR_ROOT_VARIABLE = "SESSIONMAXXING_WORKDIR_ROOT";
+export const IN_DOCKER_VARIABLE = "SESSIONMAXXING_IN_DOCKER";
 export const ZONE_VARIABLE = "TZ";
 
 const LOOPBACK = "127.0.0.1";
@@ -33,6 +34,16 @@ export function resolveEdition(env: Env) {
       400,
     );
   return "full";
+}
+
+export function resolveDockerInstall(env: Env) {
+  const marker = env[IN_DOCKER_VARIABLE];
+  if (marker !== undefined && marker !== "1")
+    throw new DomainError(
+      `${IN_DOCKER_VARIABLE} must be 1; the Docker image sets it and a native install leaves it unset.`,
+      400,
+    );
+  return marker === "1";
 }
 
 function isAllowedHostEntry(entry: string) {

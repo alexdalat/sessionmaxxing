@@ -2,6 +2,7 @@ import { expect, it } from "vitest";
 import {
   formatListenUrl,
   resolveAllowedHosts,
+  resolveDockerInstall,
   resolveEdition,
   resolveHost,
   resolveTimeZone,
@@ -11,6 +12,7 @@ import { DomainError } from "../server/storage.js";
 const HOST = "SESSIONMAXXING_HOST";
 const EDITION = "SESSIONMAXXING_EDITION";
 const ALLOWED = "SESSIONMAXXING_ALLOWED_HOSTS";
+const IN_DOCKER = "SESSIONMAXXING_IN_DOCKER";
 
 it("binds loopback when SESSIONMAXXING_HOST is unset", () => {
   expect(resolveHost({})).toBe("127.0.0.1");
@@ -121,3 +123,18 @@ it.each([
   expect(attempt).toThrow(DomainError);
   expect(attempt).toThrow("TZ");
 });
+
+it("treats an unset SESSIONMAXXING_IN_DOCKER as a native install", () => {
+  expect(resolveDockerInstall({})).toBe(false);
+});
+it("treats SESSIONMAXXING_IN_DOCKER=1 as a Docker install", () => {
+  expect(resolveDockerInstall({ [IN_DOCKER]: "1" })).toBe(true);
+});
+it.each(["", "0", "true"])(
+  "rejects SESSIONMAXXING_IN_DOCKER=%j naming the variable",
+  (marker) => {
+    const attempt = () => resolveDockerInstall({ [IN_DOCKER]: marker });
+    expect(attempt).toThrow(DomainError);
+    expect(attempt).toThrow(IN_DOCKER);
+  },
+);

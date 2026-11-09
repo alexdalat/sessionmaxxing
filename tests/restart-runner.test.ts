@@ -4,6 +4,7 @@ import {
   readdir,
   readFile,
   realpath,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
@@ -61,6 +62,8 @@ interface Setup {
   respond?: (command: string, args: string[]) => CommandResponse;
   /** Replaces the fake spawner, so restarts run real processes. */
   restart?: RestartOptions;
+  /** Options for the fake docker spawner. */
+  docker?: RestartOptions;
 }
 
 interface Finish {
@@ -85,7 +88,7 @@ async function dashboard(temp: string, setup: Setup = {}) {
       return child;
     },
     autoApply: () => setup.autoApply ?? true,
-    restart: setup.restart ?? { spawn: command.spawn },
+    restart: setup.restart ?? { spawn: command.spawn, ...setup.docker },
     now: () => new Date(NOW),
   });
   if (setup.method) await runner.restartMethods.set(workdir, setup.method);
@@ -122,6 +125,7 @@ async function dashboard(temp: string, setup: Setup = {}) {
     settled,
     record,
     launches: () => launches,
+    child: () => child,
   };
 }
 
@@ -604,6 +608,124 @@ it("stops a running restart when the runner closes and fails its record at the n
       reopened.list().find(({ id }) => id === started.id)?.restart,
     ).toMatchObject({ status: "failed", output: STOPPED_BEFORE_FINISH });
     await reopened.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+const IMAGE_ID = `sha256:${"ab".repeat(32)}`;
+const WORKING_DIR_LABEL = "com.docker.compose.project.working_dir";
+
+it("restarts its own project through a sibling container once the other running task has ended", async () => {
+  const temp = await temporary();
+  try {
+    const base = await realpath(temp.path);
+    const socket = join(base, "docker.sock");
+    await writeFile(socket, "");
+    const fixture = await dashboard(temp.path, {
+      method: COMPOSE,
+      docker: { dockerInstall: true, socketPath: socket },
+      respond: (_command, args) => {
+        if (args[0] === "inspect")
+          // Hand-written in the shape the executor reads: no daemon exists here to produce a real answer.
+          return {
+            stdout: JSON.stringify([
+              {
+                Image: IMAGE_ID,
+                Config: {
+                  Labels: { [WORKING_DIR_LABEL]: join(base, "project") },
+                },
+              },
+            ]),
+          };
+        if (args[0] === "wait") return { stdout: "0\n" };
+        if (args[0] === "logs") return { stdout: "recreated\n" };
+        return {};
+      },
+    });
+    const {
+      store,
+      runner,
+      command,
+      child,
+      record,
+      settled,
+      restartOf,
+      workdir,
+    } = fixture;
+    const other = join(temp.path, "other");
+    await repository(other);
+    const own = await store.create(taskInput(fixture.project));
+    const started = await runner.start(own.id);
+    const ownChild = child();
+    await appendFile(join(fixture.project, "notes.md"), "two\n");
+    const second = await store.create(taskInput(other));
+    await runner.start(second.id);
+    const otherChild = child();
+    ownChild.emit("close", 0, null);
+
+    await vi.waitFor(() =>
+      expect(command.calls.map(({ args }) => args.join(" "))).toContain(
+        "compose build",
+      ),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(command.calls.map(({ args }) => args[0])).not.toContain("run");
+    expect((await record(started.id)).status).toBe("requested");
+
+    otherChild.emit("close", 0, null);
+    await settled(started.id);
+
+    const sibling = `sessionmaxxing-restart-${started.id}`;
+    const unset = Object.keys(process.env)
+      .filter((name) => name.startsWith("SESSIONMAXXING_"))
+      .sort()
+      .flatMap((name) => ["-u", name]);
+    const socketGid = (await stat(socket)).gid;
+    const run = command.calls.find(({ args }) => args[0] === "run");
+    expect(run?.args).toEqual([
+      "run",
+      "--detach",
+      "--name",
+      sibling,
+      "--user",
+      `${process.getuid?.()}:${process.getgid?.()}`,
+      "--group-add",
+      String(socketGid),
+      "--mount",
+      `type=bind,source=${socket},target=${socket}`,
+      "--mount",
+      `type=bind,source=${workdir},target=${workdir}`,
+      "--workdir",
+      workdir,
+      IMAGE_ID,
+      "env",
+      ...unset,
+      "docker",
+      "compose",
+      "up",
+      "-d",
+    ]);
+    expect(run?.args).not.toContain("--rm");
+    expect(command.calls.map(({ args }) => args.slice(0, 2).join(" "))).toEqual(
+      [
+        expect.stringMatching(/^inspect /),
+        "compose build",
+        "run --detach",
+        `wait ${sibling}`,
+        `logs ${sibling}`,
+        `rm ${sibling}`,
+      ],
+    );
+    expect(command.calls.every(({ options }) => options.shell === false)).toBe(
+      true,
+    );
+    expect(restartOf(started.id)?.status).toBe("succeeded");
+    expect(await record(started.id)).toMatchObject({
+      status: "succeeded",
+      sibling,
+    });
+    await runner.close();
   } finally {
     await temp.cleanup();
   }

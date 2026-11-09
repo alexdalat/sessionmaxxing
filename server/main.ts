@@ -12,6 +12,7 @@ import { DispatchSettingsStore } from "./dispatch-settings.js";
 import {
   formatListenUrl,
   resolveAllowedHosts,
+  resolveDockerInstall,
   resolveEdition,
   resolveHost,
   resolveTimeZone,
@@ -54,6 +55,7 @@ export async function startDashboard(
     );
   // Phase 4 reads the edition; until then an unsupported value must fail instead of silently running full.
   resolveEdition(process.env);
+  const dockerInstall = resolveDockerInstall(process.env);
   const allowedHosts = resolveAllowedHosts(process.env, host);
   const workdirRoot =
     options.workdirRoot ?? (await resolveWorkdirRoot(process.env, homedir()));
@@ -103,6 +105,7 @@ export async function startDashboard(
       autoApply: () => settings.snapshot().autoApply,
       sessionTokens: (sessionId, since) =>
         readSessionTokens(join(homedir(), ".claude"), sessionId, since),
+      restart: { dockerInstall },
     });
     const keeper = await SessionKeeper.open(directory, {
       enabled: () => settings.snapshot().keepSessionActive,

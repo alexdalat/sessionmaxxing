@@ -15,6 +15,7 @@ beforeEach(() => {
   vi.stubEnv("SESSIONMAXXING_HOST", undefined);
   vi.stubEnv("SESSIONMAXXING_PORT", undefined);
   vi.stubEnv("SESSIONMAXXING_EDITION", undefined);
+  vi.stubEnv("SESSIONMAXXING_IN_DOCKER", undefined);
   vi.stubEnv("SESSIONMAXXING_ALLOWED_HOSTS", undefined);
   vi.stubEnv("HOST", undefined);
 });
