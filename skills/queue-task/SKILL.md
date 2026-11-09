@@ -45,9 +45,9 @@ and stop.
 - **commit line** — depends on `settings.autoApply` from `/api/dispatch-settings`:
   - `false`: end the prompt with **do not commit**.
   - `true`: the dashboard appends an edit-in-place paragraph that tells the run to ignore
-    git and to leave `docker compose` to the host, which redeploys a Compose work directory
-    once the run ends. Never write a git step (commit, stash, branch, worktree, clean-tree
-    check) or any docker step in the prompt.
+    git and names the work directory's restart method, which the dashboard runs after the
+    run ends. Never write a git step (commit, stash, branch, worktree, clean-tree check),
+    a docker step or a restart step in the prompt.
 - **git state** — ignore it. Uncommitted changes never block queuing or applying a task.
 
 Write long prompts to a file in your scratchpad directory and pass `--prompt-file`.
