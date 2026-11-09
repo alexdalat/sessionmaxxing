@@ -67,6 +67,7 @@ Other flags: `--priority N` (lower runs first),
 `--tokens N|auto` (expected weighted tokens, `auto` by default),
 `--window HH` (0-23; omit for any hour), `--after ISO`, `--url` (or `SESSIONMAXXING_URL`), `--dry-run`.
 `SESSIONMAXXING_PATH_MAP=from=to[,from=to]` rewrites a `--workdir` prefix for a server that sees the same folders under other paths.
+The lite edition (`edition: "lite"` from `GET /api/environment`) has no `quiet` field and takes no `--tokens`.
 The script prints the usage summary, then the created task id, title, and window.
 
 ## 4. Report back

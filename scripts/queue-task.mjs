@@ -20,7 +20,7 @@ const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." 
   [--workdir /abs/path]  default: the current directory
   [--model NAME] [--priority N]
   [--max-turns N]        default: 500
-  [--tokens N|auto]      expected weighted tokens; auto lets the server estimate them
+  [--tokens N|auto]      expected weighted tokens; auto lets the server estimate them (full edition only)
   [--window HH]          0-23; omit for any hour
   [--depends-on ID[,ID]] run only after these queued task ids finish
   [--after ISO] [--dry-run]
@@ -41,6 +41,7 @@ const VALUE_FLAGS = new Set([
   "--url",
 ]);
 const TASK_ID = /^[a-f0-9]{24}$/;
+const EDITIONS = new Set(["full", "lite"]);
 
 function fail(message) {
   console.error(message);
@@ -196,17 +197,32 @@ if (dryRun) {
 }
 
 const { base, usage } = await connect(values["--url"] ?? DEFAULT_URL);
+const { edition } = await send(base, "/api/environment");
+if (!EDITIONS.has(edition))
+  fail(`${base} reports the unknown edition ${JSON.stringify(edition)}.`);
+const lite = edition === "lite";
+if (lite && values["--tokens"] !== undefined)
+  fail(
+    "The lite edition takes no token cost. Drop --tokens, or point --url at a full-edition server.",
+  );
+const { tokens: _tokens, ...liteBody } = body;
 const planning = await send(base, "/api/dispatch-settings");
 const gate = planning.gate;
 const percent = (bucket) => (bucket ? `${bucket.percent}%` : "unknown");
-console.log(
-  `${base} · session ${percent(usage.snapshot?.session)} · weekly ${percent(usage.snapshot?.weekly)} · quiet ${quietLabel(planning.quiet)} · claude ${gate.status}: ${gate.reason}${usage.error ? ` · usage error: ${usage.error}` : ""}`,
-);
+const summary = [
+  base,
+  `session ${percent(usage.snapshot?.session)}`,
+  `weekly ${percent(usage.snapshot?.weekly)}`,
+  ...(lite ? [] : [`quiet ${quietLabel(planning.quiet)}`]),
+  `claude ${gate.status}: ${gate.reason}`,
+  ...(usage.error ? [`usage error: ${usage.error}`] : []),
+];
+console.log(summary.join(" · "));
 
 const created = await send(base, "/api/tasks", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
-  body: JSON.stringify(body),
+  body: JSON.stringify(lite ? liteBody : body),
 });
 console.log(
   `Queued ${created.id} · ${created.title} · ${created.preferredWindowStart === null ? "Any hour" : `Window ${hourLabel(created.preferredWindowStart)}`}`,
