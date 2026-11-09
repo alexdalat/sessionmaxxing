@@ -7,6 +7,7 @@ import {
   CLAUDE_BUCKETS,
   type ClaudeBucket,
   type ClaudeBudgets,
+  type FullPlanning,
   type OfficialUsage,
   type PlanningSnapshot,
   planLabel,
@@ -117,7 +118,7 @@ export function UsagePanel({
   onRefresh,
 }: {
   usage: UsageState | undefined;
-  planning: PlanningSnapshot | undefined;
+  planning: FullPlanning | undefined;
   budgets: ClaudeBudgets;
   now: number;
   busy: boolean;

@@ -492,6 +492,8 @@ export interface QuietHours {
   nextStartHour: number | null;
 }
 export const WEEKLY_HARD_CEILING_PERCENT = 95;
+/** Official usage older than this blocks dispatch. */
+export const USAGE_STALE_MS = 15 * MINUTE_MS;
 export interface BucketGate {
   percent: number | null;
   ceiling: number;
@@ -518,21 +520,28 @@ export interface DispatchGate {
   status: "ready" | "waiting";
   reason: string;
 }
-export interface PlanningSnapshot {
+export interface PlanningBase {
   /** The IANA zone every hour in this snapshot is read in. */
   timeZone: string;
   settings: DispatchSettings;
-  /** Session percent per million output tokens, fitted on this machine; null until a window can be fitted. */
-  rates: SessionRates | null;
   usage: UsageSnapshot | null;
   usageError: string | null;
   session: BucketGate;
   weekly: BucketGate;
-  fable: BucketGate | null;
-  quiet: QuietHours;
   load: DispatchLoad;
   gate: DispatchGate;
 }
+export interface FullPlanning extends PlanningBase {
+  edition: "full";
+  /** Session percent per million output tokens, fitted on this machine; null until a window can be fitted. */
+  rates: SessionRates | null;
+  fable: BucketGate | null;
+  quiet: QuietHours;
+}
+export interface LitePlanning extends PlanningBase {
+  edition: "lite";
+}
+export type PlanningSnapshot = FullPlanning | LitePlanning;
 
 export const PLAN_SCORE_DAYS = 28;
 export const PLAN_SCORE_COVERAGE_DAYS = 7;

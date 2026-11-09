@@ -22,6 +22,7 @@ import {
 } from "../shared/types.js";
 import { modelSessionPercent } from "./calibration.js";
 import type { CommitMessageSuggester } from "./commit-message.js";
+import { planningRates } from "./dispatch.js";
 import type { EstimateRun, EstimateTask, TokensEstimator } from "./estimate.js";
 import type { QueueStore, StoredTaskInput } from "./queue.js";
 import { validateRestartMethod } from "./restart-methods.js";
@@ -181,7 +182,7 @@ export function registerQueueRoutes(
   };
   const plannedTask = async (task: PublicTask) => {
     const planning = getPlanning?.();
-    const withReview = shown(task, runner.list(), planning?.rates ?? null);
+    const withReview = shown(task, runner.list(), planningRates(planning));
     return planning
       ? { ...withReview, gate: await runner.gate(task, planning, now()) }
       : withReview;
@@ -201,7 +202,7 @@ export function registerQueueRoutes(
         ...snapshot,
         tasks: await Promise.all(
           tasks.map(async (task) => {
-            const withReview = shown(task, runs, planning?.rates ?? null);
+            const withReview = shown(task, runs, planningRates(planning));
             return planning
               ? { ...withReview, gate: await runner.gate(task, planning, at) }
               : withReview;

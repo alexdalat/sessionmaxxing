@@ -14,7 +14,9 @@ import {
   type DispatchSettings,
   EMPTY_LOAD,
   FABLE_MODEL,
+  type FullPlanning,
   hourLabel,
+  type LitePlanning,
   type OfficialUsage,
   type PlanningSnapshot,
   type PublicTask,
@@ -24,6 +26,7 @@ import {
   type SessionRates,
   type Task,
   type TaskGate,
+  USAGE_STALE_MS,
   type UsageState,
   WEEK_MINUTES,
   WEEKLY_HARD_CEILING_PERCENT,
@@ -36,7 +39,6 @@ const MINUTE_MS = 60_000;
 const WEEK_MS = WEEK_MINUTES * MINUTE_MS;
 const WINDOW_MS = BLOCK_MINUTES * MINUTE_MS;
 const WINDOW_HOURS = BLOCK_MINUTES / 60;
-export const USAGE_STALE_MS = 15 * MINUTE_MS;
 export const USAGE_PREDATES_RUN_REASON =
   "Refreshing official usage after the last run";
 const FULL = 100;
@@ -182,6 +184,43 @@ export function hoursUntil(fromHour: number, toHour: number) {
   return (toHour - fromHour + HOURS_PER_DAY) % HOURS_PER_DAY || HOURS_PER_DAY;
 }
 
+const sessionOverReason = (session: BucketGate, reserve: string) =>
+  `Session ${session.percent}%${held(session)}, over the ${session.ceiling}% queue cutoff${reserve}`;
+const weeklyOverReason = (weekly: BucketGate, settings: DispatchSettings) =>
+  `Weekly ${weekly.percent}%${held(weekly)}, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`;
+
+/** Why the run slots or the official usage snapshot rule out dispatching; null when both allow it. */
+function usageWait(
+  settings: DispatchSettings,
+  usage: UsageState,
+  load: DispatchLoad,
+  now: Date,
+): DispatchGate | null {
+  const { snapshot } = usage;
+  if (load.running >= settings.maxConcurrentRuns)
+    return {
+      status: "waiting",
+      reason: `All ${plural(settings.maxConcurrentRuns, "run slot")} busy`,
+    };
+  if (!snapshot)
+    return {
+      status: "waiting",
+      reason: `Official usage unavailable: ${usage.error ?? "not fetched yet"}`,
+    };
+  const ageMs = now.getTime() - Date.parse(snapshot.fetchedAt);
+  if (ageMs > USAGE_STALE_MS)
+    return {
+      status: "waiting",
+      reason: `Official usage is ${Math.round(ageMs / MINUTE_MS)} min old · refresh to retry${usage.error ? ` (${usage.error})` : ""}`,
+    };
+  if (
+    load.lastRunEndedAt !== null &&
+    Date.parse(snapshot.fetchedAt) < Date.parse(load.lastRunEndedAt)
+  )
+    return { status: "waiting", reason: USAGE_PREDATES_RUN_REASON };
+  return null;
+}
+
 export function planDispatch(
   settings: DispatchSettings,
   usage: UsageState,
@@ -190,9 +229,8 @@ export function planDispatch(
   ranking: QuietRanking = { ranking: null, error: null },
   load: DispatchLoad = EMPTY_LOAD,
   calibration: SessionCalibration = { rates: null, error: null },
-): PlanningSnapshot {
+): FullPlanning {
   const snapshot = usage.snapshot;
-  const { lastRunEndedAt } = load;
   const quiet = quietHours(ranking, settings.quietStartHours, now, timeZone);
   const busyHours = inBusyHours(settings, quiet);
   const session = sessionGate(
@@ -217,34 +255,9 @@ export function planDispatch(
         now,
       )
     : null;
-  const ageMs = snapshot
-    ? now.getTime() - Date.parse(snapshot.fetchedAt)
-    : Number.POSITIVE_INFINITY;
-  const slotsFull = load.running >= settings.maxConcurrentRuns;
-  const slots: DispatchGate = {
-    status: "waiting",
-    reason: `All ${plural(settings.maxConcurrentRuns, "run slot")} busy`,
-  };
   let gate: DispatchGate;
-  if (slotsFull) gate = slots;
-  else if (!snapshot)
-    gate = {
-      status: "waiting",
-      reason: `Official usage unavailable: ${usage.error ?? "not fetched yet"}`,
-    };
-  else if (ageMs > USAGE_STALE_MS)
-    gate = {
-      status: "waiting",
-      reason: `Official usage is ${Math.round(ageMs / MINUTE_MS)} min old · refresh to retry${usage.error ? ` (${usage.error})` : ""}`,
-    };
-  else if (
-    lastRunEndedAt !== null &&
-    Date.parse(snapshot.fetchedAt) < Date.parse(lastRunEndedAt)
-  )
-    gate = {
-      status: "waiting",
-      reason: USAGE_PREDATES_RUN_REASON,
-    };
+  const waiting = usageWait(settings, usage, load, now);
+  if (waiting) gate = waiting;
   else if (calibration.rates === null)
     gate = {
       status: "waiting",
@@ -253,19 +266,17 @@ export function planDispatch(
   else if (!session.ok)
     gate = {
       status: "waiting",
-      reason: `Session ${session.percent}%${held(session)}, over the ${session.ceiling}% queue cutoff${reserveLabel(settings, busyHours)}`,
+      reason: sessionOverReason(session, reserveLabel(settings, busyHours)),
     };
   else if (!weekly.ok)
-    gate = {
-      status: "waiting",
-      reason: `Weekly ${weekly.percent}%${held(weekly)}, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`,
-    };
+    gate = { status: "waiting", reason: weeklyOverReason(weekly, settings) };
   else
     gate = {
       status: "ready",
       reason: `${describe("Session", session)} · ${describe("Weekly", weekly)}`,
     };
   return {
+    edition: "full",
     timeZone,
     settings,
     rates: calibration.rates,
@@ -279,6 +290,58 @@ export function planDispatch(
     gate,
   };
 }
+
+/** The lite gate: slots, fresh usage, then the session and weekly ceilings. It has one session reserve and no calibration, quiet hours or Fable bucket. */
+export function planLite(
+  settings: DispatchSettings,
+  usage: UsageState,
+  now: Date,
+  timeZone: string,
+  load: DispatchLoad = EMPTY_LOAD,
+): LitePlanning {
+  const snapshot = usage.snapshot;
+  const session = sessionGate(
+    snapshot?.session,
+    settings.sessionReservePercent,
+    load.reserved.session,
+    now,
+  );
+  const weekly = weeklyGate(
+    snapshot?.weekly,
+    settings.weeklyMarginPercent,
+    load.reserved.weekly,
+    now,
+  );
+  let gate: DispatchGate;
+  const waiting = usageWait(settings, usage, load, now);
+  if (waiting) gate = waiting;
+  else if (!session.ok)
+    gate = { status: "waiting", reason: sessionOverReason(session, "") };
+  else if (!weekly.ok)
+    gate = { status: "waiting", reason: weeklyOverReason(weekly, settings) };
+  else
+    gate = {
+      status: "ready",
+      reason: `${describe("Session", session)} · ${describe("Weekly", weekly)}`,
+    };
+  return {
+    edition: "lite",
+    timeZone,
+    settings,
+    usage: snapshot,
+    usageError: usage.error,
+    session,
+    weekly,
+    load,
+    gate,
+  };
+}
+
+/** The fitted session rates; lite plans without any. */
+export const planningRates = (
+  planning: PlanningSnapshot | undefined,
+): SessionRates | null =>
+  planning?.edition === "full" ? planning.rates : null;
 
 export type Dependency = Pick<Task, "id" | "title" | "status">;
 export const dependencyReason = ({ title, status }: Dependency) => {
@@ -421,7 +484,7 @@ const inQuietHours =
 /** The schedule rules of the task itself: earliest start aside, its preferred window or the quiet-hours-only rule. */
 function scheduleOpens(
   task: Pick<GateTask, "preferredWindowStart">,
-  planning: PlanningSnapshot,
+  planning: FullPlanning,
 ): Opens {
   const window = task.preferredWindowStart;
   if (window !== null)
@@ -432,7 +495,7 @@ function scheduleOpens(
 }
 
 /** The session cutoff the live gate applies at `at`. */
-function cutoffAt(planning: PlanningSnapshot, now: number) {
+function cutoffAt(planning: FullPlanning, now: number) {
   const { session, settings, quiet, timeZone } = planning;
   return (at: number) =>
     // At `now` the gate reads the snapshot's own ceiling; matching it keeps "ready now" in agreement.
@@ -504,7 +567,7 @@ function startsAt(
     GateTask,
     "id" | "model" | "preferredWindowStart" | "earliestStart" | "tokens"
   >,
-  planning: PlanningSnapshot,
+  planning: FullPlanning,
   now: number,
   runs: readonly RunCost[],
   ahead: readonly number[],
@@ -575,7 +638,7 @@ export function eligibleAt(
     GateTask,
     "id" | "model" | "preferredWindowStart" | "earliestStart" | "tokens"
   >,
-  planning: PlanningSnapshot,
+  planning: FullPlanning,
   now: Date,
   runs: readonly RunCost[],
   ahead: readonly number[] = [],
@@ -595,7 +658,10 @@ export function taskGate(
     return { status: "running", reason: "Running now", eligibleAt: null };
   if (task.status !== "pending")
     return { status: "finished", reason: task.status, eligibleAt: null };
-  const eligible = eligibleAt(task, planning, now, runs, ahead);
+  const eligible =
+    planning.edition === "full"
+      ? eligibleAt(task, planning, now, runs, ahead)
+      : null;
   if (
     task.earliestStart !== null &&
     Date.parse(task.earliestStart) > now.getTime()
@@ -616,6 +682,8 @@ export function taskGate(
       )}`,
       eligibleAt: eligible,
     };
+  if (planning.edition === "lite")
+    return { ...planning.gate, eligibleAt: null };
   const { gate, quiet, settings } = planning;
   if (
     gate.status === "ready" &&

@@ -22,7 +22,9 @@ export function Overview({
   const usage = usePolling<UsageReport>("/api/usage", USAGE_POLL_MS);
   const [refreshing, setRefreshing] = useState(false);
   const now = useClock();
-  const planning = queue.data?.planning;
+  const queuePlanning = queue.data?.planning;
+  const planning =
+    queuePlanning?.edition === "full" ? queuePlanning : undefined;
   return (
     <>
       {usage.error && (

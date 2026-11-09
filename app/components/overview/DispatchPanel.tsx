@@ -10,7 +10,7 @@ import { queuePreview } from "@/app/lib/queuePreview";
 import { localClock } from "@/shared/local-time";
 import type {
   BucketGate,
-  PlanningSnapshot,
+  FullPlanning,
   PublicTask,
   SessionKeeperState,
 } from "@/shared/types";
@@ -45,7 +45,7 @@ export function DispatchPanel({
   now,
   onSaved,
 }: {
-  planning: PlanningSnapshot;
+  planning: FullPlanning;
   keeper: SessionKeeperState | undefined;
   tasks: PublicTask[] | undefined;
   queueOn: boolean | undefined;

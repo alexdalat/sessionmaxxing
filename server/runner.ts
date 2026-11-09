@@ -23,6 +23,7 @@ import {
   costsAhead,
   dependencyReason,
   expectedSessionCost,
+  planningRates,
   taskGate,
   USAGE_PREDATES_RUN_REASON,
   withRun,
@@ -154,7 +155,7 @@ export class Runner {
     return this.getPlanning?.(EMPTY_LOAD).settings ?? DEFAULT_DISPATCH_SETTINGS;
   }
   private rates(): SessionRates | null {
-    return this.getPlanning?.(EMPTY_LOAD).rates ?? null;
+    return planningRates(this.getPlanning?.(EMPTY_LOAD));
   }
   /** Slots held and quota reserved by every active run. */
   load(settings = this.settings()): DispatchLoad {
