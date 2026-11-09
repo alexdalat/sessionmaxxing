@@ -32,6 +32,7 @@ const TEXT_EXTENSIONS = new Set([
   ".sh",
   ".yaml",
   ".yml",
+  ".log",
 ]);
 
 async function filesUnder(directory: string): Promise<string[]> {

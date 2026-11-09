@@ -47,6 +47,7 @@ import type { QueueStore } from "./queue.js";
 import { resolveResources, resourcesCollide } from "./resources.js";
 import { RestartExecutor, type RestartOptions } from "./restart-executor.js";
 import { RestartMethodStore } from "./restart-methods.js";
+import { migrateRestarts } from "./restart-migration.js";
 import { RestartStore } from "./restarts.js";
 import { atomicJson, DomainError, id } from "./storage.js";
 import { validateWorkdir } from "./validation.js";
@@ -256,8 +257,10 @@ export class Runner {
       run.tokens = tokens;
       await runner.persist(run);
     }
-    // A data directory without the file is a fresh install with no methods.
-    runner.methods = await RestartMethodStore.open(directory, async () => ({}));
+    // A data directory without the file is an upgrade from the host watcher or a fresh install.
+    runner.methods = await RestartMethodStore.open(directory, () =>
+      migrateRestarts(directory, store.snapshot().tasks, runner.runs),
+    );
     runner.restarts = await RestartStore.open(directory, () => runner.now());
     runner.executor = new RestartExecutor(
       runner.restarts,

@@ -1,0 +1,25 @@
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"POSTGRES_DB\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"POSTGRES_USER\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"POSTGRES_PASSWORD\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"POSTGRES_USER\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"POSTGRES_DB\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"BETTER_AUTH_SECRET\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"BETTER_AUTH_URL\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"OPENAI_API_KEY\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"NEXT_PUBLIC_MAX_RECORDING_SECONDS\" variable is not set. Defaulting to a blank string."
+time="2026-09-18T21:13:41-04:00" level=warning msg="The \"ALLOW_SIGNUP\" variable is not set. Defaulting to a blank string."
+
+   3 |     RUN apk add --no-cache libc6-compat
+
+   4 |     COPY package.json pnpm-lock.yaml ./
+
+   5 | >>> RUN corepack enable pnpm && pnpm install --frozen-lockfile
+
+   6 |     
+
+   7 |     FROM node:24-alpine AS builder
+
+--------------------
+
+failed to solve: process "/bin/sh -c corepack enable pnpm && pnpm install --frozen-lockfile" did not complete successfully: exit code: 1
+

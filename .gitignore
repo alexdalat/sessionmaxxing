@@ -5,6 +5,7 @@ data/
 tests/.tmp/
 artifacts/
 *.log
+!tests/fixtures/restart/*.log
 .next/
 out/
 next-env.d.ts
