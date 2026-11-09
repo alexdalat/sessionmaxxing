@@ -2,8 +2,12 @@
 import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/app/components/ConfirmDialog";
 import { DispatchSettingsDialog } from "@/app/components/DispatchSettingsDialog";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { QueueBadges } from "@/app/components/QueueBadges";
-import { TaskListSkeleton } from "@/app/components/Skeletons";
+import {
+  TaskListSkeleton,
+  UsageStripSkeleton,
+} from "@/app/components/Skeletons";
 import { Button } from "@/app/components/ui/button";
 import {
   Select,
@@ -20,6 +24,7 @@ import { displayOrder, movedPast, moveTarget } from "@/app/lib/queueOrder";
 import type { PublicTask, QueueSnapshot, TaskInput } from "@/shared/types";
 import { TaskCard } from "./TaskCard";
 import { TaskFormDialog } from "./TaskForm";
+import { UsageStrip } from "./UsageStrip";
 
 const LEAVE_MS = 240;
 type Confirmation = { kind: "delete" | "run"; task: PublicTask };
@@ -38,6 +43,7 @@ export function TaskQueue() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [confirm, setConfirm] = useState<Confirmation>();
   const now = useClock();
+  const { edition } = useEnvironment();
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   useEffect(() => {
     const tasks = data?.tasks;
@@ -258,6 +264,12 @@ export function TaskQueue() {
           {notice}
         </p>
       )}
+      {edition === "lite" &&
+        (data?.planning ? (
+          <UsageStrip planning={data.planning} now={now} onRefreshed={reload} />
+        ) : (
+          !data && !loadError && <UsageStripSkeleton />
+        ))}
       <section className="panel">
         <div className="section-heading queue-heading">
           <h2>Queued tasks</h2>

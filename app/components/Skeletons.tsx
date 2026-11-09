@@ -14,7 +14,8 @@ export function PanelSkeleton() {
   );
 }
 
-const USAGE_ROW_KEYS = ["session", "weekly", "fable"];
+const STRIP_ROW_KEYS = ["session", "weekly"];
+const USAGE_ROW_KEYS = [...STRIP_ROW_KEYS, "fable"];
 const TABLE_ROW_KEYS = ["r1", "r2", "r3", "r4", "r5", "r6", "r7"];
 const MIX_PANEL_KEYS = ["models", "projects", "sources"];
 const MIX_ROW_KEYS = ["m1", "m2", "m3", "m4", "m5"];
@@ -28,6 +29,32 @@ function HeadingSkeleton() {
       <Skeleton className="h-4 w-48" />
       <Skeleton className="h-3 w-32" />
     </div>
+  );
+}
+function UsageRowSkeleton() {
+  return (
+    <div className="usage-row">
+      <div className="usage-head">
+        <Skeleton className="h-4 w-32" />
+        <Skeleton className="h-4 w-12" />
+        <Skeleton className="h-4 w-24" />
+      </div>
+      <Skeleton className="usage-track" />
+    </div>
+  );
+}
+export function UsageStripSkeleton() {
+  return (
+    <section
+      className="panel usage-panel"
+      role="status"
+      aria-label="Loading usage"
+    >
+      <HeadingSkeleton />
+      {STRIP_ROW_KEYS.map((key) => (
+        <UsageRowSkeleton key={key} />
+      ))}
+    </section>
   );
 }
 function TableSkeleton() {
@@ -77,14 +104,7 @@ export function OverviewSkeleton() {
       <section className="panel usage-panel">
         <HeadingSkeleton />
         {USAGE_ROW_KEYS.map((key) => (
-          <div className="usage-row" key={key}>
-            <div className="usage-head">
-              <Skeleton className="h-4 w-32" />
-              <Skeleton className="h-4 w-12" />
-              <Skeleton className="h-4 w-24" />
-            </div>
-            <Skeleton className="usage-track" />
-          </div>
+          <UsageRowSkeleton key={key} />
         ))}
       </section>
       <div className="two-column">

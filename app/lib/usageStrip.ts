@@ -9,7 +9,7 @@ import {
 } from "@/shared/types";
 
 const STRIP_BUCKETS = ["session", "weekly"] as const satisfies ClaudeBucket[];
-const NOT_STARTED = "not started";
+export const NOT_STARTED = "not started";
 const NO_PERCENT = "—";
 const NOT_FETCHED = "Not fetched yet";
 
