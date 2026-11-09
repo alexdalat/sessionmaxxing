@@ -6,7 +6,7 @@ Local-only dashboard whose single goal is to get the most out of a Claude Max su
 
 React + TypeScript + Next.js (App Router, static export), Tailwind CSS, Recharts, Fastify, Vitest, Biome, pnpm. Node 22.12+.
 
-Four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), `/runs/` (Runs). Fastify serves the static export from `dist/client`.
+Four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), `/runs/` (Runs); the lite edition serves Queue and Runs only (see Lite edition). Fastify serves the static export from `dist/client`.
 
 ## Layout
 
@@ -52,11 +52,22 @@ A task can **depend on** other queued tasks (`dependsOn`, up to 20 ids). It wait
 
 **Eligible-time estimate.** This is the baseline model for the published product (SessionMaxxing); later phases keep it. A pending task's `eligibleAt` (`server/dispatch.ts`) is the first instant the live gate would admit it, found by walking the session from now: the pending Claude tasks queued ahead (minus those that depend on the task, directly or through a chain) start one after another, then the task itself. Each one starts at the first instant (now, or a later local hour boundary before the open window resets) whose hour's cutoff fits `used + cost`, the cost capped at that cutoff; the cutoff is `100 − sessionReservePercent` in a quiet start hour or when the queue runs only in quiet hours, and `100 − busyHoursReservePercent` otherwise. A task that fits nowhere before the reset waits for the next window, which starts empty (running tasks are assumed finished by then) and opens when its first task starts. With quiet hours only, the tasks ahead also start only in quiet start hours; the task itself also respects its earliest start, its preferred window, the weekly ceiling and, for Fable models, the Fable ceiling, each counting the points running tasks hold. The estimate is never earlier than the live gate would admit, and with nothing queued ahead it is now exactly when `taskGate` is ready. It is null while the session rates are unknown, when the session reset is unknown and nothing fits, or when no allowed hour exists.
 
+## Lite edition
+
+- **Selection.** `SESSIONMAXXING_EDITION` is `full` or `lite`; unset is `full` and any other value stops startup. One build serves both and the server decides at start.
+- **Pages.** Lite serves `/queue/` and `/runs/`. `/` answers 302 to `/queue/`, the Overview and Analytics files answer 404, and the client carries no guard.
+- **Never started.** The history reader, `/api/analytics` and `/api/plan-score` (both 404), the token estimator, session-rate calibration and the quiet-hours ranking. The usage monitor and its samples, the session keeper, run review with commit, repository locks, dependencies, restart methods and Run now keep running as in full.
+- **Gate.** `planLite` in `server/dispatch.ts` checks in order: a run slot is free; the official snapshot is fresh and newer than the last run; session utilization plus the held session points is at or below `100 − sessionReservePercent`; weekly utilization plus the held weekly points is at or below `min(95, pace + weeklyMarginPercent)`. The wording is shared with the full gate, there is no Fable window, and `eligibleAt` is null.
+- **Fixed hold.** Each running lite task holds `runSessionHoldPercent` session points (default 10) and `runWeeklyCostPercent` weekly points until it finishes. Polling folds real consumption into the snapshot while the hold stays, so the double count errs conservative as in full.
+- **No tokens.** A task body with a `tokens` field is a 400, a lite task stores no token cost, and a finished lite run stores tokens null and no session cost.
+- **Data directory.** A full start on a `queue.json` holding a lite task stops with a message naming `queue.json`. A lite start loads full data and ignores the stored tokens.
+- **Queue page.** It opens with a usage strip of session and weekly usage, each with its cutoff, held points and reset, and a Refresh usage action.
+
 ## Data directory, time zone and hosts
 
 - **Data directory.** All runtime state sits in one directory with mode 0700: `SESSIONMAXXING_DATA_DIR` (absolute), else `$XDG_DATA_HOME/sessionmaxxing` when `XDG_DATA_HOME` is absolute, else `~/.local/share/sessionmaxxing`. Files: `queue.json`, `dispatch-settings.json`, `session-keeper.json`, `usage-snapshot.json`, `usage-samples.jsonl`, `restart-methods.json`, `runs/`, `restarts/`, `server.lock`. The Compose image mounts the home directory at the same path, so the container uses the same directory as a native run and the lock refuses the second server.
 - **One-time move.** A native start moves a `data/` directory found in its working directory to the data directory with one rename (`moveLegacyData`). It stops with a message naming both paths when the target exists, the legacy directory holds a `server.lock`, it is a symlink or file, the two paths are nested, or they sit on different filesystems (the message carries the `mv` command). Never merge, copy or delete. Never start a server with the live install's checkout as its working directory while its `data/` is still in place.
-- **Time zone.** The server's zone is the process's zone; `TZ` is validated at startup and a value the process did not apply stops it. `GET /api/environment` returns `{ timeZone, workdirRoot }`; the browser formats every time and day boundary in that zone, and analytics, the plan score and the dispatch hour walk take the zone as an argument. Docker sets it through `TZ` in `.env`.
+- **Time zone.** The server's zone is the process's zone; `TZ` is validated at startup and a value the process did not apply stops it. `GET /api/environment` returns `{ timeZone, workdirRoot, edition }`; the browser formats every time and day boundary in that zone, and analytics, the plan score and the dispatch hour walk take the zone as an argument. Docker sets it through `TZ` in `.env`.
 - **Host allowlist.** Requests are accepted when Host is `localhost`, `127.0.0.1`, the bind address, or an entry of `SESSIONMAXXING_ALLOWED_HOSTS` (names or IP literals, no port, path or wildcard); an Origin header must match `http://<Host>`. A wildcard bind (`0.0.0.0`, `::`) approves no address on its own. Compose passes the bind address plus the extra entries.
 
 ## Restart methods

@@ -12,7 +12,7 @@ pnpm build
 pnpm start
 ```
 
-Run these from the repository root; the server serves the build from `dist/client` relative to its working directory. It listens on http://127.0.0.1:4317. For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs).
+Run these from the repository root; the server serves the build from `dist/client` relative to its working directory. It listens on http://127.0.0.1:4317. For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs). The lite edition serves only `/queue/` and `/runs/`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -22,18 +22,32 @@ Run these from the repository root; the server serves the build from `dist/clien
 | `SESSIONMAXXING_DATA_DIR` | see Data directory | Absolute path of the data directory. |
 | `XDG_DATA_HOME` | `~/.local/share` | Absolute base for the default data directory. |
 | `SESSIONMAXXING_WORKDIR_ROOT` | the user's home | Absolute existing directory that task work directories must be under. |
-| `SESSIONMAXXING_EDITION` | `full` | Edition; `full` is the only value. |
+| `SESSIONMAXXING_EDITION` | `full` | Edition, `full` or `lite`. Any other value stops startup. |
 | `TZ` | the host's zone | IANA zone name. Day boundaries, quiet hours, the plan score and every chart follow it. |
 | `SESSIONMAXXING_URL` | `http://127.0.0.1:4317` | Server the `scripts/queue-task.mjs` helper contacts. |
 | `SESSIONMAXXING_PATH_MAP` | empty | `from=to[,from=to]` absolute path prefixes the helper rewrites `--workdir` through. |
 
-Work directories are accepted only under the running user's home; `SESSIONMAXXING_WORKDIR_ROOT` moves that boundary. The server stops at startup with a message when `TZ` is not an IANA zone the process applied. `GET /api/environment` returns the zone and the work-directory root, and the browser formats every time in that zone.
+Work directories are accepted only under the running user's home; `SESSIONMAXXING_WORKDIR_ROOT` moves that boundary. The server stops at startup with a message when `TZ` is not an IANA zone the process applied. `GET /api/environment` returns the zone, the work-directory root and the edition, and the browser formats every time in that zone.
 
 ## Data directory
 
 Runtime state lives in one directory, created with mode 0700: `SESSIONMAXXING_DATA_DIR` when set, else `$XDG_DATA_HOME/sessionmaxxing` when `XDG_DATA_HOME` is absolute, else `~/.local/share/sessionmaxxing`. Inside: `queue.json`, `dispatch-settings.json`, `restart-methods.json`, `session-keeper.json`, `usage-snapshot.json`, `usage-samples.jsonl`, `runs/`, `restarts/` and `server.lock`. The lock refuses a second server on the same directory.
 
 A native start finds a `data/` directory in its working directory and moves it to the data directory once, as one rename. Startup stops with a message naming both paths when the data directory already exists, a lock file is left inside `data`, `data` is a symlink or a file, the two paths are nested, or they sit on different filesystems; the last message carries the exact `mv` command. Nothing is merged, copied or deleted.
+
+## Lite edition
+
+The lite edition is the queue without the analysis. It serves the Queue and Runs pages; `/` opens the queue. Overview, Analytics, the plan score, token estimates, session-rate calibration and quiet hours are left out, and the Queue page opens with a usage strip showing session and weekly usage.
+
+A lite task is Ready when a run slot is free, the official snapshot is fresh, session usage plus the points held for running tasks is at or below `100 − session reserve`, and weekly usage plus its held points is at or below `pace + weekly margin` (hard cap 95%). Each running task holds `runSessionHoldPercent` session points (default 10%) and `runWeeklyCostPercent` weekly points. Tasks carry no token cost. Dependencies, repository locks, Run now, restart methods and the session keeper work as in the full edition.
+
+```sh
+SESSIONMAXXING_EDITION=lite pnpm start
+```
+
+For Docker, set `SESSIONMAXXING_EDITION=lite` in `.env`, then run `docker compose up -d --build`.
+
+A data directory started in one edition stays with it: a full start on lite data stops with a message naming `queue.json`, while a lite start loads full data and ignores the stored token costs.
 
 ## Official usage
 
@@ -48,7 +62,7 @@ Every snapshot is appended to `usage-samples.jsonl` in the data directory (90 da
 
 ## Auto-dispatch
 
-Queue tasks under **Task queue**. With the queue on, the server runs up to *Tasks running at once* **Ready** tasks together (default 2, at most 4; 1 keeps the old one-at-a-time behaviour). The on/off state is stored in `queue.json` and survives restarts; every task still running at a restart is marked failed. A Claude task is Ready when a run slot is free, the official snapshot is fresh (under 15 min) and newer than the last finished run, session usage plus the points held for running Claude tasks is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage plus its held points is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. A Claude run that Claude Code stops at the session or weekly limit puts its task back in line; once the window resets and the gate passes, the next run resumes the same Claude session instead of starting over. **Run now** overrides the usage gate and the schedule, never the slot limit or a busy repository. Settings live in `dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ autoApply, keepSessionActive, sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours, maxConcurrentRuns, runWeeklyCostPercent }`.
+Queue tasks under **Task queue**. With the queue on, the server runs up to *Tasks running at once* **Ready** tasks together (default 2, at most 4; 1 keeps the old one-at-a-time behaviour). The on/off state is stored in `queue.json` and survives restarts; every task still running at a restart is marked failed. A Claude task is Ready when a run slot is free, the official snapshot is fresh (under 15 min) and newer than the last finished run, session usage plus the points held for running Claude tasks is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage plus its held points is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. A Claude run that Claude Code stops at the session or weekly limit puts its task back in line; once the window resets and the gate passes, the next run resumes the same Claude session instead of starting over. **Run now** overrides the usage gate and the schedule, never the slot limit or a busy repository. Settings live in `dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ autoApply, keepSessionActive, sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours, maxConcurrentRuns, runWeeklyCostPercent, runSessionHoldPercent }`.
 
 With **Start each 5-hour session automatically** on, the server opens a new session window as soon as the previous one ends by running a one-turn `claude -p hi` from the home directory and letting it exit. This is separate from the queue: it needs no task and ignores the queue switch and the reserves. It waits for a fresh usage snapshot after each ping and at least ten minutes between pings, skips while a Claude task is running, and stops when the weekly window is at 100%. Ping session ids live in `session-keeper.json`.
 
@@ -79,10 +93,11 @@ It prints session and weekly usage, the quiet start hours, and the Claude gate r
 
 ## API
 
-- `GET /api/analytics?days=7|14|30|90` local activity aggregates plus per-bucket local windows.
+- `GET /api/analytics?days=7|14|30|90` local activity aggregates plus per-bucket local windows (full edition only).
+- `GET /api/plan-score` session coverage and weekly score (full edition only).
 - `GET /api/usage` `{ snapshot, error, samples, windows }`; `POST /api/usage/refresh` fetches now.
 - `GET|PUT /api/dispatch-settings` settings plus the planning snapshot (per-bucket gates and the Claude gate status and reason).
-- `GET /api/environment` `{ timeZone, workdirRoot }`.
+- `GET /api/environment` `{ timeZone, workdirRoot, edition }`.
 - `GET /api/queue`, `POST /api/tasks`, `PATCH|DELETE /api/tasks/:id`, `POST /api/tasks/:id/run|cancel|retry`, `PUT /api/queue/order`, `PUT /api/queue/auto`, `GET /api/runs`.
 - `GET|PUT /api/restart-methods` the restart method of one work directory: `GET ?workdir=<path>` returns `{ method }`, `PUT { workdir, method }` sets it.
 
@@ -106,7 +121,7 @@ docker compose up -d --build
 | `SESSIONMAXXING_HOME` | Your home directory; mounted at the same path in the container |
 | `SESSIONMAXXING_BIND_ADDRESS` | Address Docker publishes on; `127.0.0.1` keeps the dashboard on this machine |
 | `SESSIONMAXXING_PORT` | Published port, `4317` |
-| `SESSIONMAXXING_EDITION` | `full` |
+| `SESSIONMAXXING_EDITION` | `full` or `lite` |
 | `TZ` | IANA zone name such as `Europe/Berlin`; the container's zone |
 | `SESSIONMAXXING_ALLOWED_HOSTS` | Extra host names or addresses clients type; may stay empty |
 
