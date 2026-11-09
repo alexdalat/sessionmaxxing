@@ -634,6 +634,7 @@ it("loads dispatch settings saved before concurrency existed and fills the new k
       ...legacy,
       maxConcurrentRuns: 2,
       runWeeklyCostPercent: 3,
+      runSessionHoldPercent: 10,
     });
     expect(JSON.parse(await readFile(path, "utf8"))).toEqual(migrated);
     const custom = {

@@ -642,6 +642,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
         quietStartHours: 8,
         maxConcurrentRuns: 1,
         runWeeklyCostPercent: 3,
+        runSessionHoldPercent: 15,
       },
     });
     expect(saved.json().gate.status).toBe("waiting");
@@ -659,6 +660,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
       quietStartHours: 8,
       maxConcurrentRuns: 1,
       runWeeklyCostPercent: 3,
+      runSessionHoldPercent: 15,
     });
     const valid = {
       autoApply: false,
@@ -669,6 +671,7 @@ it("serves official usage with sample history, refreshes on demand, and validate
       quietStartHours: 8,
       maxConcurrentRuns: 2,
       runWeeklyCostPercent: 3,
+      runSessionHoldPercent: 10,
     };
     for (const payload of [
       { ...valid, sessionReservePercent: 91 },
@@ -1032,6 +1035,7 @@ it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
       quietStartHours: 6,
       maxConcurrentRuns: 2,
       runWeeklyCostPercent: 3,
+      runSessionHoldPercent: 10,
     });
     expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
     await writeFile(path, JSON.stringify({ ...legacy, quietHoursOnly: false }));
@@ -1044,6 +1048,7 @@ it("migrates a saved quiet-hours flag into a busy-hours reserve", async () => {
       quietStartHours: 6,
       maxConcurrentRuns: 2,
       runWeeklyCostPercent: 3,
+      runSessionHoldPercent: 10,
     });
     expect(await readFile(path, "utf8")).not.toMatch(/quietHoursOnly/);
   } finally {

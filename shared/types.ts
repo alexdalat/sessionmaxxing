@@ -463,6 +463,8 @@ export interface DispatchSettings {
   maxConcurrentRuns: number;
   /** Weekly (and Fable weekly) points one Claude run is expected to consume. */
   runWeeklyCostPercent: number;
+  /** Session points each running lite task holds; the full edition ignores it. */
+  runSessionHoldPercent: number;
 }
 export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   autoApply: false,
@@ -473,6 +475,7 @@ export const DEFAULT_DISPATCH_SETTINGS: DispatchSettings = {
   quietStartHours: 8,
   maxConcurrentRuns: 2,
   runWeeklyCostPercent: 3,
+  runSessionHoldPercent: 10,
 };
 export const MAX_SESSION_RESERVE_PERCENT = 90;
 export const MAX_BUSY_HOURS_RESERVE_PERCENT = 100;

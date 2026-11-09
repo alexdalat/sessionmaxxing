@@ -460,6 +460,7 @@ it("loads the live dispatch settings unchanged without rewriting the file", asyn
       quietStartHours: 8,
       maxConcurrentRuns: 1,
       runWeeklyCostPercent: 3,
+      runSessionHoldPercent: 10,
     };
     const path = `${temp.path}/dispatch-settings.json`;
     const text = JSON.stringify(settings, null, 2);

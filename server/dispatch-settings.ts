@@ -21,6 +21,7 @@ const KEYS = [
   "quietStartHours",
   "maxConcurrentRuns",
   "runWeeklyCostPercent",
+  "runSessionHoldPercent",
 ] as const;
 function numeric(value: unknown, max: number) {
   return (
@@ -46,10 +47,11 @@ export function validateSettings(
     !Number.isInteger(value.maxConcurrentRuns) ||
     !numeric(value.maxConcurrentRuns, MAX_CONCURRENT_RUNS) ||
     (value.maxConcurrentRuns as number) < 1 ||
-    !numeric(value.runWeeklyCostPercent, MAX_RUN_COST_PERCENT)
+    !numeric(value.runWeeklyCostPercent, MAX_RUN_COST_PERCENT) ||
+    !numeric(value.runSessionHoldPercent, MAX_RUN_COST_PERCENT)
   )
     throw new DomainError(
-      `Dispatch settings need an apply override flag, a session keeper flag, a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, 1 to ${MAX_QUIET_START_HOURS} quiet start hours, 1 to ${MAX_CONCURRENT_RUNS} concurrent runs, and a weekly run cost from 0 to ${MAX_RUN_COST_PERCENT}%.`,
+      `Dispatch settings need an apply override flag, a session keeper flag, a session reserve from 0 to ${MAX_SESSION_RESERVE_PERCENT}%, a busy-hours reserve from 0 to ${MAX_BUSY_HOURS_RESERVE_PERCENT}%, a weekly margin from 0 to ${MAX_WEEKLY_MARGIN_PERCENT}%, 1 to ${MAX_QUIET_START_HOURS} quiet start hours, 1 to ${MAX_CONCURRENT_RUNS} concurrent runs, a weekly run cost from 0 to ${MAX_RUN_COST_PERCENT}%, and a session hold from 0 to ${MAX_RUN_COST_PERCENT}%.`,
       400,
     );
 }
@@ -86,6 +88,11 @@ export const settingsSchema = {
       maximum: MAX_CONCURRENT_RUNS,
     },
     runWeeklyCostPercent: {
+      type: "number",
+      minimum: 0,
+      maximum: MAX_RUN_COST_PERCENT,
+    },
+    runSessionHoldPercent: {
       type: "number",
       minimum: 0,
       maximum: MAX_RUN_COST_PERCENT,

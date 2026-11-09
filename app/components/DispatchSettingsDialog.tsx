@@ -104,20 +104,20 @@ export function DispatchSettingsDialog({
             setBusy(true);
             setError("");
             try {
+              const body: DispatchSettings = {
+                autoApply: draft.autoApply,
+                keepSessionActive: draft.keepSessionActive,
+                sessionReservePercent: Number(draft.sessionReservePercent),
+                busyHoursReservePercent: Number(draft.busyHoursReservePercent),
+                weeklyMarginPercent: Number(draft.weeklyMarginPercent),
+                quietStartHours: Number(draft.quietStartHours),
+                maxConcurrentRuns: Number(draft.maxConcurrentRuns),
+                runWeeklyCostPercent: Number(draft.runWeeklyCostPercent),
+                runSessionHoldPercent: settings.runSessionHoldPercent,
+              };
               await api<PlanningSnapshot>("/api/dispatch-settings", {
                 method: "PUT",
-                body: JSON.stringify({
-                  autoApply: draft.autoApply,
-                  keepSessionActive: draft.keepSessionActive,
-                  sessionReservePercent: Number(draft.sessionReservePercent),
-                  busyHoursReservePercent: Number(
-                    draft.busyHoursReservePercent,
-                  ),
-                  weeklyMarginPercent: Number(draft.weeklyMarginPercent),
-                  quietStartHours: Number(draft.quietStartHours),
-                  maxConcurrentRuns: Number(draft.maxConcurrentRuns),
-                  runWeeklyCostPercent: Number(draft.runWeeklyCostPercent),
-                }),
+                body: JSON.stringify(body),
               });
               onSaved();
               onClose();

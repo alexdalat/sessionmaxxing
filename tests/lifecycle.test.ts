@@ -55,6 +55,7 @@ it("uses the persistent runtime data directory for dispatch settings and usage s
         quietStartHours: 6,
         maxConcurrentRuns: 2,
         runWeeklyCostPercent: 3,
+        runSessionHoldPercent: 10,
       },
     });
     expect(response.statusCode).toBe(200);
