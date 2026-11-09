@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useId, useState } from "react";
+import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Button } from "@/app/components/ui/button";
 import {
   Dialog,
@@ -66,7 +67,113 @@ const draftFrom = (settings: DispatchSettings) => ({
   quietStartHours: String(settings.quietStartHours),
   maxConcurrentRuns: String(settings.maxConcurrentRuns),
   runWeeklyCostPercent: String(settings.runWeeklyCostPercent),
+  runSessionHoldPercent: String(settings.runSessionHoldPercent),
 });
+
+type Draft = ReturnType<typeof draftFrom>;
+
+interface NumberFieldSpec {
+  key: keyof Omit<Draft, "autoApply" | "keepSessionActive">;
+  label: string;
+  min: number;
+  max: number;
+  step: number | "any";
+}
+
+const SESSION_RESERVE_LITE: NumberFieldSpec = {
+  key: "sessionReservePercent",
+  label: "Session kept for you (%)",
+  min: 0,
+  max: MAX_SESSION_RESERVE_PERCENT,
+  step: "any",
+};
+const SESSION_RESERVE_FULL: NumberFieldSpec = {
+  ...SESSION_RESERVE_LITE,
+  label: "Session kept for you in quiet hours (%)",
+};
+const SESSION_HOLD: NumberFieldSpec = {
+  key: "runSessionHoldPercent",
+  label: "Session held per running Claude task (%)",
+  min: 0,
+  max: MAX_RUN_COST_PERCENT,
+  step: "any",
+};
+const BUSY_RESERVE: NumberFieldSpec = {
+  key: "busyHoursReservePercent",
+  label: "Session kept for you outside quiet hours (%)",
+  min: 0,
+  max: MAX_BUSY_HOURS_RESERVE_PERCENT,
+  step: "any",
+};
+const WEEKLY_MARGIN: NumberFieldSpec = {
+  key: "weeklyMarginPercent",
+  label: "Weekly margin above pace (%)",
+  min: 0,
+  max: MAX_WEEKLY_MARGIN_PERCENT,
+  step: "any",
+};
+const QUIET_START_HOURS: NumberFieldSpec = {
+  key: "quietStartHours",
+  label: "Quiet start hours per day",
+  min: 1,
+  max: MAX_QUIET_START_HOURS,
+  step: 1,
+};
+const CONCURRENT_RUNS: NumberFieldSpec = {
+  key: "maxConcurrentRuns",
+  label: "Tasks running at once",
+  min: 1,
+  max: MAX_CONCURRENT_RUNS,
+  step: 1,
+};
+const WEEKLY_HOLD: NumberFieldSpec = {
+  key: "runWeeklyCostPercent",
+  label: "Weekly held per running Claude task (%)",
+  min: 0,
+  max: MAX_RUN_COST_PERCENT,
+  step: "any",
+};
+
+const FULL_FIELDS = [
+  SESSION_RESERVE_FULL,
+  BUSY_RESERVE,
+  WEEKLY_MARGIN,
+  QUIET_START_HOURS,
+  CONCURRENT_RUNS,
+  WEEKLY_HOLD,
+];
+const LITE_FIELDS = [
+  SESSION_RESERVE_LITE,
+  SESSION_HOLD,
+  WEEKLY_MARGIN,
+  WEEKLY_HOLD,
+  CONCURRENT_RUNS,
+];
+
+function QuietHoursField({
+  open,
+  allowed,
+}: {
+  open: boolean;
+  allowed: number;
+}) {
+  const quiet = useQuietOpportunities(open);
+  return (
+    <div className="full">
+      <span className="field-label">Quiet hours</span>
+      {quiet.error ? (
+        <p role="alert" className="error">
+          {quiet.error}
+        </p>
+      ) : (
+        <QuietHoursStrip
+          opportunities={quiet.opportunities}
+          allowed={allowed}
+        />
+      )}
+    </div>
+  );
+}
 
 export function DispatchSettingsDialog({
   open,
@@ -80,10 +187,10 @@ export function DispatchSettingsDialog({
   onSaved: () => void;
 }) {
   const fieldId = useId();
+  const { edition } = useEnvironment();
   const [draft, setDraft] = useState(() => draftFrom(settings));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const quiet = useQuietOpportunities(open);
   return (
     <Dialog
       open={open}
@@ -113,7 +220,7 @@ export function DispatchSettingsDialog({
                 quietStartHours: Number(draft.quietStartHours),
                 maxConcurrentRuns: Number(draft.maxConcurrentRuns),
                 runWeeklyCostPercent: Number(draft.runWeeklyCostPercent),
-                runSessionHoldPercent: settings.runSessionHoldPercent,
+                runSessionHoldPercent: Number(draft.runSessionHoldPercent),
               };
               await api<PlanningSnapshot>("/api/dispatch-settings", {
                 method: "PUT",
@@ -135,123 +242,25 @@ export function DispatchSettingsDialog({
           )}
           <fieldset disabled={busy} className="guardrail-fields">
             <div className="form-grid">
-              <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-session-reserve`}>
-                  Session kept for you in quiet hours (%)
-                </Label>
-                <Input
-                  id={`${fieldId}-session-reserve`}
-                  type="number"
-                  min={0}
-                  max={MAX_SESSION_RESERVE_PERCENT}
-                  step="any"
-                  required
-                  value={draft.sessionReservePercent}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      sessionReservePercent: event.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-busy-reserve`}>
-                  Session kept for you outside quiet hours (%)
-                </Label>
-                <Input
-                  id={`${fieldId}-busy-reserve`}
-                  type="number"
-                  min={0}
-                  max={MAX_BUSY_HOURS_RESERVE_PERCENT}
-                  step="any"
-                  required
-                  value={draft.busyHoursReservePercent}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      busyHoursReservePercent: event.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-weekly-margin`}>
-                  Weekly margin above pace (%)
-                </Label>
-                <Input
-                  id={`${fieldId}-weekly-margin`}
-                  type="number"
-                  min={0}
-                  max={MAX_WEEKLY_MARGIN_PERCENT}
-                  step="any"
-                  required
-                  value={draft.weeklyMarginPercent}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      weeklyMarginPercent: event.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-quiet-hours`}>
-                  Quiet start hours per day
-                </Label>
-                <Input
-                  id={`${fieldId}-quiet-hours`}
-                  type="number"
-                  min={1}
-                  max={MAX_QUIET_START_HOURS}
-                  step={1}
-                  required
-                  value={draft.quietStartHours}
-                  onChange={(event) =>
-                    setDraft({ ...draft, quietStartHours: event.target.value })
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-concurrent-runs`}>
-                  Tasks running at once
-                </Label>
-                <Input
-                  id={`${fieldId}-concurrent-runs`}
-                  type="number"
-                  min={1}
-                  max={MAX_CONCURRENT_RUNS}
-                  step={1}
-                  required
-                  value={draft.maxConcurrentRuns}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      maxConcurrentRuns: event.target.value,
-                    })
-                  }
-                />
-              </div>
-              <div className="grid gap-1.5">
-                <Label htmlFor={`${fieldId}-weekly-cost`}>
-                  Weekly held per running Claude task (%)
-                </Label>
-                <Input
-                  id={`${fieldId}-weekly-cost`}
-                  type="number"
-                  min={0}
-                  max={MAX_RUN_COST_PERCENT}
-                  step="any"
-                  required
-                  value={draft.runWeeklyCostPercent}
-                  onChange={(event) =>
-                    setDraft({
-                      ...draft,
-                      runWeeklyCostPercent: event.target.value,
-                    })
-                  }
-                />
-              </div>
+              {(edition === "full" ? FULL_FIELDS : LITE_FIELDS).map((field) => (
+                <div key={field.key} className="grid gap-1.5">
+                  <Label htmlFor={`${fieldId}-${field.key}`}>
+                    {field.label}
+                  </Label>
+                  <Input
+                    id={`${fieldId}-${field.key}`}
+                    type="number"
+                    min={field.min}
+                    max={field.max}
+                    step={field.step}
+                    required
+                    value={draft[field.key]}
+                    onChange={(event) =>
+                      setDraft({ ...draft, [field.key]: event.target.value })
+                    }
+                  />
+                </div>
+              ))}
               <div className="full">
                 <span className="field-label">
                   Apply and restart without review
@@ -289,19 +298,12 @@ export function DispatchSettingsDialog({
                   {draft.keepSessionActive ? "On" : "Off"}
                 </Button>
               </div>
-              <div className="full">
-                <span className="field-label">Quiet hours</span>
-                {quiet.error ? (
-                  <p role="alert" className="error">
-                    {quiet.error}
-                  </p>
-                ) : (
-                  <QuietHoursStrip
-                    opportunities={quiet.opportunities}
-                    allowed={Number(draft.quietStartHours)}
-                  />
-                )}
-              </div>
+              {edition === "full" && (
+                <QuietHoursField
+                  open={open}
+                  allowed={Number(draft.quietStartHours)}
+                />
+              )}
             </div>
           </fieldset>
           <div className="actions">
