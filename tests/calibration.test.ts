@@ -87,6 +87,24 @@ it("prices a family off the fitted one rather than trust a fit from a sliver of 
   expect(rates.sonnet).toBe(round(rates.opus * 0.4));
 });
 
+it("fits a plan whose windows hold far fewer than a million weighted tokens", () => {
+  const rates = fitSessionRates([
+    { peakPercent: 40, tokens: tokens({ opus: 20_000 }) },
+    { peakPercent: 60, tokens: tokens({ opus: 30_000 }) },
+  ]);
+  expect(rates).toEqual({ fable: 4000, opus: 2000, sonnet: 800, haiku: 400 });
+});
+
+it("caps a cheaper family's fitted rate at its list-price ratio to the anchor", () => {
+  const rates = fitSessionRates([
+    { peakPercent: 40, tokens: tokens({ opus: 10_000_000 }) },
+    { peakPercent: 30, tokens: tokens({ haiku: 3_000_000 }) },
+    { peakPercent: 60, tokens: tokens({ opus: 15_000_000 }) },
+  ]);
+  if (rates === null) throw new Error("opus should fit");
+  expect(rates.haiku).toBe(round(rates.opus * 0.2));
+});
+
 /** Windows whose halves all stay inside the fitted range, so only the plan changes. */
 const scalable: WindowTokens[] = [
   { peakPercent: 80, tokens: tokens({ fable: 1_000_000, opus: 300_000 }) },

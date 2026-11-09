@@ -18,8 +18,11 @@ const MILLION = 1_000_000;
 const FULL_PERCENT = 100;
 /** Below this peak the meter's own rounding is a large share of the reading. */
 const MIN_PEAK_PERCENT = 8;
-/** Weighted tokens a family needs across the sample before its own fitted rate is trusted. */
-const MIN_FAMILY_TOKENS = 1_000_000;
+/**
+ * Share of the sample's weighted tokens a family needs before its own fitted rate is
+ * trusted; a share, so a smaller plan with fewer tokens per window still calibrates.
+ */
+const MIN_FAMILY_SHARE = 0.1;
 /** The ratio a family with too little usage is priced at. */
 const familyPrice = (family: ModelFamily) =>
   FAMILY_PRICING[family].outputTokens;
@@ -107,8 +110,9 @@ export function fitSessionRates(windows: WindowTokens[]): SessionRates | null {
   const mass = MODEL_FAMILIES.map((_family, index) =>
     rows.reduce((sum, row) => sum + row.millions[index], 0),
   );
+  const totalMass = mass.reduce((sum, each) => sum + each, 0);
   const fittedIndexes = MODEL_FAMILIES.map((_family, index) => index).filter(
-    (index) => fitted[index] > 0 && mass[index] * MILLION >= MIN_FAMILY_TOKENS,
+    (index) => fitted[index] > 0 && mass[index] >= totalMass * MIN_FAMILY_SHARE,
   );
   if (fittedIndexes.length === 0) return null;
   const anchor = fittedIndexes.reduce((best, index) =>
@@ -116,12 +120,15 @@ export function fitSessionRates(windows: WindowTokens[]): SessionRates | null {
   );
   const anchorPrice = familyPrice(MODEL_FAMILIES[anchor]);
   const rates = {} as SessionRates;
+  // A cheaper family's small sample soaks up usage the transcripts never saw (claude.ai
+  // chat, other devices), so its rate is capped at its list-price ratio to the anchor.
   MODEL_FAMILIES.forEach((family, index) => {
-    rates[family] = round(
-      fittedIndexes.includes(index)
-        ? fitted[index]
-        : (fitted[anchor] * familyPrice(family)) / anchorPrice,
-    );
+    const listRate = (fitted[anchor] * familyPrice(family)) / anchorPrice;
+    const ownRate =
+      familyPrice(family) < anchorPrice
+        ? Math.min(fitted[index], listRate)
+        : fitted[index];
+    rates[family] = round(fittedIndexes.includes(index) ? ownRate : listRate);
   });
   return rates;
 }
