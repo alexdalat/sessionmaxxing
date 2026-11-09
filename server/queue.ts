@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import {
   DEFAULT_MODEL,
+  type Edition,
   type ModelFamily,
   modelFamily,
   type PublicTask,
@@ -93,8 +94,13 @@ export class QueueStore {
     private path: string,
     private state: QueueState,
     readonly workdirRoot: string,
+    readonly edition: Edition,
   ) {}
-  static async open(directory: string, workdirRoot: string) {
+  static async open(
+    directory: string,
+    workdirRoot: string,
+    edition: Edition = "full",
+  ) {
     const path = join(directory, "queue.json");
     let state: QueueState;
     try {
@@ -132,7 +138,7 @@ export class QueueStore {
       const persisted: {
         sessionCostPercent?: number;
         outputTokens?: number;
-        tokens?: number;
+        tokens?: number | null;
         finishedAt?: string | null;
         dependsOn?: string[];
       } = task;
@@ -168,7 +174,7 @@ export class QueueStore {
         persisted.finishedAt = null;
         migrated = true;
       }
-      validateFields(task);
+      validateFields(task, edition);
       if (
         !TASK_ID.test(task.id) ||
         ids.has(task.id) ||
@@ -196,7 +202,7 @@ export class QueueStore {
         if (task.status === "running") task.status = "failed";
       await atomicJson(path, state);
     }
-    return new QueueStore(path, state, workdirRoot);
+    return new QueueStore(path, state, workdirRoot, edition);
   }
   snapshot(): QueueSnapshot {
     return {
@@ -226,7 +232,7 @@ export class QueueStore {
     return operation;
   }
   async create(input: StoredTaskInput) {
-    validateFields(input);
+    validateFields(input, this.edition);
     const workdir = await validateWorkdir(input.workdir, this.workdirRoot);
     return this.transact((state) => {
       const taskId = id();
@@ -256,7 +262,7 @@ export class QueueStore {
       if (task.status !== "pending")
         throw new DomainError("Only pending tasks can be edited.");
       const updated = { ...task, ...patch };
-      validateFields(updated);
+      validateFields(updated, this.edition);
       validateDependencies(state, task.id, updated.dependsOn);
       updated.workdir = await validateWorkdir(
         updated.workdir,

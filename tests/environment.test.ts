@@ -32,18 +32,20 @@ it.each(["", "localhost", "0.0.0.0 ", "192.0.2.10:4317", "example.test"])(
   },
 );
 
-it.each([[{}], [{ [EDITION]: "full" }]])(
-  "resolves the edition from %j to full",
-  (env) => {
-    expect(resolveEdition(env)).toBe("full");
-  },
-);
-it.each(["lite", "", "FULL"])(
-  "rejects SESSIONMAXXING_EDITION=%j naming the variable",
+it.each([
+  [{}, "full"],
+  [{ [EDITION]: "full" }, "full"],
+  [{ [EDITION]: "lite" }, "lite"],
+])("resolves the edition from %j to %s", (env, edition) => {
+  expect(resolveEdition(env)).toBe(edition);
+});
+it.each(["", "FULL", "enterprise"])(
+  "rejects SESSIONMAXXING_EDITION=%j naming the variable and both editions",
   (edition) => {
     const attempt = () => resolveEdition({ [EDITION]: edition });
     expect(attempt).toThrow(DomainError);
     expect(attempt).toThrow(EDITION);
+    expect(attempt).toThrow(/full.*lite/);
   },
 );
 

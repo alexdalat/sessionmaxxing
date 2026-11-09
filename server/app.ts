@@ -5,6 +5,7 @@ import fastifyStatic from "@fastify/static";
 import Fastify, { type FastifyError } from "fastify";
 import {
   type DispatchSettings,
+  type Edition,
   EMPTY_LOAD,
   type Environment,
   type HistoryData,
@@ -59,6 +60,8 @@ export interface AppOptions {
   /** IANA zone the server resolved from TZ. */
   timeZone: string;
   staticRoot?: string;
+  /** Defaults to full; startDashboard always passes it. */
+  edition?: Edition;
   /** Host names and addresses accepted besides localhost and 127.0.0.1. */
   allowedHosts?: readonly string[];
   queue?: QueueStore;
@@ -80,16 +83,19 @@ export async function createApp(options: AppOptions) {
     bodyLimit: 128 * 1024,
     ajv: { customOptions: { removeAdditional: false, coerceTypes: false } },
   });
+  const edition = options.edition ?? "full";
   const loadHistory =
-    options.loadHistory ??
-    createHistoryReader(
-      join(homedir(), ".claude"),
-      () =>
-        new Set<string>([
-          ...(options.runner?.dispatchedSessions() ?? []),
-          ...(options.keeper?.sessions() ?? []),
-        ]),
-    );
+    edition === "full"
+      ? (options.loadHistory ??
+        createHistoryReader(
+          join(homedir(), ".claude"),
+          () =>
+            new Set<string>([
+              ...(options.runner?.dispatchedSessions() ?? []),
+              ...(options.keeper?.sessions() ?? []),
+            ]),
+        ))
+      : undefined;
   const now = () => options.now?.() ?? new Date();
   const approvedHost = hostMatcher(options.allowedHosts ?? []);
   app.addHook("onRequest", async (request, reply) => {
@@ -134,36 +140,38 @@ export async function createApp(options: AppOptions) {
           : "The request could not be processed.",
     });
   });
-  app.get<{ Querystring: { days?: string } }>(
-    "/api/analytics",
-    {
-      schema: {
-        querystring: {
-          type: "object",
-          additionalProperties: false,
-          properties: {
-            days: {
-              type: "string",
-              enum: ["7", "14", "30", "90"],
-              default: "30",
+  if (loadHistory)
+    app.get<{ Querystring: { days?: string } }>(
+      "/api/analytics",
+      {
+        schema: {
+          querystring: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              days: {
+                type: "string",
+                enum: ["7", "14", "30", "90"],
+                default: "30",
+              },
             },
           },
         },
       },
-    },
-    async (request) =>
-      aggregate(
-        await loadHistory(),
-        Number(request.query.days ?? 30) as RangeDays,
-        options.timeZone,
-        now(),
-        options.usage?.current().snapshot ?? null,
-      ),
-  );
+      async (request) =>
+        aggregate(
+          await loadHistory(),
+          Number(request.query.days ?? 30) as RangeDays,
+          options.timeZone,
+          now(),
+          options.usage?.current().snapshot ?? null,
+        ),
+    );
   if (options.usage) {
     const usage = options.usage;
     const usageReport = async () => {
       const report = usage.report();
+      if (!loadHistory) return report;
       return {
         ...report,
         windows: mergeSessionWindows(
@@ -178,17 +186,18 @@ export async function createApp(options: AppOptions) {
       { schema: { querystring: emptyQuerySchema } },
       usageReport,
     );
-    app.get(
-      "/api/plan-score",
-      { schema: { querystring: emptyQuerySchema } },
-      async () =>
-        planScore(
-          usage.samples(now()),
-          now(),
-          (await loadHistory()).events,
-          options.timeZone,
-        ),
-    );
+    if (loadHistory)
+      app.get(
+        "/api/plan-score",
+        { schema: { querystring: emptyQuerySchema } },
+        async () =>
+          planScore(
+            usage.samples(now()),
+            now(),
+            (await loadHistory()).events,
+            options.timeZone,
+          ),
+      );
     app.post(
       "/api/usage/refresh",
       { schema: { querystring: emptyQuerySchema } },
@@ -199,7 +208,7 @@ export async function createApp(options: AppOptions) {
     );
   }
   let planning: (() => PlanningSnapshot) | undefined;
-  if (options.settings && options.usage) {
+  if (loadHistory && options.settings && options.usage) {
     const { settings, usage } = options;
     const quiet = new QuietHoursCache(
       async () =>
@@ -258,16 +267,17 @@ export async function createApp(options: AppOptions) {
     app.get<{ Reply: Environment }>(
       "/api/environment",
       { schema: { querystring: emptyQuerySchema } },
-      async () => ({ timeZone: options.timeZone, workdirRoot }),
+      async () => ({ timeZone: options.timeZone, workdirRoot, edition }),
     );
   }
   if (options.queue && options.runner)
     registerQueueRoutes(
       app,
+      edition,
       options.queue,
       options.runner,
       now,
-      options.estimate ?? estimateTokens,
+      edition === "full" ? (options.estimate ?? estimateTokens) : undefined,
       options.suggestCommit ?? suggestCommitMessage,
       planning,
       options.keeper,

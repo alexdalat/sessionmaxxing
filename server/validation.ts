@@ -2,10 +2,12 @@ import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative, sep } from "node:path";
 import {
   AUTO_TOKENS,
+  type Edition,
   MAX_DEPENDENCIES,
   MAX_TOKENS,
   MIN_TOKENS,
   type TaskInput,
+  type TokensInput,
 } from "../shared/types.js";
 import { DomainError } from "./storage.js";
 
@@ -30,7 +32,16 @@ export async function validateWorkdir(path: string, root: string) {
   }
   return canonical;
 }
-export function validateFields(input: TaskInput) {
+export const TOKENS_MESSAGE = `Tokens must be an integer from ${MIN_TOKENS} to ${MAX_TOKENS}, or "auto".`;
+const tokensInRange = (tokens: unknown) =>
+  typeof tokens === "number" &&
+  Number.isInteger(tokens) &&
+  tokens >= MIN_TOKENS &&
+  tokens <= MAX_TOKENS;
+export function validateFields(
+  input: Omit<TaskInput, "tokens"> & { tokens?: TokensInput | null },
+  edition: Edition,
+) {
   if (
     typeof input.title !== "string" ||
     !input.title.trim() ||
@@ -70,16 +81,11 @@ export function validateFields(input: TaskInput) {
       "Maximum turns must be an integer from 1 to 1000.",
       400,
     );
-  if (
-    input.tokens !== AUTO_TOKENS &&
-    (!Number.isInteger(input.tokens) ||
-      input.tokens < MIN_TOKENS ||
-      input.tokens > MAX_TOKENS)
-  )
-    throw new DomainError(
-      `Tokens must be an integer from ${MIN_TOKENS} to ${MAX_TOKENS}, or "auto".`,
-      400,
-    );
+  const tokensAllowed =
+    edition === "full"
+      ? input.tokens === AUTO_TOKENS || tokensInRange(input.tokens)
+      : input.tokens == null || tokensInRange(input.tokens);
+  if (!tokensAllowed) throw new DomainError(TOKENS_MESSAGE, 400);
   if (
     !Array.isArray(input.dependsOn) ||
     input.dependsOn.length > MAX_DEPENDENCIES ||

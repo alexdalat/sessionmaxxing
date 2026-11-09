@@ -1,6 +1,7 @@
 import { realpath, stat } from "node:fs/promises";
 import { isIP, isIPv6 } from "node:net";
 import { isAbsolute } from "node:path";
+import { EDITIONS, type Edition } from "../shared/types.js";
 import type { Env } from "./data-directory.js";
 import { DomainError } from "./storage.js";
 
@@ -26,14 +27,16 @@ export function resolveHost(env: Env) {
   return host;
 }
 
-export function resolveEdition(env: Env) {
+export function resolveEdition(env: Env): Edition {
   const edition = env[EDITION_VARIABLE];
-  if (edition !== undefined && edition !== "full")
+  if (edition === undefined) return "full";
+  const known = EDITIONS.find((candidate) => candidate === edition);
+  if (known === undefined)
     throw new DomainError(
-      `${EDITION_VARIABLE} must be full; only the full edition exists yet.`,
+      `${EDITION_VARIABLE} must be ${EDITIONS.join(" or ")}.`,
       400,
     );
-  return "full";
+  return known;
 }
 
 export function resolveDockerInstall(env: Env) {

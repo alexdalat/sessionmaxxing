@@ -30,6 +30,7 @@ import {
 } from "../shared/types.js";
 import { modelSessionPercent, type SessionCalibration } from "./calibration.js";
 import type { QuietRanking } from "./quiet-hours.js";
+import { DomainError } from "./storage.js";
 
 const MINUTE_MS = 60_000;
 const WEEK_MS = WEEK_MINUTES * MINUTE_MS;
@@ -311,6 +312,16 @@ type GateTask = Pick<
 >;
 type RunCost = Pick<Run, "taskId" | "status" | "sessionCostPercent">;
 
+/** The task's token cost; only a full-edition task has one. */
+export function requiredTokens(task: Pick<Task, "tokens">): number {
+  if (task.tokens === null)
+    throw new DomainError(
+      "This task has no token cost, and the full edition needs one.",
+      500,
+    );
+  return task.tokens;
+}
+
 /**
  * The largest session percent this task's earlier completed runs cost, or its
  * expected tokens priced at the current rates; null while the rates are unknown.
@@ -334,7 +345,7 @@ export function expectedSessionCost(
   if (largest !== null) return largest;
   return rates === null
     ? null
-    : modelSessionPercent(task.tokens, task.model, rates);
+    : modelSessionPercent(requiredTokens(task), task.model, rates);
 }
 
 /** A task larger than the whole cutoff never fits a window, so it waits for an empty one instead of waiting forever. */

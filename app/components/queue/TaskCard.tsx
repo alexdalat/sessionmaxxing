@@ -56,12 +56,14 @@ export function TaskCard({
         <div className="task-schedule">
           <span>Priority {task.priority}</span>
           <span>max {task.maxTurns} turns</span>
-          <span>
-            {formatTokens(task.tokens)} tokens
-            {task.sessionCostPercent === null
-              ? ""
-              : ` · ${task.sessionCostPercent}%`}
-          </span>
+          {task.tokens !== null && (
+            <span>
+              {formatTokens(task.tokens)} tokens
+              {task.sessionCostPercent === null
+                ? ""
+                : ` · ${task.sessionCostPercent}%`}
+            </span>
+          )}
           <span>
             {task.preferredWindowStart === null
               ? "Any hour"

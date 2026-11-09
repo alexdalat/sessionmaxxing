@@ -4,6 +4,7 @@ import {
   AUTO_TOKENS,
   COMMIT_MESSAGE_MAX,
   DEFAULT_MODEL,
+  type Edition,
   MAX_DEPENDENCIES,
   MAX_TOKENS,
   MIN_TOKENS,
@@ -27,7 +28,7 @@ import { validateRestartMethod } from "./restart-methods.js";
 import type { Runner } from "./runner.js";
 import type { SessionKeeper } from "./session-keeper.js";
 import { DomainError } from "./storage.js";
-import { validateWorkdir } from "./validation.js";
+import { TOKENS_MESSAGE, validateWorkdir } from "./validation.js";
 import { suggestWorkdirs } from "./workdirs.js";
 
 const idSchema = { type: "string", pattern: "^[a-f0-9]{24}$" };
@@ -67,6 +68,19 @@ const properties = {
     items: idSchema,
   },
 };
+const LITE_TOKENS_REFUSED =
+  "The lite edition has no token cost; remove tokens from the request.";
+const NO_ESTIMATOR = "This edition has no token estimator.";
+const taskRequired = [
+  "title",
+  "prompt",
+  "workdir",
+  "priority",
+  "earliestStart",
+  "preferredWindowStart",
+  "maxTurns",
+  "dependsOn",
+];
 const restartMethodSchema = {
   oneOf: [
     {
@@ -140,10 +154,11 @@ const runsQuerySchema = {
 };
 export function registerQueueRoutes(
   app: FastifyInstance,
+  edition: Edition,
   queue: QueueStore,
   runner: Runner,
   now: () => Date,
-  estimate: TokensEstimator,
+  estimate: TokensEstimator | undefined,
   suggestCommit: CommitMessageSuggester,
   getPlanning?: () => PlanningSnapshot,
   keeper?: SessionKeeper,
@@ -159,7 +174,7 @@ export function registerQueueRoutes(
       ...task,
       review: latest && needsReview(latest) ? "needed" : null,
       sessionCostPercent:
-        rates === null
+        rates === null || task.tokens === null
           ? null
           : modelSessionPercent(task.tokens, task.model, rates),
     };
@@ -226,6 +241,7 @@ export function registerQueueRoutes(
     task: () => EstimateTask,
   ): Promise<number> => {
     if (tokens !== AUTO_TOKENS) return tokens;
+    if (estimate === undefined) throw new DomainError(NO_ESTIMATOR, 500);
     try {
       return await estimate(task(), calibration());
     } catch (error) {
@@ -329,26 +345,24 @@ export function registerQueueRoutes(
         body: {
           type: "object",
           additionalProperties: false,
-          required: [
-            "title",
-            "prompt",
-            "workdir",
-            "priority",
-            "earliestStart",
-            "preferredWindowStart",
-            "maxTurns",
-            "tokens",
-            "dependsOn",
-          ],
+          required:
+            edition === "full" ? [...taskRequired, "tokens"] : taskRequired,
           properties,
         },
       },
     },
     async (request, reply) => {
-      const input = request.body;
+      const { tokens, ...input } = request.body;
+      if (edition === "lite") {
+        if (tokens !== undefined)
+          throw new DomainError(LITE_TOKENS_REFUSED, 400);
+        const created = await queue.create({ ...input, tokens: null });
+        return reply.code(201).send(await plannedTask(created));
+      }
+      if (tokens === undefined) throw new DomainError(TOKENS_MESSAGE, 400);
       const created = await queue.create({
         ...input,
-        tokens: await storedTokens(input.tokens, () => ({
+        tokens: await storedTokens(tokens, () => ({
           title: input.title,
           prompt: input.prompt,
           model: input.model || DEFAULT_MODEL,

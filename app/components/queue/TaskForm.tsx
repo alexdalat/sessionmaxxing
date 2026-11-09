@@ -76,8 +76,9 @@ export function TaskFormDialog({
     String(task?.preferredWindowStart ?? ANY_WINDOW),
   );
   const [workdir, setWorkdir] = useState(task?.workdir ?? "");
+  const taskTokens = task?.tokens ?? null;
   const [tokens, setTokens] = useState(
-    task ? String(task.tokens) : AUTO_TOKENS,
+    taskTokens === null ? AUTO_TOKENS : String(taskTokens),
   );
   const [dependsOn, setDependsOn] = useState<string[]>(task?.dependsOn ?? []);
   const [probe, setProbe] = useState(workdir.trim());
@@ -130,8 +131,8 @@ export function TaskFormDialog({
         dependsOn.includes(candidate.id)),
   );
   const tokenChoices =
-    task && !TOKEN_PRESETS.includes(task.tokens)
-      ? [...TOKEN_PRESETS, task.tokens].sort((a, b) => a - b)
+    taskTokens !== null && !TOKEN_PRESETS.includes(taskTokens)
+      ? [...TOKEN_PRESETS, taskTokens].sort((a, b) => a - b)
       : TOKEN_PRESETS;
   const { timeZone } = useEnvironment();
   const now = useClock();

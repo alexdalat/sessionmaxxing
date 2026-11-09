@@ -53,8 +53,7 @@ export async function startDashboard(
       `${PORT_VARIABLE} must be an integer from 1 to 65535.`,
       400,
     );
-  // Phase 4 reads the edition; until then an unsupported value must fail instead of silently running full.
-  resolveEdition(process.env);
+  const edition = resolveEdition(process.env);
   const dockerInstall = resolveDockerInstall(process.env);
   const allowedHosts = resolveAllowedHosts(process.env, host);
   const workdirRoot =
@@ -100,7 +99,7 @@ export async function startDashboard(
       options.fetchUsage ?? officialUsageFetcher(join(homedir(), ".claude")),
       await UsageHistoryStore.open(directory),
     );
-    const queue = await QueueStore.open(directory, workdirRoot);
+    const queue = await QueueStore.open(directory, workdirRoot, edition);
     const runner = await Runner.open(queue, directory, {
       autoApply: () => settings.snapshot().autoApply,
       sessionTokens: (sessionId, since) =>
@@ -121,6 +120,7 @@ export async function startDashboard(
       settings,
       usage,
       keeper,
+      edition,
       loadHistory: options.loadHistory,
       staticRoot: options.development ? undefined : resolve("dist/client"),
     });

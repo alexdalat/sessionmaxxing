@@ -1591,6 +1591,7 @@ it("serves the time zone and the work-directory root from /api/environment", asy
     expect(response.json()).toEqual({
       timeZone: "Asia/Kolkata",
       workdirRoot: TEST_WORKDIR_ROOT,
+      edition: "full",
     });
     expect((await app.inject("/api/environment?x=1")).statusCode).toBe(400);
     const foreign = await app.inject({

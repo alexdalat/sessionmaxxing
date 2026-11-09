@@ -301,16 +301,16 @@ export interface TaskInput {
   earliestStart: string | null;
   preferredWindowStart: number | null;
   maxTurns: number;
-  /** Weighted tokens: a number, or "auto" to have the server estimate it from the prompt before the task is stored. */
-  tokens: TokensInput;
+  /** Weighted tokens: a number, or "auto" to have the server estimate it from the prompt before the task is stored. Required in full, absent in lite. */
+  tokens?: TokensInput;
   /** Ids of tasks that must complete before this one is dispatched. */
   dependsOn: string[];
 }
 export interface Task extends Omit<TaskInput, "tokens"> {
   id: string;
   model: string;
-  /** Weighted tokens the whole run is expected to consume, every model and subagent included. */
-  tokens: number;
+  /** Weighted tokens the whole run is expected to consume, every model and subagent included; null for a lite task. */
+  tokens: number | null;
   status: TaskStatus;
   createdAt: string;
   /** When the task last left pending or running; null while queued or for tasks finished before this was tracked. */
@@ -336,11 +336,15 @@ export interface WorkdirSuggestions {
   /** Absolute directories whose path starts with the typed prefix. */
   matches: string[];
 }
+export const EDITIONS = ["full", "lite"] as const;
+export type Edition = (typeof EDITIONS)[number];
 export interface Environment {
   /** IANA zone the server resolved from TZ. */
   timeZone: string;
   /** Absolute directory under which task work directories are accepted. */
   workdirRoot: string;
+  /** Which edition the server runs. */
+  edition: Edition;
 }
 export interface QueueSnapshot {
   planning?: PlanningSnapshot;

@@ -246,7 +246,7 @@ it("rejects an unsupported SESSIONMAXXING_EDITION before touching runtime state 
   const temp = await temporary();
   const dataDirectory = join(temp.path, "runtime");
   try {
-    vi.stubEnv("SESSIONMAXXING_EDITION", "lite");
+    vi.stubEnv("SESSIONMAXXING_EDITION", "enterprise");
     await expect(
       startDashboard({
         port: 0,
@@ -335,6 +335,7 @@ it("serves the configured time zone and work-directory root", async () => {
     expect((await app.inject("/api/environment")).json()).toEqual({
       timeZone: "Europe/Berlin",
       workdirRoot: temp.path,
+      edition: "full",
     });
   } finally {
     await app.close();
