@@ -24,6 +24,8 @@ const RECORD_KEYS = [
 ];
 const FINISHED: readonly RestartStatus[] = ["succeeded", "failed"];
 export const OUTPUT_CAP_BYTES = 64 * 1024;
+export const STOPPED_BEFORE_FINISH =
+  "Dashboard stopped before the restart finished";
 const CONTINUATION_MASK = 0xc0;
 const CONTINUATION_BITS = 0x80;
 
@@ -136,11 +138,20 @@ export class RestartStore {
         a.requestedAt.localeCompare(b.requestedAt) ||
         a.runId.localeCompare(b.runId),
     );
-    return new RestartStore(
+    const store = new RestartStore(
       directory,
       new Map(records.map((record) => [record.runId, record])),
       now,
     );
+    // A restarting record without a sibling died with the process that ran it. One
+    // with a sibling is finished by the container that outlives the dashboard.
+    for (const record of records)
+      if (record.status === "restarting" && record.sibling === null)
+        await store.update(record.runId, {
+          status: "failed",
+          output: STOPPED_BEFORE_FINISH,
+        });
+    return store;
   }
   async request(request: RestartRequest) {
     const record: RestartRecord = {

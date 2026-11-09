@@ -12,7 +12,12 @@ import { planDispatch } from "../server/dispatch.js";
 import { gitIn } from "../server/git.js";
 import { QueueStore } from "../server/queue.js";
 import type { RestartOptions } from "../server/restart-executor.js";
-import { capOutput, OUTPUT_CAP_BYTES } from "../server/restarts.js";
+import {
+  capOutput,
+  OUTPUT_CAP_BYTES,
+  RestartStore,
+  STOPPED_BEFORE_FINISH,
+} from "../server/restarts.js";
 import { Runner, restartReason } from "../server/runner.js";
 import {
   DEFAULT_DISPATCH_SETTINGS,
@@ -531,6 +536,74 @@ it("stops a restart that runs past the limit with its whole process group and st
       expect(processAlive(pids.grandchild)).toBe(false);
     });
     await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("holds the queue for a restart requested before the start and runs it once the scheduler starts", async () => {
+  const temp = await temporary();
+  try {
+    const data = join(temp.path, "data");
+    const project = join(temp.path, "project");
+    await repository(project);
+    const store = await QueueStore.open(data, TEST_WORKDIR_ROOT);
+    const runId = "c".repeat(24);
+    const seed = await RestartStore.open(data, () => new Date(NOW));
+    await seed.request({
+      runId,
+      title: TITLE,
+      method: { kind: "command", argv: ["./restart.sh"] },
+      workdir: await realpath(project),
+      requestedAt: NOW,
+    });
+    const command = fakeCommand();
+    const runner = await Runner.open(store, data, {
+      restart: { spawn: command.spawn },
+      now: () => new Date(NOW),
+    });
+    const task = await store.create(taskInput(project));
+    await expect(runner.start(task.id)).rejects.toThrow(restartReason(TITLE));
+    expect(command.calls).toEqual([]);
+    runner.startScheduler();
+    await vi.waitFor(async () =>
+      expect(
+        JSON.parse(
+          await readFile(join(data, "restarts", `${runId}.json`), "utf8"),
+        ).status,
+      ).toBe("succeeded"),
+    );
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("stops a running restart when the runner closes and fails its record at the next open", async () => {
+  const temp = await temporary();
+  try {
+    const { data, store, runner, run, restartOf, record } = await dashboard(
+      temp.path,
+      { method: idleCommand(temp.path), restart: { killGraceMs: 100 } },
+    );
+    const started = await run();
+    const pids = await idlePids(temp.path);
+    expect(restartOf(started.id)?.status).toBe("restarting");
+    const closing = Date.now();
+    await runner.close();
+    expect(Date.now() - closing).toBeLessThan(1000);
+    expect((await record(started.id)).status).toBe("restarting");
+    await vi.waitFor(() => {
+      expect(processAlive(pids.child)).toBe(false);
+      expect(processAlive(pids.grandchild)).toBe(false);
+    });
+    const reopened = await Runner.open(store, data, {
+      restart: { spawn: fakeCommand().spawn },
+    });
+    expect(
+      reopened.list().find(({ id }) => id === started.id)?.restart,
+    ).toMatchObject({ status: "failed", output: STOPPED_BEFORE_FINISH });
+    await reopened.close();
   } finally {
     await temp.cleanup();
   }

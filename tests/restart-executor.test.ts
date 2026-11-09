@@ -1,20 +1,25 @@
-import { chmod, mkdir, realpath, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import {
   RestartExecutor,
   type RestartOptions,
 } from "../server/restart-executor.js";
-import { RestartStore } from "../server/restarts.js";
-import type { RestartMethod } from "../shared/types.js";
-import { temporary } from "./helpers";
+import {
+  type RestartAction,
+  RestartStore,
+  STOPPED_BEFORE_FINISH,
+} from "../server/restarts.js";
+import { fakeCommand, temporary } from "./helpers";
 
 const NOW = "2026-09-06T12:00:00.000Z";
 const TITLE = "Fix a test";
 const FIRST = "a".repeat(24);
+const SECOND = "b".repeat(24);
+const SECOND_NOW = "2026-09-06T12:00:01.000Z";
 const SMALL_LIMITS: RestartOptions = { stepTimeoutMs: 2000, killGraceMs: 100 };
 
-const node = (script: string, ...args: string[]): RestartMethod => ({
+const node = (script: string, ...args: string[]): RestartAction => ({
   kind: "command",
   argv: [process.execPath, "-e", script, ...args],
 });
@@ -31,10 +36,9 @@ async function openStore(temp: string) {
 
 async function runRestart(
   temp: string,
-  method: RestartMethod,
+  method: RestartAction,
   options: RestartOptions = SMALL_LIMITS,
 ) {
-  if (method.kind === "none") throw new Error("Nothing to restart.");
   const workdir = await workdirIn(temp);
   const store = await openStore(temp);
   await store.request({
@@ -174,6 +178,165 @@ it("reports a kill failure other than ESRCH naming the restart", async () => {
     );
     expect(reports).toHaveLength(1);
     expect(reports[0]).toContain(TITLE);
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("marks a record left restarting as failed when the store opens", async () => {
+  const temp = await temporary();
+  try {
+    const workdir = await workdirIn(temp.path);
+    const before = await openStore(temp.path);
+    await before.request({
+      runId: FIRST,
+      title: TITLE,
+      method: node("0"),
+      workdir,
+      requestedAt: NOW,
+    });
+    await before.update(FIRST, { status: "restarting" });
+    const after = await openStore(temp.path);
+    expect(after.publicStatus(FIRST)).toMatchObject({
+      status: "failed",
+      output: STOPPED_BEFORE_FINISH,
+    });
+    expect(after.pending()).toBeUndefined();
+    const stored = JSON.parse(
+      await readFile(
+        join(temp.path, "data", "restarts", `${FIRST}.json`),
+        "utf8",
+      ),
+    );
+    expect(stored).toMatchObject({
+      status: "failed",
+      output: "Dashboard stopped before the restart finished",
+    });
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("leaves a requested record requested when the store opens", async () => {
+  const temp = await temporary();
+  try {
+    const workdir = await workdirIn(temp.path);
+    const before = await openStore(temp.path);
+    await before.request({
+      runId: FIRST,
+      title: TITLE,
+      method: node("0"),
+      workdir,
+      requestedAt: NOW,
+    });
+    const after = await openStore(temp.path);
+    expect(after.pending()?.status).toBe("requested");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("leaves a restarting record with a sibling alone when the store opens", async () => {
+  const temp = await temporary();
+  try {
+    const workdir = await workdirIn(temp.path);
+    const before = await openStore(temp.path);
+    await before.request({
+      runId: FIRST,
+      title: TITLE,
+      method: { kind: "compose" },
+      workdir,
+      requestedAt: NOW,
+    });
+    await before.update(FIRST, {
+      status: "restarting",
+      sibling: "dashboard-2",
+    });
+    const after = await openStore(temp.path);
+    expect(after.pending()).toMatchObject({
+      status: "restarting",
+      sibling: "dashboard-2",
+    });
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+const twoRestarts = async (
+  temp: string,
+  command: ReturnType<typeof fakeCommand>,
+) => {
+  const workdir = await workdirIn(temp);
+  const store = await openStore(temp);
+  const methods: [string, string, RestartAction][] = [
+    [FIRST, NOW, { kind: "command", argv: ["./first"] }],
+    [SECOND, SECOND_NOW, { kind: "command", argv: ["./second"] }],
+  ];
+  for (const [runId, requestedAt, method] of methods)
+    await store.request({ runId, title: TITLE, method, workdir, requestedAt });
+  const executor = new RestartExecutor(
+    store,
+    { spawn: command.spawn },
+    { idle: async () => {}, report: () => {} },
+  );
+  return { store, executor };
+};
+
+it("runs two requested restarts one at a time in request order", async () => {
+  const temp = await temporary();
+  try {
+    const command = fakeCommand((program) => ({ hang: program === "./first" }));
+    const { store, executor } = await twoRestarts(temp.path, command);
+    const drained = executor.drain();
+    await vi.waitFor(() => expect(command.calls).toHaveLength(1));
+    const quiet = new Promise((resolve) => setTimeout(resolve, 50));
+    await quiet;
+    expect(command.calls.map(({ command }) => command)).toEqual(["./first"]);
+    expect(store.publicStatus(SECOND)?.status).toBe("requested");
+    command.children[0].emit("close", 0, null);
+    await drained;
+    expect(command.calls.map(({ command }) => command)).toEqual([
+      "./first",
+      "./second",
+    ]);
+    expect(store.publicStatus(FIRST)?.status).toBe("succeeded");
+    expect(store.publicStatus(SECOND)?.status).toBe("succeeded");
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("still runs a record requested while the previous restart finishes", async () => {
+  const temp = await temporary();
+  try {
+    const command = fakeCommand((program) => ({ hang: program === "./first" }));
+    const workdir = await workdirIn(temp.path);
+    const store = await openStore(temp.path);
+    const executor = new RestartExecutor(
+      store,
+      { spawn: command.spawn },
+      { idle: async () => {}, report: () => {} },
+    );
+    await store.request({
+      runId: FIRST,
+      title: TITLE,
+      method: { kind: "command", argv: ["./first"] },
+      workdir,
+      requestedAt: NOW,
+    });
+    void executor.drain();
+    await vi.waitFor(() => expect(command.children).toHaveLength(1));
+    command.children[0].emit("close", 0, null);
+    await store.request({
+      runId: SECOND,
+      title: TITLE,
+      method: { kind: "command", argv: ["./second"] },
+      workdir,
+      requestedAt: SECOND_NOW,
+    });
+    await executor.drain();
+    expect(store.publicStatus(FIRST)?.status).toBe("succeeded");
+    expect(store.publicStatus(SECOND)?.status).toBe("succeeded");
   } finally {
     await temp.cleanup();
   }
