@@ -47,14 +47,18 @@ const LITE_HOME = "/queue/";
 const LITE_HIDDEN_FILES: ReadonlySet<string> = new Set([
   "/index.html",
   "/index.txt",
-  "/__next.__PAGE__.txt",
+  "/__next.__page__.txt",
   "/__next._full.txt",
 ]);
 const LITE_HIDDEN_PREFIX = "/analytics";
-const hiddenInLite = (path: string) =>
-  LITE_HIDDEN_FILES.has(path) ||
-  path === LITE_HIDDEN_PREFIX ||
-  path.startsWith(`${LITE_HIDDEN_PREFIX}/`);
+const hiddenInLite = (requested: string) => {
+  const path = requested.toLowerCase();
+  return (
+    LITE_HIDDEN_FILES.has(path) ||
+    path === LITE_HIDDEN_PREFIX ||
+    path.startsWith(`${LITE_HIDDEN_PREFIX}/`)
+  );
+};
 
 const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
 const BRACKETED = /^\[(.*)\]$/;

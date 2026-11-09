@@ -404,6 +404,9 @@ it.each([
   "/./analytics/",
   "/queue/../analytics/",
   "/%61nalytics/",
+  "/Analytics/",
+  "/ANALYTICS/index.html",
+  "/INDEX.HTML",
 ])("answers lite %s with the not-found error", async (url) => {
   const temp = await temporary();
   const { app } = await editionApp("lite", temp.path, {

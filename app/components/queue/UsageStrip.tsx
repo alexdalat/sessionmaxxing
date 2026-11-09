@@ -73,6 +73,7 @@ export function UsageStrip({
   onRefreshed: () => void;
 }) {
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState("");
   const heading = stripHeading(planning.usage);
   const fetched = fetchedLabel(planning.usage, now);
   return (
@@ -90,9 +91,14 @@ export function UsageStrip({
             disabled={refreshing}
             onClick={async () => {
               setRefreshing(true);
+              setRefreshError("");
               try {
                 await api("/api/usage/refresh", { method: "POST" });
                 onRefreshed();
+              } catch (error) {
+                setRefreshError(
+                  error instanceof Error ? error.message : String(error),
+                );
               } finally {
                 setRefreshing(false);
               }
@@ -102,6 +108,11 @@ export function UsageStrip({
           </Button>
         </span>
       </div>
+      {refreshError && (
+        <p className="error" role="alert">
+          {refreshError}
+        </p>
+      )}
       {planning.usageError && (
         <p className="error" role="alert">
           {planning.usageError}
