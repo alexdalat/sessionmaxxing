@@ -11,6 +11,7 @@ import { expect, it, vi } from "vitest";
 import { planDispatch } from "../server/dispatch.js";
 import { gitIn } from "../server/git.js";
 import { QueueStore } from "../server/queue.js";
+import type { RestartOptions } from "../server/restart-executor.js";
 import { capOutput, OUTPUT_CAP_BYTES } from "../server/restarts.js";
 import { Runner, restartReason } from "../server/runner.js";
 import {
@@ -29,6 +30,7 @@ import {
   temporary,
   usageSnapshot,
 } from "./helpers";
+import { idleCommand, idlePids, processAlive } from "./restart-process";
 
 const IDENTITY = ["-c", "user.name=Test", "-c", "user.email=test@example.com"];
 const NOW = "2026-09-06T12:00:00.000Z";
@@ -52,6 +54,8 @@ interface Setup {
   autoApply?: boolean;
   method?: RestartMethod;
   respond?: (command: string, args: string[]) => CommandResponse;
+  /** Replaces the fake spawner, so restarts run real processes. */
+  restart?: RestartOptions;
 }
 
 interface Finish {
@@ -76,7 +80,7 @@ async function dashboard(temp: string, setup: Setup = {}) {
       return child;
     },
     autoApply: () => setup.autoApply ?? true,
-    restart: { spawn: command.spawn },
+    restart: setup.restart ?? { spawn: command.spawn },
     now: () => new Date(NOW),
   });
   if (setup.method) await runner.restartMethods.set(workdir, setup.method);
@@ -498,6 +502,34 @@ it("keeps the output of both Docker Compose steps in arrival order", async () =>
     expect(restart?.output).toBe(
       `built image\nport is taken\ndocker compose up -d exited with code 1 in ${workdir}`,
     );
+    await runner.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("stops a restart that runs past the limit with its whole process group and starts tasks again", async () => {
+  const temp = await temporary();
+  try {
+    const { project, workdir, store, runner, run, settled, restartOf, exit } =
+      await dashboard(temp.path, {
+        method: idleCommand(temp.path),
+        restart: { stepTimeoutMs: 200, killGraceMs: 100 },
+      });
+    const started = await run();
+    const pids = await idlePids(temp.path);
+    await settled(started.id);
+    const restart = restartOf(started.id);
+    expect(restart?.status).toBe("failed");
+    expect(restart?.output).toContain("ran past");
+    expect(restart?.output).toContain(workdir);
+    const next = await store.create(taskInput(project));
+    await runner.start(next.id);
+    await exit(1);
+    await vi.waitFor(() => {
+      expect(processAlive(pids.child)).toBe(false);
+      expect(processAlive(pids.grandchild)).toBe(false);
+    });
     await runner.close();
   } finally {
     await temp.cleanup();

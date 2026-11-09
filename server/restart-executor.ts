@@ -19,6 +19,10 @@ export type SpawnRestart = (
 ) => ProviderProcess;
 export interface RestartOptions {
   spawn?: SpawnRestart;
+  /** Signals a process group; defaults to process.kill. */
+  signal?: (pid: number, signal: NodeJS.Signals) => void;
+  stepTimeoutMs?: number;
+  killGraceMs?: number;
 }
 export interface RestartHooks {
   /** Resolves once no run is starting or active. */
@@ -27,6 +31,9 @@ export interface RestartHooks {
   report: (message: string) => void;
 }
 
+export const STEP_TIMEOUT_MS = 30 * 60_000;
+export const KILL_GRACE_MS = 2000;
+const MS_PER_MINUTE = 60_000;
 const OWN_PREFIX = "SESSIONMAXXING_";
 const DOCKER = "docker";
 const RECORD_ERROR =
@@ -72,6 +79,10 @@ const restartSteps = (method: RestartAction): Step[] =>
         },
       ];
 
+/** A step ended because the executor closed; its record keeps the status it had. */
+const STOPPED = Symbol("stopped");
+type StepResult = string | null | typeof STOPPED;
+
 /** The last OUTPUT_CAP_BYTES of every step's stdout and stderr, in arrival order. */
 class OutputTail {
   private bytes = Buffer.alloc(0);
@@ -94,6 +105,7 @@ class OutputTail {
 export class RestartExecutor {
   private running: Promise<void> | null = null;
   private closed = false;
+  private stopStep: (() => void) | null = null;
   constructor(
     private store: RestartStore,
     private options: RestartOptions,
@@ -107,6 +119,7 @@ export class RestartExecutor {
   }
   close(): Promise<void> {
     this.closed = true;
+    this.stopStep?.();
     return this.running ?? Promise.resolve();
   }
   private next() {
@@ -133,7 +146,9 @@ export class RestartExecutor {
     let failure: string | null = null;
     for (const step of restartSteps(record.method)) {
       if (this.closed) return;
-      failure = await this.runStep(step, workdir, tail);
+      const result = await this.runStep(step, record, workdir, tail);
+      if (result === STOPPED) return;
+      failure = result;
       if (failure !== null) break;
     }
     await this.store.update(
@@ -143,22 +158,34 @@ export class RestartExecutor {
         : { status: "failed", output: tail.withFailure(failure) },
     );
   }
-  /** Resolves with the line naming why the step failed, or null when it exited 0. */
+  /** Resolves with the line naming why the step failed, null when it exited 0, or STOPPED when the executor closed. */
   private runStep(
     step: Step,
+    record: RestartRecord,
     workdir: string,
     tail: OutputTail,
-  ): Promise<string | null> {
+  ): Promise<StepResult> {
+    const limitMs = this.options.stepTimeoutMs ?? STEP_TIMEOUT_MS;
     return new Promise((resolve) => {
       let settled = false;
-      const settle = (failure: string | null) => {
+      let stopping = false;
+      let child: ProviderProcess | undefined;
+      const timer = setTimeout(() => {
+        settle(
+          `${step.label} ran past ${limitMs / MS_PER_MINUTE} minutes in ${workdir} and was stopped`,
+        );
+        if (child) this.terminate(child, record.title);
+      }, limitMs);
+      timer.unref();
+      const settle = (result: StepResult) => {
         if (settled) return;
         settled = true;
-        resolve(failure);
+        clearTimeout(timer);
+        this.stopStep = null;
+        resolve(result);
       };
       const couldNotStart = (error: Error) =>
         settle(`Could not start ${step.label} in ${workdir}: ${error.message}`);
-      let child: ProviderProcess;
       try {
         child = (this.options.spawn ?? spawn)(step.command, step.args, {
           cwd: workdir,
@@ -171,20 +198,55 @@ export class RestartExecutor {
         couldNotStart(error as Error);
         return;
       }
+      const running = child;
+      this.stopStep = () => {
+        stopping = true;
+        this.terminate(running, record.title, () => settle(STOPPED));
+      };
       for (const channel of ["stdout", "stderr"] as const)
-        child[channel]?.on("data", (chunk: Buffer | string) =>
+        running[channel]?.on("data", (chunk: Buffer | string) =>
           tail.push(chunk),
         );
-      child.once("error", couldNotStart);
-      child.once("close", (code: number | null, signal: NodeJS.Signals) =>
+      running.once("error", couldNotStart);
+      running.once("close", (code: number | null, signal: NodeJS.Signals) =>
         settle(
-          code === 0
-            ? null
-            : code === null
-              ? `${step.label} was stopped by ${signal} in ${workdir}`
-              : `${step.label} exited with code ${code} in ${workdir}`,
+          stopping
+            ? STOPPED
+            : code === 0
+              ? null
+              : code === null
+                ? `${step.label} was stopped by ${signal} in ${workdir}`
+                : `${step.label} exited with code ${code} in ${workdir}`,
         ),
       );
     });
+  }
+  /** SIGTERM to the step's process group, SIGKILL after the grace; `killed` runs once SIGKILL is sent. */
+  private terminate(
+    child: ProviderProcess,
+    title: string,
+    killed?: () => void,
+  ) {
+    this.signal(child, title, "SIGTERM");
+    const timer = setTimeout(() => {
+      this.signal(child, title, "SIGKILL");
+      killed?.();
+    }, this.options.killGraceMs ?? KILL_GRACE_MS);
+    timer.unref();
+  }
+  private signal(
+    child: ProviderProcess,
+    title: string,
+    signal: NodeJS.Signals,
+  ) {
+    try {
+      if (child.pid) (this.options.signal ?? process.kill)(-child.pid, signal);
+      else child.kill(signal);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ESRCH")
+        this.hooks.report(
+          `Could not stop the restart of “${title}”. Stop its process before restarting the dashboard.`,
+        );
+    }
   }
 }
