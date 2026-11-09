@@ -34,7 +34,7 @@ export function TaskCard({
   dependencies: string[];
   children: ReactNode;
 }) {
-  const { timeZone } = useEnvironment();
+  const { timeZone, edition } = useEnvironment();
   const state = previewState(task);
   const wait = waitNote(task, now);
   return (
@@ -56,7 +56,7 @@ export function TaskCard({
         <div className="task-schedule">
           <span>Priority {task.priority}</span>
           <span>max {task.maxTurns} turns</span>
-          {task.tokens !== null && (
+          {edition === "full" && task.tokens !== null && (
             <span>
               {formatTokens(task.tokens)} tokens
               {task.sessionCostPercent === null

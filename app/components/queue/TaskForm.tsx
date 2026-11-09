@@ -134,7 +134,7 @@ export function TaskFormDialog({
     taskTokens !== null && !TOKEN_PRESETS.includes(taskTokens)
       ? [...TOKEN_PRESETS, taskTokens].sort((a, b) => a - b)
       : TOKEN_PRESETS;
-  const { timeZone } = useEnvironment();
+  const { timeZone, edition } = useEnvironment();
   const now = useClock();
   const zoneLabel = zoneName(timeZone, now);
   return (
@@ -164,7 +164,9 @@ export function TaskFormDialog({
               workdir: String(fields.get("workdir")).trim(),
               priority: Number(fields.get("priority")),
               maxTurns: Number(fields.get("maxTurns")),
-              tokens: tokens === AUTO_TOKENS ? AUTO_TOKENS : Number(tokens),
+              ...(edition === "full" && {
+                tokens: tokens === AUTO_TOKENS ? AUTO_TOKENS : Number(tokens),
+              }),
               earliestStart: earliestStartFromInput(
                 String(fields.get("earliestStart")),
                 timeZone,
@@ -320,22 +322,24 @@ export function TaskFormDialog({
                 defaultValue={task?.maxTurns ?? DEFAULT_MAX_TURNS}
               />
             </div>
-            <div className="grid gap-1.5">
-              <Label htmlFor={`${fieldId}-tokens`}>Tokens</Label>
-              <Select name="tokens" value={tokens} onValueChange={setTokens}>
-                <SelectTrigger id={`${fieldId}-tokens`} className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={AUTO_TOKENS}>Auto</SelectItem>
-                  {tokenChoices.map((choice) => (
-                    <SelectItem key={choice} value={String(choice)}>
-                      {formatTokens(choice)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {edition === "full" && (
+              <div className="grid gap-1.5">
+                <Label htmlFor={`${fieldId}-tokens`}>Tokens</Label>
+                <Select name="tokens" value={tokens} onValueChange={setTokens}>
+                  <SelectTrigger id={`${fieldId}-tokens`} className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={AUTO_TOKENS}>Auto</SelectItem>
+                    {tokenChoices.map((choice) => (
+                      <SelectItem key={choice} value={String(choice)}>
+                        {formatTokens(choice)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="grid gap-1.5">
               <Label htmlFor={`${fieldId}-earliest-start`}>
                 Earliest start ({zoneLabel})

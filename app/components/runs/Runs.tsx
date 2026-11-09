@@ -99,7 +99,7 @@ function CommitForm({
   );
 }
 export function Runs() {
-  const { timeZone } = useEnvironment();
+  const { timeZone, edition } = useEnvironment();
   const [limit, setLimit] = useState(PAGE_SIZE);
   const { data, error, reload } = usePolling<{
     runs: Run[];
@@ -265,18 +265,22 @@ export function Runs() {
               <dt>Exit code</dt>
               <dd>{run.exitCode ?? "—"}</dd>
             </div>
-            <div>
-              <dt>Session cost</dt>
-              <dd>
-                {run.sessionCostPercent === null
-                  ? "—"
-                  : `${run.sessionCostPercent}%`}
-              </dd>
-            </div>
-            <div>
-              <dt>Tokens</dt>
-              <dd>{tokenTotal(run.tokens)}</dd>
-            </div>
+            {edition === "full" && (
+              <>
+                <div>
+                  <dt>Session cost</dt>
+                  <dd>
+                    {run.sessionCostPercent === null
+                      ? "—"
+                      : `${run.sessionCostPercent}%`}
+                  </dd>
+                </div>
+                <div>
+                  <dt>Tokens</dt>
+                  <dd>{tokenTotal(run.tokens)}</dd>
+                </div>
+              </>
+            )}
           </dl>
           {run.endedAt && (
             <p className="muted">
