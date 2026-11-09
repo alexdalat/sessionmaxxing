@@ -1,6 +1,6 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type AppOptions, createApp } from "../server/app.js";
 import { DispatchSettingsStore } from "../server/dispatch-settings.js";
 import { startDashboard } from "../server/main.js";
@@ -8,8 +8,13 @@ import { QueueStore } from "../server/queue.js";
 import { Runner } from "../server/runner.js";
 import { UsageHistoryStore } from "../server/usage-history.js";
 import { UsageMonitor } from "../server/usage-monitor.js";
-import type { Edition, HistoryData } from "../shared/types.js";
 import {
+  DEFAULT_DISPATCH_SETTINGS,
+  type Edition,
+  type HistoryData,
+} from "../shared/types.js";
+import {
+  fakeChild,
   SESSION_RATES,
   sessionRates,
   TEST_TIME_ZONE,
@@ -50,13 +55,20 @@ async function editionApp(
   edition: Edition | undefined,
   directory: string,
   extra: Partial<AppOptions> = {},
+  runnerOptions: Parameters<typeof Runner.open>[2] = {},
 ) {
   const queue = await QueueStore.open(directory, TEST_WORKDIR_ROOT, edition);
-  const runner = await Runner.open(queue, directory);
-  const usage = new UsageMonitor(
-    fetchUsage,
-    await UsageHistoryStore.open(directory),
-  );
+  const runner = await Runner.open(queue, directory, {
+    now: extra.now,
+    ...runnerOptions,
+  });
+  const usage =
+    extra.usage ??
+    new UsageMonitor(
+      fetchUsage,
+      await UsageHistoryStore.open(directory),
+      extra.now,
+    );
   const app = await createApp({
     timeZone: TEST_TIME_ZONE,
     edition,
@@ -67,7 +79,7 @@ async function editionApp(
     loadHistory: vi.fn(emptyHistory),
     ...extra,
   });
-  return { app, queue };
+  return { app, queue, runner, usage };
 }
 
 it("starts the lite edition with no analytics, plan score or transcript reads while the usage monitor records samples", async () => {
@@ -439,3 +451,173 @@ it.each(["/", "/index.html", "/analytics/", "/analytics/index.txt"])(
     }
   },
 );
+
+describe("the lite planner", () => {
+  const NOW = new Date("2026-09-06T12:00:00Z");
+  // Three and a half days into the seven-day window: pace 50, ceiling 60 with the default margin.
+  const HALF_WEEK_RESET = "2026-09-10T00:00:00Z";
+  const liteUsage = (sessionPercent: number) => async (at: Date) =>
+    usageSnapshot({
+      fetchedAt: at.toISOString(),
+      session: { percent: sessionPercent, resetsAt: "2026-09-06T16:09:00Z" },
+      weekly: { percent: 2, resetsAt: HALF_WEEK_RESET },
+    });
+  const planned = async (
+    directory: string,
+    runnerOptions: Parameters<typeof Runner.open>[2] = {},
+    sessionPercent = 16,
+  ) => {
+    const sessionRates = vi.fn(async () => SESSION_RATES);
+    const loadHistory = vi.fn(emptyHistory);
+    const usage = new UsageMonitor(
+      liteUsage(sessionPercent),
+      await UsageHistoryStore.open(directory),
+      () => NOW,
+    );
+    const built = await editionApp(
+      "lite",
+      directory,
+      { now: () => NOW, usage, sessionRates, loadHistory },
+      runnerOptions,
+    );
+    await usage.refresh();
+    return { ...built, sessionRates, loadHistory };
+  };
+  const createTask = async (
+    app: Awaited<ReturnType<typeof createApp>>,
+    workdir: string,
+  ) =>
+    (
+      await app.inject({
+        method: "POST",
+        url: "/api/tasks",
+        payload: liteInput(workdir),
+      })
+    ).json();
+
+  it("answers the queue route with lite planning, a ready gate and no eligible time", async () => {
+    const temp = await temporary();
+    const { app, sessionRates, loadHistory } = await planned(temp.path);
+    try {
+      await createTask(app, temp.path);
+      const { planning, tasks } = (await app.inject("/api/queue")).json();
+      expect(planning.edition).toBe("lite");
+      expect(planning.session.ceiling).toBe(75);
+      expect(planning.weekly.ceiling).toBe(60);
+      expect(planning.gate).toEqual({
+        status: "ready",
+        reason: "Session 16% of 75% · Weekly 2% of 60%",
+      });
+      for (const key of ["quiet", "rates", "fable"])
+        expect(planning).not.toHaveProperty(key);
+      expect(tasks[0].gate).toEqual({
+        status: "ready",
+        reason: "Session 16% of 75% · Weekly 2% of 60%",
+        eligibleAt: null,
+      });
+      expect(sessionRates).not.toHaveBeenCalled();
+      expect(loadHistory).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+      await temp.cleanup();
+    }
+  });
+
+  it("serves and saves dispatch settings with the lite planning", async () => {
+    const temp = await temporary();
+    const { app, sessionRates, loadHistory } = await planned(temp.path);
+    try {
+      const read = await app.inject("/api/dispatch-settings");
+      expect(read.statusCode).toBe(200);
+      expect(read.json().edition).toBe("lite");
+      expect(read.json().session.ceiling).toBe(75);
+      const saved = await app.inject({
+        method: "PUT",
+        url: "/api/dispatch-settings",
+        payload: { ...DEFAULT_DISPATCH_SETTINGS, sessionReservePercent: 40 },
+      });
+      expect(saved.statusCode).toBe(200);
+      expect(saved.json().edition).toBe("lite");
+      expect(saved.json().session.ceiling).toBe(60);
+      expect(saved.json().settings.sessionReservePercent).toBe(40);
+      expect(sessionRates).not.toHaveBeenCalled();
+      expect(loadHistory).not.toHaveBeenCalled();
+    } finally {
+      await app.close();
+      await temp.cleanup();
+    }
+  });
+
+  it("refuses a settings body with an unknown key and keeps the stored settings", async () => {
+    const temp = await temporary();
+    const { app } = await planned(temp.path);
+    try {
+      const refused = await app.inject({
+        method: "PUT",
+        url: "/api/dispatch-settings",
+        payload: {
+          ...DEFAULT_DISPATCH_SETTINGS,
+          sessionReservePercent: 40,
+          extra: 1,
+        },
+      });
+      expect(refused.statusCode).toBe(400);
+      expect(
+        (await app.inject("/api/dispatch-settings")).json().settings
+          .sessionReservePercent,
+      ).toBe(DEFAULT_DISPATCH_SETTINGS.sessionReservePercent);
+    } finally {
+      await app.close();
+      await temp.cleanup();
+    }
+  });
+
+  it("starts a pending lite task through the lite gate when the queue switch is on", async () => {
+    const temp = await temporary();
+    const child = fakeChild();
+    const launch = vi.fn(() => child);
+    const { app, queue, runner, sessionRates, loadHistory } = await planned(
+      temp.path,
+      { launch },
+    );
+    try {
+      const task = await createTask(app, temp.path);
+      await queue.setAutoDispatch(true);
+      await runner.tick();
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(
+        queue.snapshot().tasks.find(({ id }) => id === task.id)?.status,
+      ).toBe("running");
+      child.emit("close", 0, null);
+      await runner.waitForIdle();
+      expect(sessionRates).not.toHaveBeenCalled();
+      expect(loadHistory).not.toHaveBeenCalled();
+    } finally {
+      await runner.close();
+      await app.close();
+      await temp.cleanup();
+    }
+  });
+
+  it("keeps a pending lite task waiting while the session is over its cutoff", async () => {
+    const temp = await temporary();
+    const launch = vi.fn(() => fakeChild());
+    const { app, queue, runner } = await planned(temp.path, { launch }, 80);
+    try {
+      await createTask(app, temp.path);
+      await queue.setAutoDispatch(true);
+      await runner.tick();
+      expect(launch).not.toHaveBeenCalled();
+      const [task] = (await app.inject("/api/queue")).json().tasks;
+      expect(task.gate).toEqual({
+        status: "waiting",
+        reason: "Session 80%, over the 75% queue cutoff",
+        eligibleAt: null,
+      });
+    } finally {
+      await runner.close();
+      await app.close();
+      await temp.cleanup();
+    }
+  });
+});

@@ -24,7 +24,7 @@ import {
   type CommitMessageSuggester,
   suggestCommitMessage,
 } from "./commit-message.js";
-import { planDispatch } from "./dispatch.js";
+import { planDispatch, planLite } from "./dispatch.js";
 import {
   type DispatchSettingsStore,
   emptyQuerySchema,
@@ -221,42 +221,54 @@ export async function createApp(options: AppOptions) {
     );
   }
   let planning: (() => PlanningSnapshot) | undefined;
-  if (loadHistory && options.settings && options.usage) {
+  if (options.settings && options.usage) {
     const { settings, usage } = options;
-    const quiet = new QuietHoursCache(
-      async () =>
-        aggregate(
-          await loadHistory(),
-          30,
-          options.timeZone,
-          now(),
-        ).opportunities.map((window) => window.startHour),
-      now,
-      options.quietHoursTtlMs,
-    );
-    const rates = new SessionRatesCache(
-      options.sessionRates ??
-        (async () =>
-          fitSessionRates(
-            windowTokens(
-              sessionWindows(usage.samples(now()), now(), CALIBRATION_DAYS),
-              (await loadHistory()).events,
-            ),
-          )),
-      now,
-      options.quietHoursTtlMs,
-    );
-    await rates.refresh();
-    const planner: Planner = (load) =>
-      planDispatch(
-        settings.snapshot(),
-        usage.current(),
-        now(),
-        options.timeZone,
-        quiet.current(),
-        load,
-        rates.current(),
+    let planner: Planner;
+    if (loadHistory) {
+      const quiet = new QuietHoursCache(
+        async () =>
+          aggregate(
+            await loadHistory(),
+            30,
+            options.timeZone,
+            now(),
+          ).opportunities.map((window) => window.startHour),
+        now,
+        options.quietHoursTtlMs,
       );
+      const rates = new SessionRatesCache(
+        options.sessionRates ??
+          (async () =>
+            fitSessionRates(
+              windowTokens(
+                sessionWindows(usage.samples(now()), now(), CALIBRATION_DAYS),
+                (await loadHistory()).events,
+              ),
+            )),
+        now,
+        options.quietHoursTtlMs,
+      );
+      await rates.refresh();
+      planner = (load) =>
+        planDispatch(
+          settings.snapshot(),
+          usage.current(),
+          now(),
+          options.timeZone,
+          quiet.current(),
+          load,
+          rates.current(),
+        );
+    } else {
+      planner = (load) =>
+        planLite(
+          settings.snapshot(),
+          usage.current(),
+          now(),
+          options.timeZone,
+          load,
+        );
+    }
     const getPlanning = () =>
       planner(options.runner?.load(settings.snapshot()) ?? EMPTY_LOAD);
     planning = getPlanning;
