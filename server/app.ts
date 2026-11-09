@@ -43,6 +43,19 @@ import { DomainError } from "./storage.js";
 import { mergeSessionWindows, sessionWindows } from "./usage-history.js";
 import type { UsageMonitor } from "./usage-monitor.js";
 
+const LITE_HOME = "/queue/";
+const LITE_HIDDEN_FILES: ReadonlySet<string> = new Set([
+  "/index.html",
+  "/index.txt",
+  "/__next.__PAGE__.txt",
+  "/__next._full.txt",
+]);
+const LITE_HIDDEN_PREFIX = "/analytics";
+const hiddenInLite = (path: string) =>
+  LITE_HIDDEN_FILES.has(path) ||
+  path === LITE_HIDDEN_PREFIX ||
+  path.startsWith(`${LITE_HIDDEN_PREFIX}/`);
+
 const LOCAL_HOSTS = ["localhost", "127.0.0.1"];
 const BRACKETED = /^\[(.*)\]$/;
 const REGEXP_SPECIALS = /[.*+?^${}()|[\]\\]/g;
@@ -282,13 +295,19 @@ export async function createApp(options: AppOptions) {
       planning,
       options.keeper,
     );
-  if (options.staticRoot)
+  if (options.staticRoot) {
+    if (edition === "lite")
+      app.get("/", (_request, reply) => reply.redirect(LITE_HOME, 302));
     await app.register(fastifyStatic, {
       root: options.staticRoot,
       index: "index.html",
       dotfiles: "deny",
       redirect: true,
+      ...(edition === "lite"
+        ? { allowedPath: (path: string) => !hiddenInLite(path) }
+        : {}),
     });
+  }
   app.setNotFoundHandler((_request, reply) =>
     reply.code(404).send({ error: "Route not found." }),
   );

@@ -1,5 +1,5 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { type AppOptions, createApp } from "../server/app.js";
 import { DispatchSettingsStore } from "../server/dispatch-settings.js";
@@ -301,3 +301,141 @@ it("prices a stored token number in full at the fitted session rates", async () 
     await temp.cleanup();
   }
 });
+
+const STATIC_FILES = [
+  "index.html",
+  "index.txt",
+  "__next.__PAGE__.txt",
+  "__next._full.txt",
+  "__next._tree.txt",
+  "icon.svg",
+  "queue/index.html",
+  "queue/index.txt",
+  "runs/index.html",
+  "analytics/index.html",
+  "analytics/index.txt",
+  "_next/static/app.js",
+];
+
+async function staticRoot(directory: string) {
+  const root = join(directory, "static");
+  for (const file of STATIC_FILES) {
+    await mkdir(dirname(join(root, file)), { recursive: true });
+    await writeFile(join(root, file), `fixture ${file}`);
+  }
+  return root;
+}
+
+it.each([
+  ["/", 302],
+  ["/?x=1", 302],
+])("redirects lite %s to the queue page", async (url, status) => {
+  const temp = await temporary();
+  const { app } = await editionApp("lite", temp.path, {
+    staticRoot: await staticRoot(temp.path),
+  });
+  try {
+    const response = await app.inject(url);
+    expect(response.statusCode).toBe(status);
+    expect(response.headers.location).toBe("/queue/");
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it.each([
+  "/queue/",
+  "/runs/",
+  "/queue/index.txt",
+  "/__next._tree.txt",
+  "/icon.svg",
+  "/_next/static/app.js",
+  "/api/queue",
+])("serves lite %s", async (url) => {
+  const temp = await temporary();
+  const { app } = await editionApp("lite", temp.path, {
+    staticRoot: await staticRoot(temp.path),
+  });
+  try {
+    expect((await app.inject(url)).statusCode).toBe(200);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("redirects lite /queue to /queue/", async () => {
+  const temp = await temporary();
+  const { app } = await editionApp("lite", temp.path, {
+    staticRoot: await staticRoot(temp.path),
+  });
+  try {
+    const response = await app.inject("/queue");
+    expect(response.statusCode).toBe(301);
+    expect(response.headers.location).toBe("/queue/");
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it.each([
+  "/analytics",
+  "/analytics/",
+  "/analytics/index.html",
+  "/analytics/index.txt",
+  "/index.html",
+  "/index.txt",
+  "/__next.__PAGE__.txt",
+  "/__next._full.txt",
+  "/./analytics/",
+  "/queue/../analytics/",
+  "/%61nalytics/",
+])("answers lite %s with the not-found error", async (url) => {
+  const temp = await temporary();
+  const { app } = await editionApp("lite", temp.path, {
+    staticRoot: await staticRoot(temp.path),
+  });
+  try {
+    const response = await app.inject(url);
+    expect(response.statusCode).toBe(404);
+    expect(response.json()).toEqual(NOT_FOUND);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it("refuses lite //analytics/ without serving the analytics page", async () => {
+  const temp = await temporary();
+  const { app } = await editionApp("lite", temp.path, {
+    staticRoot: await staticRoot(temp.path),
+  });
+  try {
+    const response = await app.inject("//analytics/");
+    expect(response.statusCode).toBe(403);
+    expect(response.body).not.toContain("fixture analytics");
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
+
+it.each(["/", "/index.html", "/analytics/", "/analytics/index.txt"])(
+  "serves full %s",
+  async (url) => {
+    const temp = await temporary();
+    const { app } = await editionApp("full", temp.path, {
+      staticRoot: await staticRoot(temp.path),
+    });
+    try {
+      const response = await app.inject(url);
+      expect(response.statusCode).toBe(200);
+      expect(response.body).toContain("fixture");
+    } finally {
+      await app.close();
+      await temp.cleanup();
+    }
+  },
+);
