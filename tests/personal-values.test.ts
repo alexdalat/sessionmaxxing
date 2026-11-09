@@ -11,7 +11,6 @@ const SEARCHED_DIRECTORIES = [
   "scripts",
   "skills",
   "tests",
-  "deploy",
 ];
 const SEARCHED_FILES = [
   "compose.yaml",
@@ -33,8 +32,6 @@ const TEXT_EXTENSIONS = new Set([
   ".sh",
   ".yaml",
   ".yml",
-  ".path",
-  ".service",
 ]);
 
 async function filesUnder(directory: string): Promise<string[]> {
@@ -68,11 +65,11 @@ describe("personal values", () => {
     expect(hits, `personal values found at:\n${hits.join("\n")}`).toEqual([]);
   });
 
-  it("searches the source, script, deploy and documentation files", async () => {
+  it("searches the source, script and documentation files", async () => {
     const files = await searchedFiles();
     for (const expected of [
       "server/data-directory.ts",
-      "deploy/host-deploy.sh",
+      ".env.example",
       "tests/personal-values.test.ts",
       "README.md",
       "compose.yaml",

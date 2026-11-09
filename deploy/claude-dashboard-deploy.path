@@ -1,8 +1,0 @@
-[Unit]
-Description=Watch for capacity dashboard deploy requests
-
-[Path]
-PathExistsGlob=%h/.local/share/sessionmaxxing/deploy/requests/*.json
-
-[Install]
-WantedBy=default.target
