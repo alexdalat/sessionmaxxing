@@ -275,10 +275,10 @@ export interface CurrentBlock extends ActivityCount {
 export const CLAUDE_MODELS: readonly { value: string; label: string }[] = [
   { value: "fable", label: "Fable 5.1" },
   { value: "opus", label: "Opus" },
-  { value: "sonnet", label: "Sonnet" },
+  { value: "sonnet", label: "Sonnet 5.5" },
   { value: "haiku", label: "Haiku" },
 ];
-export const DEFAULT_MODEL = "opus";
+export const DEFAULT_MODEL = "sonnet";
 export type TaskStatus =
   | "pending"
   | "running"

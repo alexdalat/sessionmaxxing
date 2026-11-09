@@ -25,11 +25,12 @@ until it finishes. Queue work here instead of burning the current session.
 ```sh
 curl -s "${SESSIONMAXXING_URL:-http://127.0.0.1:4317}/api/usage"
 curl -s "${SESSIONMAXXING_URL:-http://127.0.0.1:4317}/api/dispatch-settings"
+curl -s "${SESSIONMAXXING_URL:-http://127.0.0.1:4317}/api/queue" | jq .autoDispatch
 ```
 
-Read `snapshot.session.percent`, `snapshot.weekly.percent`, `quiet.startHours`, and
-`gate.reason`. If a call fails, the dashboard is not running at that address — say so
-and stop.
+Read `snapshot.session.percent`, `snapshot.weekly.percent`, `quiet.startHours`,
+`gate.reason`, and `autoDispatch` (`true` or `false`). If a call fails, the dashboard is
+not running at that address — say so and stop.
 
 ## 2. Gather the task
 
@@ -59,7 +60,7 @@ node scripts/queue-task.mjs \
   --title "Rename the parser" \
   --prompt-file /tmp/claude-*/scratchpad/queued-prompt.md \
   --workdir /path/to/some-repo \
-  --model claude-fable-5-1 \
+  --model sonnet \
   --max-turns 100
 ```
 
@@ -73,11 +74,13 @@ The script prints the usage summary, then the created task id, title, and window
 ## 4. Report back
 
 Tell the user the task id, the quiet start hours it will wait for (or the chosen
-window), and these two conditions:
+window), and whether auto-dispatch is on (`autoDispatch` from step 1). State it as a
+fact; never tell the user to turn it on "to be safe". Only when it is `false`, give the
+command that turns it on:
 
-- Auto-dispatch must be on:
-  ```sh
-  curl -X PUT "${SESSIONMAXXING_URL:-http://127.0.0.1:4317}/api/queue/auto" \
-    -H 'Content-Type: application/json' -d '{"enabled":true}'
-  ```
-- The dashboard must stay running; nothing runs while the server is stopped.
+```sh
+curl -X PUT "${SESSIONMAXXING_URL:-http://127.0.0.1:4317}/api/queue/auto" \
+  -H 'Content-Type: application/json' -d '{"enabled":true}'
+```
+
+Also say the dashboard must stay running; nothing runs while the server is stopped.

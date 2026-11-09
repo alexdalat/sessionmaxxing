@@ -8,7 +8,7 @@ export function QueueBadges({ planning }: { planning?: PlanningSnapshot }) {
   return (
     <>
       <Badge variant={ready ? "success" : "warning"}>
-        {ready ? "Claude ready" : "Claude waiting"}
+        {ready ? "Ready" : "Waiting"}
       </Badge>
       {planning.settings.autoApply && (
         <Badge variant="outline" className="text-muted-foreground">
