@@ -46,6 +46,26 @@ async function fingerprint(path: string) {
     throw error;
   }
 }
+const WORKFLOW_AGENT_FILE = /^agent-.+\.jsonl$/;
+
+/** Agent transcripts of one session directory: direct subagents and Workflow tool agents. */
+async function agentFiles(sessionDirectory: string) {
+  const subagentsDirectory = join(sessionDirectory, "subagents");
+  const subagents: string[] = [];
+  const workflowAgents: string[] = [];
+  for (const agent of await entries(subagentsDirectory))
+    if (agent.isFile() && agent.name.endsWith(".jsonl"))
+      subagents.push(join(subagentsDirectory, agent.name));
+  const workflows = join(subagentsDirectory, "workflows");
+  for (const run of await entries(workflows)) {
+    if (!run.isDirectory()) continue;
+    const runDirectory = join(workflows, run.name);
+    for (const agent of await entries(runDirectory))
+      if (agent.isFile() && WORKFLOW_AGENT_FILE.test(agent.name))
+        workflowAgents.push(join(runDirectory, agent.name));
+  }
+  return { subagents, workflowAgents };
+}
 async function listFiles(root: string) {
   const files: string[] = [];
   for (const project of await entries(join(root, "projects"))) {
@@ -57,10 +77,8 @@ async function listFiles(root: string) {
         continue;
       }
       if (!file.isDirectory()) continue;
-      const subagents = join(directory, file.name, "subagents");
-      for (const agent of await entries(subagents))
-        if (agent.isFile() && agent.name.endsWith(".jsonl"))
-          files.push(join(subagents, agent.name));
+      const agents = await agentFiles(join(directory, file.name));
+      files.push(...agents.subagents, ...agents.workflowAgents);
     }
   }
   files.push(join(root, "history.jsonl"));
@@ -108,6 +126,7 @@ async function sessionFiles(root: string, sessionId: string) {
   const transcript = `${sessionId}.jsonl`;
   const main: string[] = [];
   const subagents: string[] = [];
+  const workflowAgents: string[] = [];
   for (const project of await entries(join(root, "projects"))) {
     if (!project.isDirectory()) continue;
     const directory = join(root, "projects", project.name);
@@ -117,18 +136,17 @@ async function sessionFiles(root: string, sessionId: string) {
         continue;
       }
       if (!file.isDirectory() || file.name !== sessionId) continue;
-      const agents = join(directory, file.name, "subagents");
-      for (const agent of await entries(agents))
-        if (agent.isFile() && agent.name.endsWith(".jsonl"))
-          subagents.push(join(agents, agent.name));
+      const agents = await agentFiles(join(directory, file.name));
+      subagents.push(...agents.subagents);
+      workflowAgents.push(...agents.workflowAgents);
     }
   }
-  return { main, subagents };
+  return { main, subagents, workflowAgents };
 }
 
 /**
  * Weighted tokens one dispatched session consumed from `since` on, by model
- * family, subagents included. A resumed session keeps its id, so each run
+ * family, subagents and workflow agents included. A resumed session keeps its id, so each run
  * counts only the records written after it started.
  */
 export async function readSessionTokens(
@@ -139,8 +157,11 @@ export async function readSessionTokens(
   const tokens = emptyWeightedTokens();
   const latest = new Map<string, ActivityEvent>();
   const anonymous: ActivityEvent[] = [];
-  const { main, subagents } = await sessionFiles(root, sessionId);
-  for (const path of [...main, ...subagents]) {
+  const { main, subagents, workflowAgents } = await sessionFiles(
+    root,
+    sessionId,
+  );
+  for (const path of [...main, ...subagents, ...workflowAgents]) {
     const parsed = await parseFile(path, false);
     if (!parsed) continue;
     for (const { messageId, event } of parsed.events)
@@ -205,6 +226,7 @@ export async function countUnfinishedSubagents(
   since: string,
 ) {
   let unfinished = 0;
+  // Workflow agents are skipped: their transcript ends on the structured-output tool call, so it never shows a final reply.
   for (const path of (await sessionFiles(root, sessionId)).subagents) {
     const turn = await lastTurn(path);
     if (turn === undefined || turn.timestamp === undefined) continue;

@@ -378,6 +378,75 @@ it("ignores a subagent a resumed session left unfinished before the run started"
   });
 });
 
+it("counts a workflow agent's tokens and skips the journal beside it", async () => {
+  await withRoot(async (root) => {
+    const workflow = `demo/${DISPATCHED_SESSION}/subagents/workflows/run-1`;
+    await transcript(root, `${workflow}/agent-a1.jsonl`, [
+      assistantLine({
+        messageId: "w1",
+        timestamp: "2026-09-06T15:00:00Z",
+        sessionId: DISPATCHED_SESSION,
+        outputTokens: 30,
+      }),
+    ]);
+    await transcript(root, `${workflow}/journal.jsonl`, [
+      assistantLine({
+        messageId: "j1",
+        timestamp: "2026-09-06T15:01:00Z",
+        sessionId: DISPATCHED_SESSION,
+        outputTokens: 500,
+      }),
+    ]);
+    expect(
+      await readSessionTokens(root, DISPATCHED_SESSION, BEFORE_RECORDS),
+    ).toEqual({ fable: 0, opus: 30, sonnet: 0, haiku: 0 });
+  });
+});
+
+it("reports no unfinished subagents for a workflow agent that ends on its structured-output call", async () => {
+  await withRoot(async (root) => {
+    const workflow = `demo/${DISPATCHED_SESSION}/subagents/workflows/run-1`;
+    await transcript(root, `${workflow}/agent-a1.jsonl`, [
+      subagentAssistant("2026-10-11T08:12:56.022Z", "tool_use"),
+    ]);
+    expect(
+      await countUnfinishedSubagents(root, DISPATCHED_SESSION, RUN_START),
+    ).toBe(0);
+  });
+});
+
+it("reads workflow agent transcripts and attributes them through their parent session", async () => {
+  await withRoot(async (root) => {
+    await transcript(
+      root,
+      `demo/${DISPATCHED_SESSION}/subagents/workflows/run-1/agent-a1.jsonl`,
+      [
+        assistantLine({
+          messageId: "wf1",
+          timestamp: "2026-09-06T16:00:00Z",
+          sessionId: DISPATCHED_SESSION,
+          entrypoint: "sdk-cli",
+          outputTokens: 9,
+        }),
+      ],
+    );
+    const read = createHistoryReader(root, () => new Set([DISPATCHED_SESSION]));
+    const result = await read();
+    expect(result.events).toEqual([
+      {
+        timestamp: "2026-09-06T16:00:00.000Z",
+        project: "demo",
+        model: "claude-opus-4-6",
+        source: "dispatched",
+        inputTokens: 0,
+        outputTokens: 9,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+      },
+    ]);
+  });
+});
+
 it("never counts the main transcript or another session's subagents", async () => {
   await withRoot(async (root) => {
     await transcript(root, `demo/${DISPATCHED_SESSION}.jsonl`, [
