@@ -121,11 +121,17 @@ function weekScores(
         percent: sample.weekly,
       });
   }
+  const latestReset = samples.findLast(
+    (sample) => sample.weeklyResetsAt !== null,
+  )?.weeklyResetsAt;
+  const currentKey = latestReset ? resetMinute(latestReset) : null;
   const scores: WeekScore[] = [];
-  for (const { end, percent } of groups.values()) {
+  for (const [key, { end, percent }] of groups) {
     const start = end - WEEK_MS;
     if (start >= now.getTime() || end <= rangeStart) continue;
     const complete = end <= now.getTime();
+    // An open window the meter no longer reports came from another account or reset schedule.
+    if (!complete && key !== currentKey) continue;
     const pacePercent = ((now.getTime() - start) / WEEK_MS) * FULL_PERCENT;
     scores.push({
       start: new Date(start).toISOString(),

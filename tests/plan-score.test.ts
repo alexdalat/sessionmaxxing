@@ -148,6 +148,26 @@ it("scores the open week by used percent over elapsed pace, capped at 100", () =
   expect(openWeekScore(20)).toBe(100);
 });
 
+it("scores the week the latest sample reports when an older open week also contains now", () => {
+  const staleResetsAt = "2026-09-09T00:00:00.000Z";
+  const { weeks, weeklyScore } = planScore(
+    [
+      sample("2026-09-06T08:00:00Z", 0, null, {
+        weekly: 60,
+        weeklyResetsAt: staleResetsAt,
+      }),
+      sample("2026-09-06T11:00:00Z", 0, null, {
+        weekly: 5,
+        weeklyResetsAt: OPEN_WEEK_RESETS_AT,
+      }),
+    ],
+    NOW,
+    [],
+  );
+  expect(weeklyScore).toBe(50);
+  expect(weeks.map((week) => week.end)).toEqual([OPEN_WEEK_RESETS_AT]);
+});
+
 it("averages session coverage and the current week's score", () => {
   const score = planScore(
     [
