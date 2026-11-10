@@ -691,7 +691,7 @@ it("gates Fable tasks on Fable reservations and other Claude tasks on the weekly
   expect(taskGate(pending, planning, at, [])).toMatchObject({
     status: "waiting",
     reason:
-      "Fable weekly 55% + 10% held for running tasks, over the 60% queue cutoff",
+      "Fable weekly 55% + 10% held for running tasks + 10% expected, over the 60% queue cutoff",
   });
   expect(taskGate({ ...pending, model: "opus" }, planning, at, []).status).toBe(
     "ready",

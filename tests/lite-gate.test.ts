@@ -188,12 +188,13 @@ describe("the lite usage gate", () => {
     });
     expect(planning.gate).toEqual({
       status: "waiting",
-      reason: "Weekly 61%, over the 60% queue cutoff (pace 50% + 10% margin)",
+      reason:
+        "Weekly 61% + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
     });
   });
 
-  it("is ready with weekly exactly at pace plus margin", () => {
-    expect(lite(usage(weekly(60))).gate.status).toBe("ready");
+  it("is ready when weekly plus the task's own charge lands exactly on pace plus margin", () => {
+    expect(lite(usage(weekly(57))).gate.status).toBe("ready");
   });
 
   it("counts weekly points held for running tasks against the ceiling", () => {
@@ -204,21 +205,40 @@ describe("the lite usage gate", () => {
       holding(0, 3),
     );
     expect(planning.gate.reason).toBe(
-      "Weekly 58% + 3% held for running tasks, over the 60% queue cutoff (pace 50% + 10% margin)",
+      "Weekly 58% + 3% held for running tasks + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
     );
+  });
+
+  it("charges the task being admitted its own weekly points", () => {
+    expect(lite(usage(weekly(58))).gate).toEqual({
+      status: "waiting",
+      reason:
+        "Weekly 58% + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
+    });
+    expect(lite(usage(weekly(57))).gate.status).toBe("ready");
+    expect(
+      lite(usage(weekly(55)), null, DEFAULT_DISPATCH_SETTINGS, holding(0, 3))
+        .gate.reason,
+    ).toBe(
+      "Weekly 55% + 3% held for running tasks + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
+    );
+    expect(
+      lite(usage(weekly(54)), null, DEFAULT_DISPATCH_SETTINGS, holding(0, 3))
+        .gate.status,
+    ).toBe("ready");
   });
 
   it("never lets the weekly ceiling pass 95", () => {
     const settings = { ...DEFAULT_DISPATCH_SETTINGS, weeklyMarginPercent: 50 };
     // 1.4 days before the reset is 80% of the way through the window.
     const resetsAt = "2026-09-07T21:36:00Z";
-    expect(lite(usage(weekly(94, resetsAt)), null, settings).gate.status).toBe(
+    expect(lite(usage(weekly(92, resetsAt)), null, settings).gate.status).toBe(
       "ready",
     );
     const over = lite(usage(weekly(96, resetsAt)), null, settings);
     expect(over.weekly).toMatchObject({ ceiling: 95, pace: 80 });
     expect(over.gate.reason).toBe(
-      "Weekly 96%, over the 95% queue cutoff (pace 80% + 50% margin)",
+      "Weekly 96% + 3% expected, over the 95% queue cutoff (pace 80% + 50% margin)",
     );
   });
 

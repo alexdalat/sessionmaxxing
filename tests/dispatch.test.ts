@@ -107,14 +107,14 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
     ok: false,
   });
   expect(ahead.gate.reason).toBe(
-    "Weekly 61%, over the 60% queue cutoff (pace 50% + 10% margin)",
+    "Weekly 61% + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
   );
   const ready = plan(
-    usageSnapshot({ weekly: { percent: 59, resetsAt: halfway } }),
+    usageSnapshot({ weekly: { percent: 57, resetsAt: halfway } }),
   );
   expect(ready.gate).toEqual({
     status: "ready",
-    reason: "Session 16% of 75% · Weekly 59% of 60%",
+    reason: "Session 16% of 75% · Weekly 57% of 60%",
   });
   const lateWeek = plan(
     usageSnapshot({
@@ -126,6 +126,66 @@ it("holds Claude tasks once weekly usage runs ahead of pace plus margin, capped 
   expect(
     plan(usageSnapshot({ weekly: { percent: 0, resetsAt: null } })).weekly,
   ).toEqual({ percent: 0, ceiling: 95, pace: null, reserved: 0, ok: true });
+});
+
+it("charges the task being admitted its own weekly points on top of what running tasks hold", () => {
+  const halfway = "2026-09-10T00:00:00Z";
+  const weeklyAt = (percent: number) =>
+    usageSnapshot({ weekly: { percent, resetsAt: halfway } });
+  const task = {
+    id: "a".repeat(24),
+    status: "pending" as const,
+    model: "opus",
+    preferredWindowStart: 8,
+    earliestStart: null,
+    tokens: 100_000,
+  };
+  const holding: DispatchLoad = {
+    ...EMPTY_LOAD,
+    running: 1,
+    claudeRuns: 1,
+    reserved: { session: 0, weekly: 3, fable: 0 },
+  };
+
+  const alone = plan(weeklyAt(58));
+  expect(alone.weekly.ok).toBe(false);
+  const aloneReason =
+    "Weekly 58% + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)";
+  expect(alone.gate).toEqual({ status: "waiting", reason: aloneReason });
+  expect(taskGate(task, alone, now, [])).toMatchObject({
+    status: "waiting",
+    reason: aloneReason,
+  });
+
+  expect(
+    plan(weeklyAt(55), null, DEFAULT_DISPATCH_SETTINGS, undefined, holding)
+      .gate,
+  ).toEqual({
+    status: "waiting",
+    reason:
+      "Weekly 55% + 3% held for running tasks + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
+  });
+  const fits = plan(
+    weeklyAt(54),
+    null,
+    DEFAULT_DISPATCH_SETTINGS,
+    undefined,
+    holding,
+  );
+  expect(fits.gate).toEqual({
+    status: "ready",
+    reason:
+      "Session 16% of 75% · Weekly 54% + 3% held for running tasks of 60%",
+  });
+  expect(taskGate(task, fits, now, []).status).toBe("ready");
+
+  const dearer = { ...DEFAULT_DISPATCH_SETTINGS, runWeeklyCostPercent: 5 };
+  expect(plan(weeklyAt(56), null, dearer).gate).toEqual({
+    status: "waiting",
+    reason:
+      "Weekly 56% + 5% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
+  });
+  expect(plan(weeklyAt(55), null, dearer).gate.status).toBe("ready");
 });
 
 it("gates Fable-model tasks on the Fable window and mirrors task status", () => {
@@ -153,7 +213,7 @@ it("gates Fable-model tasks on the Fable window and mirrors task status", () => 
     taskGate({ ...base, model: "claude-fable-5-1" }, planning, now, []),
   ).toEqual({
     status: "waiting",
-    reason: "Fable weekly 70%, over the 60% queue cutoff",
+    reason: "Fable weekly 70% + 3% expected, over the 60% queue cutoff",
     eligibleAt: "2026-09-07T12:00:00.000Z",
   });
   expect(
@@ -167,6 +227,60 @@ it("gates Fable-model tasks on the Fable window and mirrors task status", () => 
   expect(
     taskGate({ ...base, model: "claude-fable-5-1" }, noFable, now, []).status,
   ).toBe("ready");
+});
+
+it("charges a Fable-model task its own points against the Fable window", () => {
+  const halfway = "2026-09-10T00:00:00Z";
+  const fableAt = (percent: number) =>
+    usageSnapshot({ fable: { percent, resetsAt: halfway } });
+  const opus = {
+    id: "a".repeat(24),
+    status: "pending" as const,
+    model: "opus",
+    preferredWindowStart: 8,
+    earliestStart: null,
+    tokens: 100_000,
+  };
+  const fableTask = { ...opus, model: "claude-fable-5-1" };
+  const holding: DispatchLoad = {
+    ...EMPTY_LOAD,
+    running: 1,
+    claudeRuns: 1,
+    reserved: { session: 0, weekly: 3, fable: 3 },
+  };
+
+  const over = plan(fableAt(58));
+  expect(over.fable?.ok).toBe(false);
+  expect(taskGate(fableTask, over, now, [])).toMatchObject({
+    status: "waiting",
+    reason: "Fable weekly 58% + 3% expected, over the 60% queue cutoff",
+  });
+  expect(taskGate(opus, over, now, []).status).toBe("ready");
+
+  const fits = plan(fableAt(57));
+  expect(fits.fable?.ok).toBe(true);
+  expect(taskGate(fableTask, fits, now, []).status).toBe("ready");
+
+  const heldOver = plan(
+    fableAt(55),
+    null,
+    DEFAULT_DISPATCH_SETTINGS,
+    undefined,
+    holding,
+  );
+  expect(taskGate(fableTask, heldOver, now, [])).toMatchObject({
+    status: "waiting",
+    reason:
+      "Fable weekly 55% + 3% held for running tasks + 3% expected, over the 60% queue cutoff",
+  });
+  const heldFits = plan(
+    fableAt(54),
+    null,
+    DEFAULT_DISPATCH_SETTINGS,
+    undefined,
+    holding,
+  );
+  expect(taskGate(fableTask, heldFits, now, []).status).toBe("ready");
 });
 
 it("ranks quiet start hours, marks whether now is inside one, and names the next one", () => {

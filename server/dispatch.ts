@@ -78,6 +78,7 @@ function weeklyGate(
   usage: OfficialUsage | undefined | null,
   marginPercent: number,
   reserved: number,
+  charge: number,
   now: Date,
 ): BucketGate {
   if (!usage)
@@ -99,12 +100,14 @@ function weeklyGate(
     ceiling,
     pace,
     reserved,
-    ok: percent + reserved <= ceiling,
+    ok: percent + reserved + charge <= ceiling,
   };
 }
 
 const held = (gate: BucketGate) =>
   gate.reserved > 0 ? ` + ${round(gate.reserved)}% held for running tasks` : "";
+const expectedCharge = (points: number) =>
+  points > 0 ? ` + ${round(points)}% expected` : "";
 const describe = (name: string, gate: BucketGate) =>
   `${name} ${gate.percent}%${held(gate)} of ${gate.ceiling}%`;
 const plural = (count: number, noun: string) =>
@@ -187,7 +190,7 @@ export function hoursUntil(fromHour: number, toHour: number) {
 const sessionOverReason = (session: BucketGate, reserve: string) =>
   `Session ${session.percent}%${held(session)}, over the ${session.ceiling}% queue cutoff${reserve}`;
 const weeklyOverReason = (weekly: BucketGate, settings: DispatchSettings) =>
-  `Weekly ${weekly.percent}%${held(weekly)}, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`;
+  `Weekly ${weekly.percent}%${held(weekly)}${expectedCharge(settings.runWeeklyCostPercent)}, over the ${weekly.ceiling}% queue cutoff${weekly.pace === null ? "" : ` (pace ${weekly.pace}% + ${settings.weeklyMarginPercent}% margin)`}`;
 
 /** Why the run slots or the official usage snapshot rule out dispatching; null when both allow it. */
 function usageWait(
@@ -245,6 +248,7 @@ export function planDispatch(
     snapshot?.weekly,
     settings.weeklyMarginPercent,
     load.reserved.weekly,
+    settings.runWeeklyCostPercent,
     now,
   );
   const fable = snapshot?.fable
@@ -252,6 +256,7 @@ export function planDispatch(
         snapshot.fable,
         settings.weeklyMarginPercent,
         load.reserved.fable,
+        settings.runWeeklyCostPercent,
         now,
       )
     : null;
@@ -310,6 +315,7 @@ export function planLite(
     snapshot?.weekly,
     settings.weeklyMarginPercent,
     load.reserved.weekly,
+    settings.runWeeklyCostPercent,
     now,
   );
   let gate: DispatchGate;
@@ -715,7 +721,7 @@ export function taskGate(
   )
     return {
       status: "waiting",
-      reason: `Fable weekly ${fable.percent}%${held(fable)}, over the ${fable.ceiling}% queue cutoff`,
+      reason: `Fable weekly ${fable.percent}%${held(fable)}${expectedCharge(settings.runWeeklyCostPercent)}, over the ${fable.ceiling}% queue cutoff`,
       eligibleAt: eligible,
     };
   const { session } = planning;
