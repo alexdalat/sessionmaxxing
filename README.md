@@ -1,10 +1,36 @@
 # SessionMaxxing
 
-A local dashboard for one job: squeeze the most out of any Claude plan (Pro, Max, Team or Enterprise). It shows Anthropic's official usage for the buckets your plan enforces (Session 5h, Weekly, and per-model weekly limits such as Fable), records how much of each five-hour window you actually used, and auto-dispatches queued Claude Code tasks into idle windows while keeping weekly usage on pace.
+SessionMaxxing is a local dashboard that runs queued Claude Code tasks in the five-hour session windows you would otherwise leave unused, while keeping your weekly limit on pace. It reads the same usage numbers as Claude Code's `/usage` panel and works with any Claude plan, including Pro, Max, Team and Enterprise.
 
-## Install natively
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/overview-dark.png">
+  <img src="docs/screenshots/overview-light.png" alt="Overview page with session, weekly and Fable weekly usage against the queue cutoff, a week of session windows, the queue, and weekly usage against pace">
+</picture>
 
-Requires Node.js 22.12+, pnpm, and a signed-in `claude` CLI (the dashboard reuses its OAuth token).
+## How it works
+
+Every five minutes the server asks Anthropic for your plan's usage, using the login Claude Code already keeps, and stores 90 days of samples. You add tasks to a queue, each with a prompt, a work directory, a model and the tokens the run is expected to use. When the current session window has room for a task and weekly usage is on pace, the server starts it as a headless `claude -p` run in its work directory. By default tasks start only in the hours you rarely use Claude Code, ranked from your own transcripts, so the windows you work in stay free for you. Finished runs appear on the Runs page for review.
+
+## Requirements
+
+- Linux. The server reads Claude Code's login from `~/.claude/.credentials.json`, where Claude Code keeps it on Linux. On macOS Claude Code stores it in the Keychain, which the dashboard does not read.
+- Claude Code, installed and signed in.
+- Node.js 22.12 or newer for a native install, or Docker with the Compose plugin.
+
+## Install
+
+### npm
+
+```sh
+npm install --global sessionmaxxing
+sessionmaxxing
+```
+
+The server listens on http://127.0.0.1:4317. The package also installs `sessionmaxxing-queue`, which adds tasks from a terminal.
+
+### From source
+
+In a clone of this repository:
 
 ```sh
 pnpm install
@@ -12,215 +38,160 @@ pnpm build
 pnpm start
 ```
 
-Or install the published package, which puts `sessionmaxxing` (the server) and `sessionmaxxing-queue` (the queue helper below) on your PATH:
+### Docker Compose
 
-```sh
-npm install --global sessionmaxxing
-sessionmaxxing
-```
-
-The server serves the build from the `dist/client` folder next to its own files, so it starts from any working directory. It listens on http://127.0.0.1:4317. For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs). The lite edition serves only `/queue/` and `/runs/`.
-
-| Variable | Default | Meaning |
-| --- | --- | --- |
-| `SESSIONMAXXING_HOST` | `127.0.0.1` | Bind address, an IPv4 or IPv6 literal. A wider bind such as `0.0.0.0` also needs `SESSIONMAXXING_ALLOWED_HOSTS`. |
-| `SESSIONMAXXING_PORT` | `4317` | Listen port. |
-| `SESSIONMAXXING_ALLOWED_HOSTS` | empty | Comma-separated host names or addresses clients type, added to `localhost`, `127.0.0.1` and the bind address. No ports, paths or wildcards. |
-| `SESSIONMAXXING_DATA_DIR` | see Data directory | Absolute path of the data directory. |
-| `XDG_DATA_HOME` | `~/.local/share` | Absolute base for the default data directory. |
-| `SESSIONMAXXING_WORKDIR_ROOT` | the user's home | Absolute existing directory that task work directories must be under. |
-| `SESSIONMAXXING_EDITION` | `full` | Edition, `full` or `lite`. Any other value stops startup. |
-| `TZ` | the host's zone | IANA zone name. Day boundaries, quiet hours, the plan score and every chart follow it. |
-| `SESSIONMAXXING_URL` | `http://127.0.0.1:4317` | Server the `scripts/queue-task.mjs` helper contacts. |
-| `SESSIONMAXXING_PATH_MAP` | empty | `from=to[,from=to]` absolute path prefixes the helper rewrites `--workdir` through. |
-
-Work directories are accepted only under the running user's home; `SESSIONMAXXING_WORKDIR_ROOT` moves that boundary. The server stops at startup with a message when `TZ` is not an IANA zone the process applied. `GET /api/environment` returns the zone, the work-directory root and the edition, and the browser formats every time in that zone.
-
-## Data directory
-
-Runtime state lives in one directory, created with mode 0700: `SESSIONMAXXING_DATA_DIR` when set, else `$XDG_DATA_HOME/sessionmaxxing` when `XDG_DATA_HOME` is absolute, else `~/.local/share/sessionmaxxing`. Inside: `queue.json`, `dispatch-settings.json`, `restart-methods.json`, `session-keeper.json`, `usage-snapshot.json`, `usage-samples.jsonl`, `runs/`, `restarts/` and `server.lock`. The lock refuses a second server on the same directory.
-
-A native start finds a `data/` directory in its working directory and moves it to the data directory once, as one rename. Startup stops with a message naming both paths when the data directory already exists, a lock file is left inside `data`, `data` is a symlink or a file, the two paths are nested, or they sit on different filesystems; the last message carries the exact `mv` command. Nothing is merged, copied or deleted.
-
-## Lite edition
-
-The lite edition is the queue without the analysis. It serves the Queue and Runs pages; `/` opens the queue. Overview, Analytics, the plan score, token estimates, session-rate calibration and quiet hours are left out, and the Queue page opens with a usage strip showing session and weekly usage.
-
-A lite task is Ready when a run slot is free, the official snapshot is fresh, session usage plus the points held for running tasks is at or below `100 − session reserve`, and weekly usage plus its held points is at or below `pace + weekly margin` (hard cap 95%). Each running task holds `runSessionHoldPercent` session points (default 10%) and `runWeeklyCostPercent` weekly points. Tasks carry no token cost. Dependencies, repository locks, Run now, restart methods and the session keeper work as in the full edition.
-
-```sh
-SESSIONMAXXING_EDITION=lite pnpm start
-```
-
-For Docker, set `SESSIONMAXXING_EDITION=lite` in `.env`, then run `docker compose up -d --build`.
-
-A data directory started in one edition stays with it: a full start on lite data stops with a message naming `queue.json`, while a lite start loads full data and ignores the stored token costs.
-
-## Official usage
-
-The server calls `GET https://api.anthropic.com/api/oauth/usage` with the token from `~/.claude/.credentials.json`, the `anthropic-beta: oauth-2025-04-20` header, and a Claude Code User-Agent. That is the same source as Claude Code's `/usage` panel and the "Claude Usage Tracker" browser extension. The response's `five_hour` and `seven_day` windows become **Session (5h)** and **Weekly**; the `limits[]` entry whose model display name is Fable becomes **Fable weekly**. Each bucket shows the percent used, a reset countdown, a pace tick (share of the window already elapsed) and a dispatch-ceiling tick, plus the active minutes and responses your local transcripts show inside that window.
-
-The server fetches every five minutes and on **Refresh** (at most once per 30 s). A failed fetch keeps the last snapshot, shows the error in the panel, and blocks auto-dispatch until a fresh fetch succeeds. An expired token is reported with "run `claude`"; the dashboard never refreshes or stores the token, and no route returns it.
-
-Every snapshot is appended to `usage-samples.jsonl` in the data directory (90 days kept). From those samples:
-
-- **Session windows · last 7 days** draws each five-hour window Anthropic reported, shaded by its peak utilization, on a day grid in the host's time zone, with the share of the week that had no window at all.
-- **Weekly usage vs pace** plots weekly and Fable utilization through the current seven-day window against the straight line to the reset and the auto-dispatch limit (pace plus the weekly margin, capped at 95%).
-
-## Auto-dispatch
-
-Queue tasks under **Task queue**. With the queue on, the server runs up to *Tasks running at once* **Ready** tasks together (default 2, at most 4; 1 keeps the old one-at-a-time behaviour). The on/off state is stored in `queue.json` and survives restarts; every task still running at a restart is marked failed. A Claude task is Ready when a run slot is free, the official snapshot is fresh (under 15 min) and newer than the last finished run, session usage plus the points held for running Claude tasks is at or below `100 − session reserve` (default 25% in quiet hours, 100% outside them, so the default queue only runs in quiet hours), weekly usage plus its held points is at or below `pace + weekly margin` (default 10%, hard cap 95%), and, for Fable models, the Fable window passes the same weekly test. A Claude run that Claude Code stops at the session or weekly limit puts its task back in line; once the window resets and the gate passes, the next run resumes the same Claude session instead of starting over. **Run now** overrides the usage gate and the schedule, never the slot limit or a busy repository. Settings live in `dispatch-settings.json`; `PUT /api/dispatch-settings` takes `{ autoApply, keepSessionActive, sessionReservePercent, busyHoursReservePercent, weeklyMarginPercent, quietStartHours, maxConcurrentRuns, runWeeklyCostPercent, runSessionHoldPercent }`.
-
-With **Start each 5-hour session automatically** on, the server opens a new session window as soon as the previous one ends by running a one-turn `claude -p hi` from the home directory and letting it exit. This is separate from the queue: it needs no task and ignores the queue switch and the reserves. It waits for a fresh usage snapshot after each ping and at least ten minutes between pings, skips while a Claude task is running, and stops when the weekly window is at 100%. Ping session ids live in `session-keeper.json`.
-
-### Parallel runs
-
-Two tasks run together only when they cannot touch the same files. The server resolves each work directory (symlinks included) and the git repository it belongs to, following linked worktrees back to their main checkout. Tasks whose directories are equal or nested, or that belong to the same repository, wait for each other; the waiting card names the task it waits for. Independent repositories and unrelated directories run side by side. A directory whose repository cannot be read waits instead of running unlocked.
-
-Every running Claude task holds *Session held per running Claude task* points of the session window (default 20%) and *Weekly held per running Claude task* points of the weekly window (default 3%, Fable models also hold it in the Fable window) until it finishes. The next task starts only if usage plus everything held still fits under the queue cutoff, so two tasks never start just because each would fit alone. The Overview panel shows running slots as `1/2` and the held points next to each bucket. Settings files saved before these options existed load with the defaults.
-
-Limits: the hold is a fixed estimate, not measured consumption; worktrees of one repository always serialize; locks live in the server process, so a task started outside the dashboard is invisible to them; and a restart fails every running task.
-
-Dispatched Claude tasks run with `--dangerously-skip-permissions`, so a queued run has the same tools an interactive session has: shell, web search, and any MCP servers or skills configured under `~/.claude`, which the container mounts along with your global `CLAUDE.md`.
-
-Each Claude task carries **Tokens**, the weighted count the whole run is expected to consume: output tokens count once, and input, cache writes and cache reads count at their list-price ratio to output, since cached context re-reads are most of what a session spends. The dashboard prices them at the session rates it fits from its own history, so the same task costs more on Fable than on Opus and the number survives a plan change. A task only becomes Ready when session usage, the percent held for running Claude tasks, and its own expected cost (its tokens at the current rates, or the largest percent one of its runs has cost) stay at or below the cutoff.
-
-**Quiet hours** keep your own five-hour windows opening when you actually work. The server ranks all 24 local start hours by your average active minutes in the following five hours over the last 30 days (recomputed every 10 minutes) and, with *Quiet hours only* on (default), a task with no chosen window starts only when the current hour is one of the `quietStartHours` quietest starts (default 8). The dispatch panel lists those hours as ranges and the next one coming up. A task with an explicit preferred window ignores the quiet-hours rule and runs inside that window instead.
-
-## Queueing work
-
-`scripts/queue-task.mjs` (installed as `sessionmaxxing-queue` by the npm package) queues a task from any terminal without opening the UI:
-
-```sh
-node scripts/queue-task.mjs --title "Rename the parser" --prompt-file ./prompt.md \
-  --workdir /home/user/workspace/some-repo --model claude-fable-5-1
-```
-
-It prints session and weekly usage, the quiet start hours, and the Claude gate reason before posting, then the new task id and the window it will wait for. `--window HH` pins a start hour, `--tokens N` sets the expected weighted tokens (`auto` by default, estimated by the server), `--dry-run` prints the body instead of posting, and `SESSIONMAXXING_URL` (or `--url`) picks the server and the helper tries only that one. `SESSIONMAXXING_PATH_MAP` rewrites a `--workdir` prefix for a server that sees the same folders under other paths, for example `SESSIONMAXXING_PATH_MAP=/Users/me/Projects=/home/user/projects`. Claude Code queues through it with the `queue-task` skill in `~/.claude/skills/queue-task`; `skills/queue-task/SKILL.md` is the same skill for uploading to claude.ai, where it writes the command out for you to paste instead.
-
-## API
-
-- `GET /api/analytics?days=7|14|30|90` local activity aggregates plus per-bucket local windows (full edition only).
-- `GET /api/plan-score` session coverage and weekly score (full edition only).
-- `GET /api/usage` `{ snapshot, error, samples, windows }`; `POST /api/usage/refresh` fetches now.
-- `GET|PUT /api/dispatch-settings` settings plus the planning snapshot (per-bucket gates and the Claude gate status and reason).
-- `GET /api/environment` `{ timeZone, workdirRoot, edition }`.
-- `GET /api/queue`, `POST /api/tasks`, `PATCH|DELETE /api/tasks/:id`, `POST /api/tasks/:id/run|cancel|retry`, `PUT /api/queue/order`, `PUT /api/queue/auto`, `GET /api/runs`.
-- `GET|PUT /api/restart-methods` the restart method of one work directory: `GET ?workdir=<path>` returns `{ method }`, `PUT { workdir, method }` sets it.
-
-Hosts are limited to `localhost`, `127.0.0.1`, the bind address, and the entries of `SESSIONMAXXING_ALLOWED_HOSTS`; an Origin header must match `http://<Host>`. There is no dashboard authentication.
-
-## Install with Docker Compose
+In a clone of this repository:
 
 ```sh
 cp .env.example .env
-# fill in .env
 docker compose up -d --build
 ```
 
-`.env` holds nine fields; Compose refuses to start while a required one is empty.
+Fill in `.env` before the last command. Compose refuses to start while a required field is empty.
 
 | Field | Value |
 | --- | --- |
-| `SESSIONMAXXING_UID` | `id -u` |
-| `SESSIONMAXXING_GID` | `id -g` |
-| `SESSIONMAXXING_DOCKER_GID` | `stat -c %g /var/run/docker.sock` |
-| `SESSIONMAXXING_HOME` | Your home directory; mounted at the same path in the container |
-| `SESSIONMAXXING_BIND_ADDRESS` | Address Docker publishes on; `127.0.0.1` keeps the dashboard on this machine |
-| `SESSIONMAXXING_PORT` | Published port, `4317` |
+| `SESSIONMAXXING_UID`, `SESSIONMAXXING_GID` | Output of `id -u` and `id -g` |
+| `SESSIONMAXXING_DOCKER_GID` | Output of `stat -c %g /var/run/docker.sock` |
+| `SESSIONMAXXING_HOME` | Your home directory |
+| `SESSIONMAXXING_BIND_ADDRESS` | Address the port is published on; `127.0.0.1` keeps the dashboard on this machine |
+| `SESSIONMAXXING_PORT` | Published port, usually `4317` |
 | `SESSIONMAXXING_EDITION` | `full` or `lite` |
-| `TZ` | IANA zone name such as `Europe/Berlin`; the container's zone |
-| `SESSIONMAXXING_ALLOWED_HOSTS` | Extra host names or addresses clients type; may stay empty |
+| `TZ` | IANA time zone, such as `Europe/Berlin` |
+| `SESSIONMAXXING_ALLOWED_HOSTS` | Extra host names or addresses you open the dashboard by; may stay empty |
 
-The home directory is mounted at the same path, so Claude history, `.claude/.credentials.json`, work directories and the data directory (`$SESSIONMAXXING_HOME/.local/share/sessionmaxxing`) are all the host's own; there is no data volume. A native install and a container on the same account share that directory, and the lock refuses the second server.
+The image includes Claude Code and the Docker CLI with the Compose and Buildx plugins. Compose mounts your home directory at the same path, so the container works with your Claude Code login and history, your work directories, and the same data directory a native install uses. A lock file keeps a second server off that directory.
 
-A second published address goes into an untracked `compose.override.yaml`, which Compose merges with `compose.yaml`:
+## Queue tasks
 
-```yaml
-services:
-  sessionmaxxing:
-    ports:
-      - target: 4317
-        published: "4317"
-        host_ip: 192.0.2.10
-        protocol: tcp
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/queue-dark.png">
+  <img src="docs/screenshots/queue-light.png" alt="Task queue with one running task and waiting tasks, each showing its model, work directory, tokens, session cost and the reason it waits">
+</picture>
 
-Add that address, or the name clients type for it, to `SESSIONMAXXING_ALLOWED_HOSTS`; only the `SESSIONMAXXING_BIND_ADDRESS` address is approved on its own.
+Add a task with **Add task** on the Task queue page, or type a prompt into **New task** on the Overview. A task needs a title, the prompt, a work directory under your home directory and a model: Fable 5.1, Opus, Sonnet 5.5 (the default) or Haiku. **Tokens** is the number of tokens the whole run is expected to use, subagents included. Leave it on **Auto** and Haiku estimates it from the prompt and your past runs. Optional fields set a priority, the maximum number of turns, an earliest start, a preferred five-hour window, the tasks it depends on and the restart method of its work directory.
 
-### Upgrading an existing Docker install
+Token counts are weighted by list price: an output token counts once, and input, cache-write and cache-read tokens count at their price relative to output. The server converts tokens to session percent with a rate per model family, fitted from the last 14 days of your own five-hour windows. A task stores tokens, so its expected session cost follows your current rates when your plan or the task's model changes.
 
-An install from before the data directory kept its state in `./data`, mounted at `/app/data`. Stop the old container first, move the directory to the data directory (it must not exist yet), then start the new one:
+## When a task starts
+
+With **Run queue** on, a task starts once every check below passes. The queue shows which check a waiting task fails and when it is expected to start.
+
+1. A run slot is free. **Tasks running at once** defaults to 2 and goes up to 4.
+2. The usage snapshot is under 15 minutes old and was fetched after the last run ended.
+3. Session usage, plus the expected cost of the tasks already running, plus this task's own expected cost, is at or below the queue cutoff of 100% minus **Session kept for you in quiet hours** (default 25%). A task's expected cost is its tokens at the fitted rate until a run of it completes, then the most a completed run of it has cost.
+4. Weekly usage, plus **Weekly held per running Claude task** (default 3 points) for each running task, is at or below pace plus **Weekly margin above pace** (default 10%), and never above 95%. Pace is the share of the seven-day window that has passed. Fable tasks also check the Fable weekly limit when your plan reports one.
+5. The current hour is one of the **Quiet start hours per day** (default 8): the local start hours whose next five hours held the least of your own Claude Code activity over the last 30 days. A task with a preferred window waits for its window instead, and no task starts before its earliest start.
+6. Every task it depends on has completed, and no running task works in the same directory, a directory nested in it, or the same git repository, worktrees included.
+
+Setting **Session kept for you outside quiet hours** below its default of 100% lifts check 5. Tasks then start at any hour, and outside quiet hours the cutoff becomes 100% minus that value.
+
+**Run task**, the play button on a queued task, starts it at once and skips checks 2 to 5. It refuses to start while check 1 or 6 fails or a restart is pending.
+
+When Claude Code stops a run at the session or weekly limit, the task goes back to the queue and its next run resumes the same Claude session. `claude -p` exits when the lead agent's turn ends, so every launched prompt ends with an instruction to keep subagents and long commands in the foreground, and a run that exits while a subagent is still working is marked failed. Tasks still running when the server stops are marked failed at the next start.
+
+## Review runs
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/runs-dark.png">
+  <img src="docs/screenshots/runs-light.png" alt="Runs page with a running task, completed runs that need review, a run stopped at the usage limit, and a suggested commit message">
+</picture>
+
+The Runs page lists each run with its model, start time, duration, exit code, session cost and tokens, followed by the run's final message. A run needs review when it left uncommitted changes or commits on a branch other than `main` or `master`. **Show changed files** lists what it touched. For uncommitted changes, Haiku suggests a conventional commit subject from the run's title, final message and file list; edit it if needed and press **Commit changes**, which commits only those files. **Mark run reviewed** clears a run without committing, and **Retry run** puts a failed or cancelled task back in the queue.
+
+## Analytics
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/analytics-dark.png">
+  <img src="docs/screenshots/analytics-light.png" alt="Analytics page with a busy-hours heatmap, daily active minutes by source, and responses by model, project and source">
+</picture>
+
+Analytics reads Claude Code's local transcripts and prompt history for the last 7, 14, 30 or 90 days. The page totals active minutes, responses and tokens, maps busy hours with the quiet start hours marked, charts daily active minutes by source or model, and breaks responses down by model, project and source. **Dispatched tasks** are runs the queue started, matched by session id. **Local Claude Code** is your interactive sessions, and **Unattributed** covers headless sessions the dashboard did not start. Usage from claude.ai or other machines shows up only in the official meters.
+
+## Queue from a terminal
 
 ```sh
-docker compose down
-mkdir -p ~/.local/share && mv data ~/.local/share/sessionmaxxing
-docker compose up -d --build
+sessionmaxxing-queue --title "Retry failed webhook deliveries" \
+  --prompt-file ./prompt.md --workdir ~/code/billing-api --model opus
 ```
 
-Starting first would create an empty data directory, which the move then refuses to overwrite. These paths assume `SESSIONMAXXING_HOME` is your home directory.
+In a source checkout the same helper is `node scripts/queue-task.mjs`. Before posting, it prints session and weekly usage, the quiet start hours and whether the queue would start the task now. Other flags are `--prompt`, `--priority`, `--window HH`, `--tokens N|auto`, `--depends-on ID[,ID]`, `--after ISO`, `--max-turns N`, `--url URL` and `--dry-run`. `--help` prints the full usage.
 
-## Restart methods
+`skills/queue-task` is a Claude Code skill that queues work through this helper when you ask Claude to queue something or run it later. Copy the folder to `~/.claude/skills/` to install it.
 
-Each work directory has a restart method, set in the **Restart** field of the task form and shared by every task in that directory. A directory without a method restarts nothing.
+## Keep session active
 
-| Method | What the server runs |
+A five-hour window opens with your first message after the previous one ended. **Keep session active** in Queue settings opens the next window as soon as the previous one ends, by running a one-turn `claude -p hi` on Haiku from your home directory, so windows run back to back. It works whether the queue is on or off, and it skips while a task is running or the weekly limit is at 100%.
+
+## Apply and restart
+
+With **Apply and restart without review** on (Queue settings, off by default), every run is told to edit its work directory in place and leave git alone, so its changes are live when it finishes. The instruction names the directory's restart method, so the agent leaves that step to the dashboard and runs any other deploy the project needs itself. After a run that completed with changes, the server runs the restart method of its work directory. The method is set in the task form's **Restart** field and shared by every task in that directory.
+
+| Method | What runs |
 | --- | --- |
 | None | Nothing |
-| Docker Compose | `docker compose build`, then `docker compose up -d`, in the directory |
-| Command | One argument per line, run in the directory without a shell. The first line is the program, found through `PATH` or relative to the directory. Up to 64 arguments of 4096 characters each |
+| Docker Compose | `docker compose build`, then `docker compose up -d`, in the work directory |
+| Command | One argument per line, run in the work directory without a shell |
 
-Methods live in `restart-methods.json`; `GET|PUT /api/restart-methods` reads and sets one.
+The run card shows **Restart queued**, **Restarting**, **Restarted** or **Restart failed**, with the output of a failed restart. No task starts while a restart is pending. Restarts run one at a time, and a step that runs longer than 30 minutes is stopped and fails the restart. In the Docker install, when the work directory is the dashboard's own Compose project, the restart runs from a short-lived sibling container, so the dashboard can rebuild and recreate itself.
 
-With **Apply and restart without review** on, a run that completes with commits or changed files gets its directory's method run by the server. The run card shows **Restart queued**, **Restarting**, **Restarted** or **Restart failed**, and a failed restart's last 64 KiB of output under **Restart output**. Nothing new starts until the restart ends. Restarts run one at a time, a step that runs past 30 minutes is stopped, and a dashboard stopped mid-restart records it as failed at the next start. Records live in `restarts/` in the data directory.
+## Lite edition
 
-The image carries the docker CLI with the compose and buildx plugins, and `compose.yaml` mounts `/var/run/docker.sock` with the group from `SESSIONMAXXING_DOCKER_GID`. Mounting the docker socket gives any dispatched prompt root on the host.
+`SESSIONMAXXING_EDITION=lite` serves only the Task queue and Runs pages, with session and weekly usage at the top of the queue. It leaves out analytics, token estimates, rate fitting and quiet hours. A lite task starts when a slot is free, the snapshot is fresh, session usage plus **Session held per running Claude task** (default 10 points) for each running task is at or below 100% minus **Session kept for you** (default 25%), and weekly usage passes the same pace check as in the full edition. Dependencies, repository locks, **Run task**, restart methods and **Keep session active** work as in the full edition.
 
-### The dashboard's own project
+A full start refuses a data directory that holds lite tasks. A lite start reads full data and ignores the token counts.
 
-When the work directory is the dashboard's own Compose project, the server builds in place, waits until no task runs, then starts the container `sessionmaxxing-restart-<run id>` from its own image to run `docker compose up -d`. The recreated dashboard records the result and removes that container. Limits:
+## Configuration
 
-- The sibling container sees only the work directory and the socket, so a Compose file that reaches outside the directory fails there.
-- A Command in the dashboard's own directory runs inside the dashboard. When it recreates the container, the restart shows as failed at the next start.
-- Native installs run the host's `docker` from `PATH`, and no directory counts as the dashboard's own.
-- The socket path is the Linux Docker Engine one.
+| Variable | Default | Meaning |
+| --- | --- | --- |
+| `SESSIONMAXXING_HOST` | `127.0.0.1` | Bind address, an IPv4 or IPv6 literal. A wider bind such as `0.0.0.0` also needs `SESSIONMAXXING_ALLOWED_HOSTS` |
+| `SESSIONMAXXING_PORT` | `4317` | Listen port |
+| `SESSIONMAXXING_ALLOWED_HOSTS` | empty | Comma-separated host names or addresses accepted besides `localhost`, `127.0.0.1` and the bind address. No ports, paths or wildcards |
+| `SESSIONMAXXING_DATA_DIR` | see [Data](#data) | Absolute path of the data directory |
+| `SESSIONMAXXING_WORKDIR_ROOT` | your home directory | Directory every task work directory must sit under |
+| `SESSIONMAXXING_EDITION` | `full` | `full` or `lite`; any other value stops startup |
+| `TZ` | the system zone | IANA time zone for day boundaries, quiet hours and every chart |
+| `SESSIONMAXXING_URL` | `http://127.0.0.1:4317` | Server the queue helper talks to |
+| `SESSIONMAXXING_PATH_MAP` | empty | `from=to[,from=to]` path prefixes the queue helper rewrites `--workdir` through, for a server that sees your folders under other paths |
 
-### Upgrading from the host deploy watcher
+Queue settings are edited in the dashboard and saved to `dispatch-settings.json`.
 
-Earlier versions redeployed Compose projects through a systemd user path unit. The first start of this version refuses to run while that watcher still has a request pending, and the message names the file. To upgrade:
+## Data
 
-1. Add `SESSIONMAXXING_DOCKER_GID` to `.env` before any Compose command: `printf 'SESSIONMAXXING_DOCKER_GID=%s\n' "$(stat -c %g /var/run/docker.sock)" >> .env`.
-2. Disable and delete the user units:
+All state lives in one directory, created with mode 0700: `SESSIONMAXXING_DATA_DIR` when set, else `$XDG_DATA_HOME/sessionmaxxing`, else `~/.local/share/sessionmaxxing`. It holds the queue, settings, usage samples, run records and restart records as JSON files, plus a lock file that keeps a second server off the directory. The server refuses to start on a corrupt file and leaves the file as it is.
 
-   ```sh
-   systemctl --user disable --now claude-dashboard-deploy.path
-   systemctl --user stop claude-dashboard-deploy.service
-   rm -f ~/.config/systemd/user/claude-dashboard-deploy.path ~/.config/systemd/user/claude-dashboard-deploy.service
-   systemctl --user daemon-reload && systemctl --user reset-failed
-   ```
+## Privacy and security
 
-3. Rebuild and start once from the host: `docker compose up -d --build`.
+The server calls two Anthropic endpoints: `api.anthropic.com/api/oauth/usage` for usage, and `platform.claude.com/v1/oauth/token` to refresh Claude Code's access token when it is about to expire. A refresh writes the new token to `~/.claude/.credentials.json`, the file Claude Code reads. No dashboard route returns the token, and the server makes no other network requests. The Claude Code processes it launches talk to Anthropic as usual.
 
-The first start gives every task directory that holds a Compose file the Docker Compose method, shows the old results on their run cards, and removes the old `deploy/` folder from the data directory.
+Transcript content stays on the server. The browser receives task prompts, work directories, each run's final message and changed files, and the output of a failed restart. Analytics carry only aggregates.
 
-## Privacy
+The dashboard has no login. Anyone who can reach it can queue a prompt, and every task runs as `claude --dangerously-skip-permissions`, so reaching the dashboard means running commands as you. Keep it on `127.0.0.1` or a private network. The server rejects requests addressed to a host name it does not allow, and requests whose `Origin` does not match the host.
 
-Transcript content is discarded at the parser boundary. The output of a failed restart is shown on its run card. Prompts and work directories stay on disk in `queue.json` and are never returned by the API. Run previews keep only allowlisted event labels and counters. Runtime state sits in the data directory described above.
+The Docker setup mounts `/var/run/docker.sock` so restart methods can run `docker compose`. Access to that socket is root on the host, so any dispatched prompt can gain root as well.
 
-## Layout
+## API
 
-| Path | Purpose |
+The UI talks to a JSON API on the same port.
+
+| Route | Purpose |
 | --- | --- |
-| `app/` | Next.js App Router: `layout.tsx`, `styles.css`, one `page.tsx` per route |
-| `app/components/` | Feature components by route (`overview/`, `analytics/`, `queue/`, `runs/`); shared ones at the root; `ui/` is shadcn |
-| `app/hooks/` | React hooks (`usePolling`, `useAnalytics`) |
-| `app/lib/` | Pure client logic: API client, time helpers, chart series, queue ordering, analytics cache |
-| `server/` | Fastify server, usage monitor, dispatcher, Claude launcher, transcript parser, data directory and environment settings |
-| `shared/` | Types, constants and zone-explicit time helpers shared by server and client |
-| `scripts/` | `queue-task.mjs` CLI |
-| `tests/` | Vitest suites, `helpers.ts`, `fixtures/` |
+| `GET /api/usage`, `POST /api/usage/refresh` | Latest snapshot, samples and session windows; fetch now |
+| `GET /api/queue`, `PUT /api/queue/auto`, `PUT /api/queue/order` | Tasks with their gate status; the queue switch; task order |
+| `POST /api/tasks`, `PATCH /api/tasks/:id`, `DELETE /api/tasks/:id` | Add, edit or delete a task |
+| `POST /api/tasks/:id/run`, `/cancel`, `/retry` | Run now, cancel or retry a task |
+| `GET /api/runs`, `GET /api/runs/pending-review` | Runs; runs that need review |
+| `POST /api/runs/:id/commit-message`, `/commit`, `/reviewed` | Suggest a commit subject, commit, mark reviewed |
+| `GET /api/dispatch-settings`, `PUT /api/dispatch-settings` | Queue settings and the current gate status |
+| `GET /api/restart-methods?workdir=`, `PUT /api/restart-methods` | A work directory's restart method |
+| `GET /api/environment` | Time zone, work-directory root and edition |
+| `GET /api/workdirs` | Recent Claude Code project directories |
+| `GET /api/analytics?days=30`, `GET /api/plan-score` | Local activity and plan score, full edition only |
 
-## Verification
+## Development
+
+Run `pnpm dev` for the API server and `pnpm dev:ui` for the Next.js dev server in two terminals. Before a commit, run:
 
 ```sh
 pnpm typecheck
@@ -229,8 +200,8 @@ pnpm test
 pnpm build
 ```
 
-Tests use synthetic transcripts, fake provider processes, and a stubbed usage fetcher. They never call Anthropic or launch coding agents. `tests/parallel.test.ts` and `tests/resources.test.ts` cover the slot bound, aggregate budget, collision rules, and multi-run recovery.
+Tests use synthetic transcripts, fake Claude processes and a stubbed usage fetcher. They never call Anthropic or start Claude Code.
 
 ## License
 
-Apache-2.0. See `LICENSE`.
+Apache-2.0. See [LICENSE](LICENSE).
