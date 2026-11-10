@@ -74,6 +74,8 @@ cp .env.example .env    # then fill in the fields
 docker compose up -d --build
 ```
 
+To queue from inside Claude Code, copy the [queue-task skill](skills/queue-task/SKILL.md) into `~/.claude/skills/` and ask Claude to "queue this".
+
 ## Security
 
 The dashboard has no login. Every task runs as `claude --dangerously-skip-permissions`, so anyone who can reach the dashboard can run commands as you. Keep it on `127.0.0.1` or a private network. The Docker setup also mounts `/var/run/docker.sock`, which gives any queued prompt root on the host.
