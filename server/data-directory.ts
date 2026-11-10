@@ -1,4 +1,4 @@
-import { lstat, mkdir, rename } from "node:fs/promises";
+import { lstat, mkdir, rename, stat } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { DomainError } from "./storage.js";
 
@@ -6,6 +6,7 @@ export const DATA_DIR_VARIABLE = "SESSIONMAXXING_DATA_DIR";
 export const LOCK_FILE = "server.lock";
 const APP_DIRECTORY = "sessionmaxxing";
 const LEGACY_DIRECTORY = "data";
+const QUEUE_FILE = "queue.json";
 const PRIVATE_DIRECTORY_MODE = 0o700;
 
 export type Env = Readonly<Record<string, string | undefined>>;
@@ -36,6 +37,16 @@ const exists = (path: string) =>
     () => true,
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT") return false;
+      throw error;
+    },
+  );
+
+// Every dashboard start writes queue.json, so a data/ folder without one belongs to another project.
+const holdsDashboardData = (directory: string) =>
+  stat(join(directory, QUEUE_FILE)).then(
+    () => true,
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return false;
       throw error;
     },
   );
@@ -100,6 +111,7 @@ export async function prepareDataDirectory(options: {
 }) {
   if (options.explicit !== undefined) return options.explicit;
   const target = resolveDataDirectory(options.env, options.home);
-  await moveLegacyData(join(options.cwd, LEGACY_DIRECTORY), target);
+  const legacy = join(options.cwd, LEGACY_DIRECTORY);
+  if (await holdsDashboardData(legacy)) await moveLegacyData(legacy, target);
   return target;
 }

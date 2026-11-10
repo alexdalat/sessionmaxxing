@@ -383,6 +383,57 @@ it("returns the resolved target without moving anything when the working directo
     await temp.cleanup();
   }
 });
+const PROJECT_ROWS = "id,value\n1,2\n";
+it.each([
+  [
+    "a project folder without queue.json",
+    async (path: string) => {
+      await mkdir(path);
+      await writeFile(join(path, "rows.csv"), PROJECT_ROWS);
+    },
+  ],
+  ["a regular file", (path: string) => writeFile(path, PROJECT_ROWS)],
+])(
+  "leaves %s named data in the working directory where it is",
+  async (_label, create) => {
+    const temp = await temporary();
+    try {
+      const home = join(temp.path, "home");
+      const cwd = join(temp.path, "cwd");
+      await mkdir(cwd);
+      await create(join(cwd, "data"));
+      const before = await describeTree(cwd);
+      expect(
+        await prepareDataDirectory({ explicit: undefined, env: {}, home, cwd }),
+      ).toBe(join(home, ".local/share/sessionmaxxing"));
+      expect(await describeTree(cwd)).toEqual(before);
+      expect(await exists(home)).toBe(false);
+    } finally {
+      await temp.cleanup();
+    }
+  },
+);
+it("starts beside a project's data folder when the data directory already exists", async () => {
+  const temp = await temporary();
+  try {
+    const home = join(temp.path, "home");
+    const cwd = join(temp.path, "cwd");
+    const target = join(home, ".local/share/sessionmaxxing");
+    await mkdir(join(cwd, "data"), { recursive: true });
+    await writeFile(join(cwd, "data", "rows.csv"), PROJECT_ROWS);
+    await mkdir(target, { recursive: true });
+    await writeFile(join(target, "queue.json"), '{"version":1}\n');
+    const cwdBefore = await describeTree(cwd);
+    const targetBefore = await describeTree(target);
+    expect(
+      await prepareDataDirectory({ explicit: undefined, env: {}, home, cwd }),
+    ).toBe(target);
+    expect(await describeTree(cwd)).toEqual(cwdBefore);
+    expect(await describeTree(target)).toEqual(targetBefore);
+  } finally {
+    await temp.cleanup();
+  }
+});
 it("honours SESSIONMAXXING_DATA_DIR as the destination of the move", async () => {
   const temp = await temporary();
   try {
