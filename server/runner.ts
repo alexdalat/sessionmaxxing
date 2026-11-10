@@ -268,12 +268,7 @@ export class Runner {
         endedAt: saved.endedAt,
         durationMs: saved.durationMs,
         exitCode: saved.exitCode,
-        error:
-          saved.error === LIMIT_STOP_ERROR
-            ? LIMIT_STOP_ERROR
-            : saved.error
-              ? "Previous run failed. See status or retry the task."
-              : null,
+        error: saved.error ?? null,
         tokens: savedTokens(saved.tokens),
         sessionId: typeof saved.sessionId === "string" ? saved.sessionId : null,
         summary: saved.summary ?? null,

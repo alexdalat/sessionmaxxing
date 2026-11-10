@@ -837,3 +837,25 @@ it("keeps the usage-limit reason of a stopped run across a restart so its task s
     await temp.cleanup();
   }
 });
+it("keeps the failure reason of a run across a restart", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    const task = await store.create(taskInput(temp.path));
+    const child = fakeChild();
+    const runner = await Runner.open(store, temp.path, { launch: () => child });
+    await runner.start(task.id);
+    child.emit("close", 1);
+    await runner.waitForIdle();
+    await runner.close();
+    const restarted = await Runner.open(store, temp.path, {
+      launch: () => fakeChild(),
+    });
+    expect(restarted.list()[0].error).toBe(
+      "Provider reported failure. Check CLI authentication, task settings, or retry.",
+    );
+    await restarted.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
