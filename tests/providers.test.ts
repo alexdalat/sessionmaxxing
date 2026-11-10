@@ -1,6 +1,7 @@
 import { expect, it, vi } from "vitest";
 import {
   autoApplyInstruction,
+  HEADLESS_INSTRUCTION,
   isLimitStop,
   launchProvider,
   RESUME_PROMPT,
@@ -10,7 +11,7 @@ import {
 import type { RestartMethod } from "../shared/types.js";
 import { fakeChild, taskInput } from "./helpers";
 
-it("launches the exact claude argv with no shell and the whole prompt as one argument", () => {
+it("launches the exact claude argv with no shell and the whole prompt, headless instruction appended, as one argument", () => {
   const child = fakeChild();
   const spawn = vi.fn<SpawnProvider>(() => child);
   const base = {
@@ -22,12 +23,13 @@ it("launches the exact claude argv with no shell and the whole prompt as one arg
     model: "opus",
   };
   const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
+  const launched = `${base.prompt}\n\n${HEADLESS_INSTRUCTION}`;
   launchProvider(base, sessionId, false, spawn);
   expect(spawn).toHaveBeenLastCalledWith(
     "claude",
     [
       "-p",
-      base.prompt,
+      launched,
       "--model",
       "opus",
       "--output-format",
@@ -46,9 +48,9 @@ it("launches the exact claude argv with no shell and the whole prompt as one arg
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
-  expect(spawn.mock.lastCall?.[1].filter((arg) => arg === base.prompt)).toEqual(
-    [base.prompt],
-  );
+  expect(spawn.mock.lastCall?.[1].filter((arg) => arg === launched)).toEqual([
+    launched,
+  ]);
 });
 it("bounds previews and redacts arbitrary text, credentials, environment values, IDs, and message contents across chunks", async () => {
   const { OutputPreview } = await import("../server/output.js");
@@ -157,7 +159,7 @@ it.each(APPLY_METHODS)(
     );
   },
 );
-it("resumes the stopped Claude session with the resume prompt instead of the task prompt", () => {
+it("resumes the stopped Claude session with the resume prompt, headless instruction appended, instead of the task prompt", () => {
   const child = fakeChild();
   const spawn = vi.fn<SpawnProvider>(() => child);
   const task = {
@@ -171,7 +173,10 @@ it("resumes the stopped Claude session with the resume prompt instead of the tas
   const sessionId = "4f1c2b6e-2a3d-4e5f-8a9b-0c1d2e3f4a5b";
   launchProvider(task, sessionId, true, spawn);
   const args = spawn.mock.calls[0][1];
-  expect(args.slice(0, 2)).toEqual(["-p", RESUME_PROMPT]);
+  expect(args.slice(0, 2)).toEqual([
+    "-p",
+    `${RESUME_PROMPT}\n\n${HEADLESS_INSTRUCTION}`,
+  ]);
   expect(args.slice(-2)).toEqual(["--resume", sessionId]);
   expect(args).not.toContain("--session-id");
 });

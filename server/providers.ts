@@ -56,6 +56,9 @@ export const isLimitStop = (summary: string | null) =>
   summary !== null && LIMIT_STOP.test(summary);
 export const RESUME_PROMPT =
   "The Claude usage limit stopped you before you finished. The limit has reset; continue the task from where you left off.";
+/** `claude -p` exits when the lead turn ends and kills whatever still runs, so a queued run has to wait in the foreground. */
+export const HEADLESS_INSTRUCTION =
+  "This run is headless: the process exits as soon as your turn ends, which kills any subagent or background command still running. Start subagents and long commands in the foreground (several subagents in one message still run in parallel) and never end your turn while one is still working.";
 export function launchProvider(
   task: Task,
   sessionId: string,
@@ -66,7 +69,7 @@ export function launchProvider(
     CLAUDE_COMMAND,
     [
       "-p",
-      resume ? RESUME_PROMPT : task.prompt,
+      `${resume ? RESUME_PROMPT : task.prompt}\n\n${HEADLESS_INSTRUCTION}`,
       "--model",
       task.model,
       "--output-format",
