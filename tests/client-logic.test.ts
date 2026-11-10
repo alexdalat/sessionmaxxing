@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { activitySeries, type Breakdown } from "../app/lib/activitySeries";
+import { activitySeries } from "../app/lib/activitySeries";
 import {
   formatMetric,
   heatmapTotals,
@@ -9,20 +9,16 @@ import { describeHours, quietSummary } from "../app/lib/dispatchSummary";
 import { formatDuration } from "../app/lib/duration";
 import { modelOptions } from "../app/lib/models";
 import { dayTicks, paceSeries } from "../app/lib/pace";
-import { scoreSeries } from "../app/lib/planScore";
 import { displayOrder, movedPast, moveTarget } from "../app/lib/queueOrder";
 import { queuePreview, waitNote } from "../app/lib/queuePreview";
 import { allowedStartHours } from "../app/lib/quietHours";
 import { clockOfFraction, daySegments } from "../app/lib/sessionWindows";
 import { localCell, localDay } from "../app/lib/time";
 import type {
-  ActivitySource,
   ChangedFile,
-  CoverageDay,
   DailyActivity,
   HeatCell,
   Opportunity,
-  PlanScore as PlanScoreData,
   PublicTask,
   Run,
   SessionWindow,
@@ -514,174 +510,6 @@ describe("source rows", () => {
       });
       expect(rows.slice(0, -1).every((row) => row.measured)).toBe(true);
     }
-  });
-});
-
-describe("plan score series", () => {
-  const coverageDay = (
-    date: string,
-    coverage: number | null,
-    sources: Partial<Record<ActivitySource, number>> = {},
-    models: Record<string, number> = {},
-  ): CoverageDay => ({
-    date,
-    coverage,
-    sources: { local: 0, dispatched: 0, unknown: 0, ...sources },
-    models,
-  });
-  const plan: PlanScoreData = {
-    score: 71,
-    sessionCoverage: 62,
-    weeklyScore: 80,
-    days: [
-      coverageDay(
-        "2026-08-30",
-        40.5,
-        { local: 30, dispatched: 10 },
-        { "claude-opus-4-6": 30, "claude-fable-5-1": 10 },
-      ),
-      coverageDay("2026-08-31", null),
-      coverageDay(
-        "2026-09-02",
-        88,
-        { local: 60, dispatched: 20, unknown: 20 },
-        {
-          "claude-opus-4-6": 60,
-          "claude-fable-5-1": 20,
-          "claude-haiku-4-5": 20,
-        },
-      ),
-      coverageDay("2026-09-06", 12.5),
-    ],
-    weeks: [
-      {
-        start: "2026-08-24T07:53:00.000Z",
-        end: "2026-08-31T07:53:00.000Z",
-        percent: 64,
-        score: 64,
-        complete: true,
-      },
-      {
-        start: "2026-08-31T07:53:00.000Z",
-        end: "2026-09-07T07:53:00.000Z",
-        percent: 45,
-        score: 80,
-        complete: false,
-      },
-    ],
-    generatedAt: "2026-09-06T14:00:00.000Z",
-  };
-
-  const rowFor = (breakdown: Breakdown, date: string) =>
-    scoreSeries(plan, breakdown, TEST_TIME_ZONE).rows.find(
-      (row) => row.date === date,
-    );
-
-  it("gives each day its coverage and the score of the week containing it", () => {
-    expect(rowFor("source", "2026-08-30")).toMatchObject({
-      coverage: 40.5,
-      weekly: 64,
-    });
-    expect(rowFor("source", "2026-09-02")).toMatchObject({
-      coverage: 88,
-      weekly: 80,
-    });
-  });
-
-  it("scores a date after the last week as null weekly", () => {
-    const { rows } = scoreSeries(
-      { ...plan, days: [coverageDay("2026-09-09", 30, { local: 5 })] },
-      "source",
-      TEST_TIME_ZONE,
-    );
-    expect(rows).toEqual([
-      {
-        date: "2026-09-09",
-        coverage: 30,
-        weekly: null,
-        local: 30,
-        dispatched: 0,
-        unknown: 0,
-      },
-    ]);
-  });
-
-  it("splits coverage across sources in proportion to minutes and sums back to coverage", () => {
-    const row = rowFor("source", "2026-09-02");
-    expect(row).toMatchObject({ local: 52, dispatched: 18, unknown: 18 });
-    expect(
-      [...ACTIVITY_SOURCES].reduce(
-        (sum, source) => sum + Number(row?.[source]),
-        0,
-      ),
-    ).toBeCloseTo(88);
-  });
-
-  it("splits coverage across models and folds the unnamed ones", () => {
-    const { keys } = scoreSeries(plan, "model", TEST_TIME_ZONE);
-    expect(keys).toEqual([
-      "claude-opus-4-6",
-      "claude-fable-5-1",
-      "claude-haiku-4-5",
-      "Other",
-    ]);
-    expect(rowFor("model", "2026-09-02")).toMatchObject({
-      "claude-opus-4-6": 52,
-      "claude-fable-5-1": 18,
-      "claude-haiku-4-5": 18,
-      Other: 0,
-    });
-  });
-
-  it("puts coverage with no local minutes on Unattributed", () => {
-    expect(rowFor("source", "2026-09-06")).toMatchObject({
-      coverage: 12.5,
-      local: 0,
-      dispatched: 0,
-      unknown: 12.5,
-    });
-    expect(rowFor("model", "2026-09-06")).toMatchObject({
-      "claude-opus-4-6": 0,
-      Other: 12.5,
-    });
-  });
-
-  it("assigns a day to the week containing its local noon", () => {
-    const boundary = "2026-09-07T10:00:00.000Z";
-    const split: PlanScoreData = {
-      ...plan,
-      days: [coverageDay("2026-09-07", 30, { local: 5 })],
-      weeks: [
-        {
-          start: "2026-08-31T10:00:00.000Z",
-          end: boundary,
-          percent: 70,
-          score: 70,
-          complete: true,
-        },
-        {
-          start: boundary,
-          end: "2026-09-14T10:00:00.000Z",
-          percent: 90,
-          score: 90,
-          complete: false,
-        },
-      ],
-    };
-    expect(scoreSeries(split, "source", "Asia/Kolkata").rows[0].weekly).toBe(
-      70,
-    );
-    expect(scoreSeries(split, "source", TEST_TIME_ZONE).rows[0].weekly).toBe(
-      90,
-    );
-  });
-
-  it("leaves null-coverage days without series fields", () => {
-    expect(rowFor("source", "2026-08-31")).toEqual({
-      date: "2026-08-31",
-      coverage: null,
-      weekly: 80,
-    });
   });
 });
 

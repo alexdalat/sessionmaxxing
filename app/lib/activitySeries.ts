@@ -19,7 +19,7 @@ export const BREAKDOWNS: { value: Breakdown; label: string }[] = [
   { value: "model", label: "Model" },
 ];
 export const MAX_MODEL_SERIES = 4;
-export const OTHER_SERIES = "Other";
+const OTHER_SERIES = "Other";
 
 export interface ActivityRow {
   date: string;
@@ -28,8 +28,8 @@ export interface ActivityRow {
   [series: string]: number | string;
 }
 
-/** A day whose active minutes are already split by owner: both DailyActivity and CoverageDay. */
-export interface Partitioned {
+/** A day whose active minutes are already split by owner. */
+interface Partitioned {
   date: string;
   sources: Record<ActivitySource, number>;
   models: Record<string, number>;
@@ -52,12 +52,12 @@ function modelKeys(daily: Partitioned[]) {
   return otherMinutes > 0 ? [...top, OTHER_SERIES] : top;
 }
 
-export function partitionKeys(days: Partitioned[], breakdown: Breakdown) {
+function partitionKeys(days: Partitioned[], breakdown: Breakdown) {
   return breakdown === "source" ? [...ACTIVITY_SOURCES] : modelKeys(days);
 }
 
 /** Active minutes of `day` per key, with the models outside `keys` folded into Other. */
-export function partitionShares(
+function partitionShares(
   day: Partitioned,
   breakdown: Breakdown,
   keys: string[],
