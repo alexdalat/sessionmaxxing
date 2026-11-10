@@ -501,7 +501,7 @@ export interface BucketGate {
   percent: number | null;
   ceiling: number;
   pace: number | null;
-  /** Points held for runs in progress; the bucket passes when percent + reserved ≤ ceiling. */
+  /** Points held for runs in progress; the session bucket passes when percent + reserved ≤ ceiling, the weekly and Fable buckets also add runWeeklyCostPercent for the task being admitted. */
   reserved: number;
   ok: boolean;
 }
