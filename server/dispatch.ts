@@ -461,16 +461,17 @@ export function costsAhead(
   return costs;
 }
 
-/** When the pace-based weekly ceiling rises past what the bucket uses and holds, or the window reset when it never does. */
+/** When the pace-based weekly ceiling rises past what the bucket uses, holds and charges the task, or the window reset when it never does. */
 function weeklyClearsAt(
   gate: BucketGate,
   resetsAt: string | null,
   marginPercent: number,
+  charge: number,
 ): number | null {
   if (resetsAt === null) return null;
   const reset = Date.parse(resetsAt);
   if (gate.percent === null) return reset;
-  const needed = gate.percent + gate.reserved;
+  const needed = gate.percent + gate.reserved + charge;
   if (needed > WEEKLY_HARD_CEILING_PERCENT) return reset;
   const neededPace = needed - marginPercent;
   return Math.min(reset, reset - WEEK_MS + (neededPace / FULL) * WEEK_MS);
@@ -600,6 +601,7 @@ function startsAt(
         weekly,
         usage.weekly.resetsAt,
         settings.weeklyMarginPercent,
+        settings.runWeeklyCostPercent,
       );
   if (weeklyAt === null) return null;
   const fableAt =
@@ -608,6 +610,7 @@ function startsAt(
           fable,
           usage.fable?.resetsAt ?? null,
           settings.weeklyMarginPercent,
+          settings.runWeeklyCostPercent,
         )
       : now;
   if (fableAt === null) return null;

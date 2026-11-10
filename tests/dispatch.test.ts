@@ -669,7 +669,23 @@ it("predicts the session reset, shifted to the next quiet hour, for a task witho
   );
 });
 
-it("predicts when the rising weekly pace ceiling clears the measured percent", () => {
+it("waits until the weekly pace covers the task's own charge", () => {
+  const planning = plan(
+    usageSnapshot({
+      weekly: { percent: 59, resetsAt: "2026-09-10T00:00:00Z" },
+    }),
+    null,
+    anyHour,
+  );
+  expect(taskGate(pending, planning, now, [])).toEqual({
+    status: "waiting",
+    reason:
+      "Weekly 59% + 3% expected, over the 60% queue cutoff (pace 50% + 10% margin)",
+    eligibleAt: "2026-09-06T15:21:36.000Z",
+  });
+});
+
+it("predicts when the rising weekly pace ceiling clears the measured percent plus the task's own charge", () => {
   const planning = plan(
     usageSnapshot({
       weekly: { percent: 70, resetsAt: "2026-09-10T00:00:00Z" },
@@ -680,7 +696,7 @@ it("predicts when the rising weekly pace ceiling clears the measured percent", (
   expect(planning.weekly).toMatchObject({ ceiling: 60, pace: 50, ok: false });
   expect(taskGate(pending, planning, now, [])).toMatchObject({
     status: "waiting",
-    eligibleAt: "2026-09-07T04:48:00.000Z",
+    eligibleAt: "2026-09-07T09:50:24.000Z",
   });
 });
 
@@ -987,7 +1003,7 @@ it("places a preferred window that opens in busy hours only where its cutoff fit
   });
 });
 
-it("waits for the weekly ceiling to clear what running tasks hold on top of the measured percent", () => {
+it("waits for the weekly ceiling to clear what running tasks hold and the task's own charge on top of the measured percent", () => {
   const load = {
     ...EMPTY_LOAD,
     running: 1,
@@ -1003,10 +1019,10 @@ it("waits for the weekly ceiling to clear what running tasks hold on top of the 
     undefined,
     load,
   );
-  // 57% + 3% held needs the pace-plus-10% ceiling at 60%, a pace of 50%: half of the week from Sep 3, 12:00 UTC.
+  // 57% + 3% held + 3% for this task needs the pace-plus-10% ceiling at 63%, a pace of 53%: 53% of the week from Sep 3, 12:00 UTC is Sep 7, 05:02:24 UTC.
   expect(taskGate(pending, planning, now, [])).toMatchObject({
     status: "waiting",
-    eligibleAt: "2026-09-07T00:00:00.000Z",
+    eligibleAt: "2026-09-07T05:02:24.000Z",
   });
 });
 
