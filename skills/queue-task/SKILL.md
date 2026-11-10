@@ -8,17 +8,20 @@ description: Queue a coding task on the local SessionMaxxing dashboard so it run
 On claude.ai the dashboard is unreachable: it is a loopback or private-network service and
 no `curl` or `node` runs there. In that setting, skip the capacity check and instead write
 out the exact command for the user to paste into a terminal that can reach it — a
-`node scripts/queue-task.mjs ...` invocation, or a `curl -X POST .../api/tasks` with a
+`sessionmaxxing-queue ...` invocation, or a `curl -X POST .../api/tasks` with a
 JSON body — with the prompt spelled out in full inside it, since nothing else can
 supply it later.
 
-The SessionMaxxing dashboard (run `node scripts/queue-task.mjs` from its checkout) keeps a
+The SessionMaxxing dashboard keeps a
 queue and auto-dispatches tasks into the quietest five-hour windows, gated by official Claude
 usage. Up to `settings.maxConcurrentRuns` tasks (default 2) run together when their
 work directories belong to different repositories; tasks in the same repository, a
 nested directory, or another worktree of the same repository wait for each other, and
 each running Claude task holds the session percent its own expected tokens cost
 until it finishes. Queue work here instead of burning the current session.
+
+The npm package installs the `sessionmaxxing-queue` command. In a source checkout,
+run `node scripts/queue-task.mjs` from the checkout instead; it takes the same flags.
 
 ## 1. Check capacity
 
@@ -56,7 +59,7 @@ Write long prompts to a file in your scratchpad directory and pass `--prompt-fil
 ## 3. Queue it
 
 ```sh
-node scripts/queue-task.mjs \
+sessionmaxxing-queue \
   --title "Rename the parser" \
   --prompt-file /tmp/claude-*/scratchpad/queued-prompt.md \
   --workdir /path/to/some-repo \

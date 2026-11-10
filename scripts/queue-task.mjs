@@ -16,7 +16,7 @@ const CONNECTION_CODES = new Set([
   "ENOTFOUND",
   "ETIMEDOUT",
 ]);
-const USAGE = `Usage: node scripts/queue-task.mjs --title "..." (--prompt "..." | --prompt-file PATH)
+const USAGE = `Usage: sessionmaxxing-queue --title "..." (--prompt "..." | --prompt-file PATH)
   [--workdir /abs/path]  default: the current directory
   [--model NAME] [--priority N]
   [--max-turns N]        default: 500
