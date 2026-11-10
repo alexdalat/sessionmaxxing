@@ -17,15 +17,8 @@ import { TOOLTIP_CLASS } from "@/app/lib/chart";
 import { blueAlpha, FIELD, INK, ORANGE } from "@/app/lib/palette";
 import { allowedStartHours } from "@/app/lib/quietHours";
 import { localCell, WEEKDAYS } from "@/app/lib/time";
-import type { Analytics, HeatCell, HeatShare } from "@/shared/types";
-import {
-  ACTIVITY_SOURCE_LABELS,
-  ACTIVITY_SOURCES,
-  formatTokens,
-  HOURS,
-  hourLabel,
-  shortHourLabel,
-} from "@/shared/types";
+import type { Analytics, HeatCell } from "@/shared/types";
+import { HOURS, hourLabel, shortHourLabel } from "@/shared/types";
 
 const HOURS_PER_DAY = 24;
 const CELL_BASE_ALPHA = 0.12;
@@ -37,7 +30,7 @@ const minutes = (value: number) => `${formatNumber(Math.round(value))} min`;
 const cellTitle = (cell: HeatCell) =>
   `${WEEKDAYS[cell.day]} ${hourLabel(cell.hour)} – ${hourLabel((cell.hour + 1) % HOURS_PER_DAY)}`;
 const cellDescription = (cell: HeatCell) =>
-  `${cellTitle(cell)}, ${cell.activeMinutes} active minutes, ${cell.responses} responses, ${cell.sources.dispatched} dispatched minutes`;
+  `${cellTitle(cell)}, ${cell.activeMinutes} active minutes, ${cell.sources.dispatched} dispatched minutes`;
 const dispatchedShare = (cell: HeatCell) =>
   cell.activeMinutes ? cell.sources.dispatched / cell.activeMinutes : 0;
 
@@ -49,46 +42,13 @@ function Row({ label, value }: { label: string; value: string }) {
     </span>
   );
 }
-function Shares({ title, items }: { title: string; items: HeatShare[] }) {
-  if (!items.length) return null;
-  return (
-    <>
-      <span className="heat-group">{title}</span>
-      {items.map((item) => (
-        <Row
-          key={item.name}
-          label={item.name}
-          value={minutes(item.activeMinutes)}
-        />
-      ))}
-    </>
-  );
-}
 function CellDetails({ cell }: { cell: HeatCell }) {
   return (
     <>
       <strong className="font-medium">{cellTitle(cell)}</strong>
-      {cell.activeMinutes ? (
-        <>
-          <Row label="Active" value={minutes(cell.activeMinutes)} />
-          <Row label="Responses" value={formatNumber(cell.responses)} />
-          <Row label="Avg" value={minutes(cell.averageActiveMinutes)} />
-          <Row label="Tokens" value={formatTokens(cell.tokens)} />
-          <span className="heat-group">Source</span>
-          {ACTIVITY_SOURCES.filter((source) => cell.sources[source] > 0).map(
-            (source) => (
-              <Row
-                key={source}
-                label={ACTIVITY_SOURCE_LABELS[source]}
-                value={minutes(cell.sources[source])}
-              />
-            ),
-          )}
-          <Shares title="Models" items={cell.models} />
-          <Shares title="Projects" items={cell.projects} />
-        </>
-      ) : (
-        <span>0 min</span>
+      <Row label="Active" value={minutes(cell.activeMinutes)} />
+      {cell.sources.dispatched > 0 && (
+        <Row label="Dispatched" value={minutes(cell.sources.dispatched)} />
       )}
     </>
   );
