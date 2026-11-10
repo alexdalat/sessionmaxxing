@@ -1,6 +1,6 @@
 # SessionMaxxing
 
-Local-only dashboard whose single goal is to get the most out of a Claude Max subscription: fill five-hour session windows that would otherwise go unused with queued Claude Code tasks, while keeping the weekly limit on pace so interactive work never gets cut off.
+Local-only dashboard whose single goal is to get the most out of a Claude subscription (Pro, Max, Team or Enterprise): fill five-hour session windows that would otherwise go unused with queued Claude Code tasks, while keeping the weekly limit on pace so interactive work never gets cut off.
 
 ## Stack
 

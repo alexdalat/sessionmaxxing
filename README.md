@@ -1,6 +1,6 @@
 # SessionMaxxing
 
-A local dashboard for one job: squeeze the most out of a Claude Max plan. It shows Anthropic's official usage for the three buckets Max enforces (Session 5h, Weekly, Fable weekly), records how much of each five-hour window you actually used, and auto-dispatches queued Claude Code tasks into idle windows while keeping weekly usage on pace.
+A local dashboard for one job: squeeze the most out of any Claude plan (Pro, Max, Team or Enterprise). It shows Anthropic's official usage for the buckets your plan enforces (Session 5h, Weekly, and per-model weekly limits such as Fable), records how much of each five-hour window you actually used, and auto-dispatches queued Claude Code tasks into idle windows while keeping weekly usage on pace.
 
 ## Install natively
 
@@ -12,7 +12,14 @@ pnpm build
 pnpm start
 ```
 
-Run these from the repository root; the server serves the build from `dist/client` relative to its working directory. It listens on http://127.0.0.1:4317. For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs). The lite edition serves only `/queue/` and `/runs/`.
+Or install the published package, which puts `sessionmaxxing` (the server) and `sessionmaxxing-queue` (the queue helper below) on your PATH:
+
+```sh
+npm install --global sessionmaxxing
+sessionmaxxing
+```
+
+The server serves the build from the `dist/client` folder next to its own files, so it starts from any working directory. It listens on http://127.0.0.1:4317. For development run `pnpm dev` and `pnpm dev:ui` in separate terminals. The UI is a Next.js static export with four routes: `/` (Overview), `/analytics/` (Analytics), `/queue/` (Task queue), and `/runs/` (Runs). The lite edition serves only `/queue/` and `/runs/`.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -82,7 +89,7 @@ Each Claude task carries **Tokens**, the weighted count the whole run is expecte
 
 ## Queueing work
 
-`scripts/queue-task.mjs` queues a task from any terminal without opening the UI:
+`scripts/queue-task.mjs` (installed as `sessionmaxxing-queue` by the npm package) queues a task from any terminal without opening the UI:
 
 ```sh
 node scripts/queue-task.mjs --title "Rename the parser" --prompt-file ./prompt.md \
@@ -222,4 +229,8 @@ pnpm test
 pnpm build
 ```
 
-Tests use synthetic transcripts, fake provider processes, and a stubbed usage fetcher. They never call Anthropic or launch coding agents. `tests/parallel.test.ts` and `tests/resources.test.ts` cover the slot bound, aggregate budget, collision rules, and multi-run recovery; the design note is `reports/parallel-dispatch-design.md`.
+Tests use synthetic transcripts, fake provider processes, and a stubbed usage fetcher. They never call Anthropic or launch coding agents. `tests/parallel.test.ts` and `tests/resources.test.ts` cover the slot bound, aggregate budget, collision rules, and multi-run recovery.
+
+## License
+
+Apache-2.0. See `LICENSE`.

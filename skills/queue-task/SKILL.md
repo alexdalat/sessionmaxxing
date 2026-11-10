@@ -1,6 +1,6 @@
 ---
 name: queue-task
-description: Queue a coding task on the local SessionMaxxing dashboard so it runs automatically in a quiet hour / next session instead of now. Use when the user says "queue this", "run this later", "schedule for tonight", or when Claude Max session usage is above ~75%.
+description: Queue a coding task on the local SessionMaxxing dashboard so it runs automatically in a quiet hour / next session instead of now. Use when the user says "queue this", "run this later", "schedule for tonight", or when Claude session usage is above ~75%.
 ---
 
 # Queue a task on SessionMaxxing
@@ -13,7 +13,7 @@ JSON body — with the prompt spelled out in full inside it, since nothing else 
 supply it later.
 
 The SessionMaxxing dashboard (run `node scripts/queue-task.mjs` from its checkout) keeps a
-queue and auto-dispatches tasks into the quietest five-hour windows, gated by official Claude Max
+queue and auto-dispatches tasks into the quietest five-hour windows, gated by official Claude
 usage. Up to `settings.maxConcurrentRuns` tasks (default 2) run together when their
 work directories belong to different repositories; tasks in the same repository, a
 nested directory, or another worktree of the same repository wait for each other, and

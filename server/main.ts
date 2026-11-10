@@ -1,7 +1,9 @@
+#!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { mkdir, open, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import type { FastifyInstance } from "fastify";
 import { PRODUCT_NAME } from "../shared/product.js";
 import type { HistoryData } from "../shared/types.js";
@@ -28,6 +30,7 @@ import { UsageMonitor } from "./usage-monitor.js";
 
 const PORT_VARIABLE = "SESSIONMAXXING_PORT";
 const DEFAULT_PORT = 4317;
+const CLIENT_ROOT = fileURLToPath(new URL("../../client", import.meta.url));
 
 interface StartOptions {
   port?: number;
@@ -128,7 +131,7 @@ export async function startDashboard(
       keeper,
       edition,
       loadHistory: options.loadHistory,
-      staticRoot: options.development ? undefined : resolve("dist/client"),
+      staticRoot: options.development ? undefined : CLIENT_ROOT,
     });
     app.addHook("onClose", async () => usage.stop());
     app.addHook("onClose", async () => keeper.close());
@@ -146,7 +149,7 @@ export async function startDashboard(
 }
 if (
   process.argv[1] &&
-  import.meta.url === pathToFileURL(resolve(process.argv[1])).href
+  import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href
 ) {
   try {
     const app = await startDashboard({

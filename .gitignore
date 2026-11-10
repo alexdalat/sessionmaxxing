@@ -12,3 +12,5 @@ next-env.d.ts
 *.tsbuildinfo
 .env
 compose.override.yaml
+.planning/
+reports/
