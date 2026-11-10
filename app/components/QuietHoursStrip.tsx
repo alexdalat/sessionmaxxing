@@ -1,6 +1,6 @@
 "use client";
 import { Skeleton } from "@/app/components/ui/skeleton";
-import { inkAlpha } from "@/app/lib/palette";
+import { blueAlpha } from "@/app/lib/palette";
 import { allowedStartHours } from "@/app/lib/quietHours";
 import { hourLabel, type Opportunity } from "@/shared/types";
 
@@ -10,10 +10,10 @@ const SKELETON_KEYS = Array.from({ length: HOURS }, (_, hour) => hour);
 const BASE_ALPHA = 0.12;
 const ACTIVE_ALPHA = 0.8;
 const cellShade = (utilization: number) =>
-  inkAlpha(BASE_ALPHA + ACTIVE_ALPHA * Math.min(1, Math.max(0, utilization)));
+  blueAlpha(BASE_ALPHA + ACTIVE_ALPHA * Math.min(1, Math.max(0, utilization)));
 
 const cellLabel = (opportunity: Opportunity) =>
-  `${hourLabel(opportunity.startHour)} · avg ${Math.round(opportunity.averageActiveMinutes)} min`;
+  `${hourLabel(opportunity.startHour)}, average ${Math.round(opportunity.averageActiveMinutes)} active minutes`;
 
 export function QuietHoursStrip({
   opportunities,

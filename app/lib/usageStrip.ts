@@ -1,19 +1,22 @@
 import { formatRemaining } from "@/app/lib/duration";
 import {
+  type BucketGate,
   CLAUDE_BUCKET_LABELS,
   type ClaudeBucket,
+  MINUTE_MS,
   type PlanningBase,
   planLabel,
   USAGE_STALE_MS,
   type UsageSnapshot,
 } from "@/shared/types";
 
-const STRIP_BUCKETS = ["session", "weekly"] as const satisfies ClaudeBucket[];
 export const NOT_STARTED = "not started";
+const NOT_STARTED_NOTE = "Not started";
 const NO_PERCENT = "—";
 const NOT_FETCHED = "Not fetched yet";
+const FETCHED_NOW = "Fetched just now";
 
-export type StripBucket = (typeof STRIP_BUCKETS)[number];
+export type StripBucket = ClaudeBucket;
 export type PaceTone = "under" | "over";
 
 export interface StripRow {
@@ -21,6 +24,7 @@ export interface StripRow {
   label: string;
   percentText: string;
   fill: number;
+  held: number;
   ceiling: number;
   cutoffText: string;
   heldText: string | null;
@@ -28,10 +32,13 @@ export interface StripRow {
   paceText: string | null;
   paceTone: PaceTone | null;
   resetText: string;
+  resetNote: string;
   ariaLabel: string;
 }
 
-type StripPlanning = Pick<PlanningBase, "session" | "weekly" | "usage">;
+type StripPlanning = Pick<PlanningBase, "session" | "weekly" | "usage"> & {
+  fable?: BucketGate | null;
+};
 
 const percentOf = (value: number) => `${Math.round(value)}%`;
 
@@ -40,7 +47,7 @@ function paceOf(
   percent: number | null,
   pace: number | null,
 ) {
-  if (bucket !== "weekly" || pace === null) {
+  if (bucket === "session" || pace === null) {
     return { pace: null, paceText: null, paceTone: null };
   }
   if (percent === null) return { pace, paceText: null, paceTone: null };
@@ -61,16 +68,21 @@ function resetTextOf(resetsAt: string | null | undefined, now: number) {
     : NOT_STARTED;
 }
 
+/** Session and weekly rows, then a Fable row when Anthropic reports that window. */
 export function usageStripRows(
   planning: StripPlanning,
   now: number,
 ): StripRow[] {
-  return STRIP_BUCKETS.map((bucket) => {
-    const gate = planning[bucket];
+  const gates: [StripBucket, BucketGate][] = [
+    ["session", planning.session],
+    ["weekly", planning.weekly],
+  ];
+  if (planning.fable) gates.push(["fable", planning.fable]);
+  return gates.map(([bucket, gate]) => {
     const label = CLAUDE_BUCKET_LABELS[bucket];
     const percentText =
       gate.percent === null ? NO_PERCENT : percentOf(gate.percent);
-    const resetText = resetTextOf(planning.usage?.[bucket].resetsAt, now);
+    const resetText = resetTextOf(planning.usage?.[bucket]?.resetsAt, now);
     const cutoffText = `Cutoff ${percentOf(gate.ceiling)}`;
     const heldText =
       gate.reserved > 0 ? `Held ${percentOf(gate.reserved)}` : null;
@@ -84,16 +96,20 @@ export function usageStripRows(
     ]
       .filter(Boolean)
       .join(". ");
+    const fill = Math.min(100, gate.percent ?? 0);
     return {
       bucket,
       label,
       percentText,
-      fill: Math.min(100, gate.percent ?? 0),
+      fill,
+      held: Math.min(gate.reserved, 100 - fill),
       ceiling: gate.ceiling,
       cutoffText,
       heldText,
       ...pace,
       resetText,
+      resetNote:
+        resetText === NOT_STARTED ? NOT_STARTED_NOTE : `Resets in ${resetText}`,
       ariaLabel,
     };
   });
@@ -103,7 +119,7 @@ export function fetchedLabel(usage: UsageSnapshot | null, now: number) {
   if (usage === null) return { text: NOT_FETCHED, stale: false };
   const age = now - Date.parse(usage.fetchedAt);
   return {
-    text: `Fetched ${formatRemaining(age)} ago`,
+    text: age < MINUTE_MS ? FETCHED_NOW : `Fetched ${formatRemaining(age)} ago`,
     stale: age > USAGE_STALE_MS,
   };
 }

@@ -1,33 +1,51 @@
 "use client";
-import { useEffect, useState } from "react";
+import {
+  ArrowDown,
+  ArrowUp,
+  CircleStop,
+  Pencil,
+  Play,
+  Plus,
+  RotateCw,
+  Settings2,
+  Trash2,
+} from "lucide-react";
+import { useEffect, useId, useState } from "react";
 import { ConfirmDialog } from "@/app/components/ConfirmDialog";
 import { DispatchSettingsDialog } from "@/app/components/DispatchSettingsDialog";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
-import { QueueBadges } from "@/app/components/QueueBadges";
-import {
-  TaskListSkeleton,
-  UsageStripSkeleton,
-} from "@/app/components/Skeletons";
+import { IconButton } from "@/app/components/IconButton";
+import { PageHeader } from "@/app/components/PageHeader";
+import { QueueStatus } from "@/app/components/QueueStatus";
+import { Segmented } from "@/app/components/Segmented";
+import { KpisSkeleton, TaskListSkeleton } from "@/app/components/Skeletons";
+import { UsageKpis } from "@/app/components/UsageKpis";
 import { Button } from "@/app/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/app/components/ui/select";
+import { Label } from "@/app/components/ui/label";
+import { Switch } from "@/app/components/ui/switch";
 import { useClock } from "@/app/hooks/useClock";
 import { useNotice } from "@/app/hooks/useNotice";
 import { usePolling } from "@/app/hooks/usePolling";
 import { ACTIVE_QUEUE_PATH, api } from "@/app/lib/api";
 import { ACTION_LABELS, FIELD_LABELS } from "@/app/lib/labels";
 import { displayOrder, movedPast, moveTarget } from "@/app/lib/queueOrder";
+import {
+  fetchedLabel,
+  stripHeading,
+  usageStripRows,
+} from "@/app/lib/usageStrip";
 import type { PublicTask, QueueSnapshot, TaskInput } from "@/shared/types";
 import { TaskCard } from "./TaskCard";
 import { TaskFormDialog } from "./TaskForm";
-import { UsageStrip } from "./UsageStrip";
 
 const LEAVE_MS = 240;
+const LITE_BUCKETS = 2;
+type Filter = "all" | "ready" | "waiting";
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "ready", label: "Ready" },
+  { value: "waiting", label: "Waiting" },
+];
 type Confirmation = { kind: "delete" | "run"; task: PublicTask };
 export function TaskQueue() {
   const {
@@ -35,7 +53,8 @@ export function TaskQueue() {
     error: loadError,
     reload,
   } = usePolling<QueueSnapshot & { runnerError?: string }>(ACTIVE_QUEUE_PATH);
-  const [filter, setFilter] = useState("all");
+  const [filter, setFilter] = useState<Filter>("all");
+  const queueSwitchId = useId();
   const [error, setError] = useState("");
   const [notice, setNotice] = useNotice();
   const [busy, setBusy] = useState(false);
@@ -74,9 +93,7 @@ export function TaskQueue() {
       reload();
       return true;
     } catch (error) {
-      setError(
-        error instanceof Error ? error.message : "Could not update queue.",
-      );
+      setError(error instanceof Error ? error.message : String(error));
       return false;
     } finally {
       setBusy(false);
@@ -86,7 +103,7 @@ export function TaskQueue() {
     const saved = await mutate(
       editing ? `/api/tasks/${editing.id}` : "/api/tasks",
       editing ? "PATCH" : "POST",
-      editing ? "Task updated." : "Task added.",
+      editing ? "Task updated" : "Task added",
       input,
     );
     if (saved) {
@@ -101,7 +118,7 @@ export function TaskQueue() {
     const deleted = await mutate(
       `/api/tasks/${task.id}`,
       "DELETE",
-      "Task deleted.",
+      "Task deleted",
     );
     if (!deleted)
       setLeaving((ids) => {
@@ -113,7 +130,7 @@ export function TaskQueue() {
   function runConfirmed({ kind, task }: Confirmation) {
     setConfirm(undefined);
     if (kind === "delete") void remove(task);
-    else void mutate(`/api/tasks/${task.id}/run`, "POST", "Task started.");
+    else void mutate(`/api/tasks/${task.id}/run`, "POST", "Task started");
   }
   function openAdd() {
     setEditing(undefined);
@@ -144,7 +161,7 @@ export function TaskQueue() {
       neighbor.id,
       offset,
     );
-    void mutate("/api/queue/order", "PUT", "Order updated.", { ids });
+    void mutate("/api/queue/order", "PUT", "Order updated", { ids });
   }
   const dependencyTitles = (task: PublicTask) =>
     task.dependsOn.flatMap((id) => {
@@ -153,6 +170,7 @@ export function TaskQueue() {
     });
   const taskCard = (task: PublicTask) => {
     const isLeaving = leaving.has(task.id);
+    const named = (label: string) => `${label}: ${task.title}`;
     return (
       <TaskCard
         key={task.id}
@@ -165,105 +183,143 @@ export function TaskQueue() {
         <div className="task-actions">
           {task.status === "pending" && (
             <>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
+              <IconButton
+                label={ACTION_LABELS.runTask}
+                aria-label={named(ACTION_LABELS.runTask)}
                 disabled={
                   busy ||
                   slotsFull ||
                   isLeaving ||
                   task.gate?.blockedBy !== undefined
                 }
-                aria-label={`${ACTION_LABELS.runTask}: ${task.title}`}
                 onClick={() => setConfirm({ kind: "run", task })}
               >
-                {ACTION_LABELS.runTask}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
+                <Play />
+              </IconButton>
+              <IconButton
+                label={ACTION_LABELS.editTask}
+                aria-label={named(ACTION_LABELS.editTask)}
                 disabled={busy || isLeaving}
-                aria-label={`${ACTION_LABELS.editTask}: ${task.title}`}
                 onClick={() => {
                   setEditing(task);
                   setNotice("");
                   setFormOpen(true);
                 }}
               >
-                {ACTION_LABELS.editTask}
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled={busy || isLeaving || !moveTarget(ordered, task, -1)}
+                <Pencil />
+              </IconButton>
+              <IconButton
+                label="Move up"
                 aria-label={`Move ${task.title} up`}
+                disabled={busy || isLeaving || !moveTarget(ordered, task, -1)}
                 onClick={() => move(task, -1)}
               >
-                ↑
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                disabled={busy || isLeaving || !moveTarget(ordered, task, 1)}
+                <ArrowUp />
+              </IconButton>
+              <IconButton
+                label="Move down"
                 aria-label={`Move ${task.title} down`}
+                disabled={busy || isLeaving || !moveTarget(ordered, task, 1)}
                 onClick={() => move(task, 1)}
               >
-                ↓
-              </Button>
+                <ArrowDown />
+              </IconButton>
             </>
           )}
-          {task.status === "running" && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
+          {task.status === "running" ? (
+            <IconButton
+              label={ACTION_LABELS.cancelTask}
+              aria-label={named(ACTION_LABELS.cancelTask)}
               disabled={busy || isLeaving}
-              aria-label={`${ACTION_LABELS.cancelTask}: ${task.title}`}
               onClick={() =>
                 void mutate(
                   `/api/tasks/${task.id}/cancel`,
                   "POST",
-                  "Cancelling task.",
+                  "Cancelling task",
                 )
               }
             >
-              {ACTION_LABELS.cancelTask}
-            </Button>
-          )}
-          {task.status !== "running" && (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
+              <CircleStop />
+            </IconButton>
+          ) : (
+            <IconButton
+              label={ACTION_LABELS.deleteTask}
+              aria-label={named(ACTION_LABELS.deleteTask)}
               disabled={busy || isLeaving}
-              aria-label={`${ACTION_LABELS.deleteTask}: ${task.title}`}
               onClick={() => setConfirm({ kind: "delete", task })}
             >
-              {ACTION_LABELS.deleteTask}
-            </Button>
+              <Trash2 />
+            </IconButton>
           )}
         </div>
       </TaskCard>
     );
   };
+  const planning = data?.planning;
+  const fetched = fetchedLabel(planning?.usage ?? null, now);
+  const errors = [
+    error,
+    loadError,
+    data?.runnerError,
+    edition === "lite" ? planning?.usageError : null,
+  ].filter(Boolean);
   return (
-    <>
-      {(error || loadError || data?.runnerError) && (
-        <section className="panel span-12" data-tone="paper" role="alert">
-          <h2 className="panel-label">Error</h2>
-          <p className="error-message">
-            {error || loadError || data?.runnerError}
-          </p>
-          <div className="panel-tools">
-            <Button type="button" variant="outline" size="sm" onClick={reload}>
-              {ACTION_LABELS.refreshQueue}
+    <div className="page">
+      <PageHeader
+        title="Task queue"
+        status={
+          <>
+            <QueueStatus planning={planning} queueOn={data?.autoDispatch} />
+            {planning?.gate.status === "waiting" && (
+              <span>{planning.gate.reason}</span>
+            )}
+            {planning?.settings.autoApply && <span>Auto-apply on</span>}
+            {planning?.settings.keepSessionActive && (
+              <span>Session keeper on</span>
+            )}
+          </>
+        }
+        actions={
+          <>
+            <div className="switch-field">
+              <Switch
+                id={queueSwitchId}
+                checked={data?.autoDispatch ?? false}
+                disabled={!data || busy}
+                onCheckedChange={(enabled) =>
+                  void mutate("/api/queue/auto", "PUT", "", { enabled })
+                }
+              />
+              <Label htmlFor={queueSwitchId}>{ACTION_LABELS.runQueue}</Label>
+            </div>
+            <IconButton
+              label={ACTION_LABELS.editSettings}
+              size="icon"
+              disabled={!planning}
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings2 />
+            </IconButton>
+            <Button type="button" onClick={openAdd}>
+              <Plus />
+              {ACTION_LABELS.addTask}
             </Button>
+          </>
+        }
+      />
+      {errors.length > 0 && (
+        <div className="alert" role="alert">
+          <div className="grid gap-2">
+            {errors.map((message) => (
+              <p className="error" key={message}>
+                {message}
+              </p>
+            ))}
           </div>
-        </section>
+          <Button type="button" variant="secondary" size="sm" onClick={reload}>
+            {ACTION_LABELS.refreshQueue}
+          </Button>
+        </div>
       )}
       {notice && (
         <p role="status" className="toast">
@@ -271,65 +327,54 @@ export function TaskQueue() {
         </p>
       )}
       {edition === "lite" &&
-        (data?.planning ? (
-          <UsageStrip planning={data.planning} now={now} onRefreshed={reload} />
+        (planning ? (
+          <UsageKpis
+            rows={usageStripRows(planning, now)}
+            head={
+              <>
+                <h2 className="section-title">
+                  {stripHeading(planning.usage)}
+                </h2>
+                <div className="section-tools">
+                  <span
+                    className="muted"
+                    data-tone={fetched.stale ? "attention" : undefined}
+                  >
+                    {fetched.text}
+                  </span>
+                  <IconButton
+                    label={ACTION_LABELS.refreshUsage}
+                    disabled={busy}
+                    onClick={() =>
+                      void mutate("/api/usage/refresh", "POST", "")
+                    }
+                  >
+                    <RotateCw />
+                  </IconButton>
+                </div>
+              </>
+            }
+          />
         ) : (
-          !data && !loadError && <UsageStripSkeleton />
+          !data && !loadError && <KpisSkeleton count={LITE_BUCKETS} />
         ))}
-      <section className="panel span-12" data-tone="paper">
-        <h2 className="panel-label">Queued tasks</h2>
-        <div className="panel-tools">
-          <div className="tool-group">
-            <Button
-              type="button"
-              role="switch"
-              aria-checked={data?.autoDispatch ?? false}
-              disabled={!data || busy}
-              variant={data?.autoDispatch ? "default" : "outline"}
-              size="sm"
-              onClick={() =>
-                void mutate("/api/queue/auto", "PUT", "", {
-                  enabled: !(data?.autoDispatch ?? false),
-                })
-              }
-            >
-              {ACTION_LABELS.runQueue}
-            </Button>
-            <QueueBadges planning={data?.planning} />
-          </div>
-          <div className="tool-group">
-            <Select value={filter} onValueChange={setFilter}>
-              <SelectTrigger aria-label={FIELD_LABELS.filterTasks}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All</SelectItem>
-                <SelectItem value="ready">Ready</SelectItem>
-                <SelectItem value="waiting">Waiting</SelectItem>
-              </SelectContent>
-            </Select>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!data?.planning}
-              onClick={() => setSettingsOpen(true)}
-            >
-              {ACTION_LABELS.editSettings}
-            </Button>
-            <Button type="button" size="sm" onClick={openAdd}>
-              {ACTION_LABELS.addTask}
-            </Button>
-          </div>
+      <section className="section" aria-label="Tasks">
+        <div className="section-head">
+          <Segmented
+            label={FIELD_LABELS.filterTasks}
+            value={filter}
+            options={FILTERS}
+            onChange={setFilter}
+          />
         </div>
         {!data && !loadError ? (
           <TaskListSkeleton />
         ) : visibleTasks.length ? (
-          visibleTasks.map(taskCard)
+          <ol className="list">{visibleTasks.map(taskCard)}</ol>
         ) : (
-          <h3 className="empty-heading">
+          <p className="empty">
             {ordered.length ? "No tasks match this filter" : "No tasks yet"}
-          </h3>
+          </p>
         )}
       </section>
       <TaskFormDialog
@@ -341,11 +386,11 @@ export function TaskQueue() {
         busy={busy}
         onClose={closeForm}
       />
-      {data?.planning && (
+      {planning && (
         <DispatchSettingsDialog
           key={String(settingsOpen)}
           open={settingsOpen}
-          settings={data.planning.settings}
+          settings={planning.settings}
           onClose={() => setSettingsOpen(false)}
           onSaved={reload}
         />
@@ -370,6 +415,6 @@ export function TaskQueue() {
         onConfirm={() => confirm && runConfirmed(confirm)}
         onClose={() => setConfirm(undefined)}
       />
-    </>
+    </div>
   );
 }

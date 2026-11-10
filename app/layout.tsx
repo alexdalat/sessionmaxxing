@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import type { ReactNode } from "react";
 import "@fontsource-variable/geist";
-import "@fontsource/courier-prime/400.css";
+import "@fontsource-variable/geist-mono";
 import "./styles.css";
 import { EnvironmentProvider } from "@/app/components/EnvironmentProvider";
 import { Sidebar } from "@/app/components/Sidebar";
@@ -17,8 +17,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: light)", color: LIGHT.frame },
-    { media: DARK_QUERY, color: DARK.frame },
+    { media: "(prefers-color-scheme: light)", color: LIGHT.page },
+    { media: DARK_QUERY, color: DARK.page },
   ],
   // Shrink the layout viewport when the phone keyboard opens so dialogs sized in
   // dvh keep their submit row above it.

@@ -1,4 +1,5 @@
 "use client";
+import { Moon, Sun } from "lucide-react";
 import { useEffect, useState } from "react";
 import { FIELD_LABELS } from "@/app/lib/labels";
 import type { Theme } from "@/app/lib/palette";
@@ -35,14 +36,16 @@ export function ThemeToggle() {
     applyTheme(next);
     setTheme(next);
   };
+  const Icon = theme === "dark" ? Sun : Moon;
   return (
     <button
       type="button"
-      className="theme-toggle"
+      className="nav-item"
       aria-pressed={theme === "dark"}
       onClick={toggle}
     >
-      {FIELD_LABELS.darkMode}
+      <Icon aria-hidden="true" />
+      <span className="nav-label">{FIELD_LABELS.darkMode}</span>
     </button>
   );
 }

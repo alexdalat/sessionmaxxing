@@ -47,7 +47,7 @@ export function ConfirmDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="actions">
-          <Button type="button" variant="outline" onClick={onClose}>
+          <Button type="button" variant="secondary" onClick={onClose}>
             {dismissLabel}
           </Button>
           <Button

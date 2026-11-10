@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { activitySeries, type Breakdown } from "../app/lib/activitySeries";
-import { heatmapTotals, sourceRows } from "../app/lib/analyticsRows";
+import {
+  formatMetric,
+  heatmapTotals,
+  sourceRows,
+} from "../app/lib/analyticsRows";
 import { describeHours, quietSummary } from "../app/lib/dispatchSummary";
+import { formatDuration } from "../app/lib/duration";
 import { modelOptions } from "../app/lib/models";
 import { dayTicks, paceSeries } from "../app/lib/pace";
 import { scoreSeries } from "../app/lib/planScore";
@@ -934,5 +939,41 @@ describe("localCell", () => {
       day: 1,
       hour: 0,
     });
+  });
+});
+
+describe("formatMetric", () => {
+  it("groups digits below one hundred thousand", () => {
+    expect(formatMetric(0)).toBe("0");
+    expect(formatMetric(1234)).toBe("1,234");
+    expect(formatMetric(99_999)).toBe("99,999");
+  });
+
+  it("switches to three significant digits with a suffix at one hundred thousand", () => {
+    expect(formatMetric(100_000)).toBe("100K");
+    expect(formatMetric(456_789)).toBe("457K");
+  });
+
+  it("keeps three significant digits for millions and billions", () => {
+    expect(formatMetric(1_234_567)).toBe("1.23M");
+    expect(formatMetric(12_345_678)).toBe("12.3M");
+    expect(formatMetric(4_560_000_000)).toBe("4.56B");
+  });
+});
+
+describe("formatDuration", () => {
+  it("counts whole seconds under a minute", () => {
+    expect(formatDuration(0)).toBe("0s");
+    expect(formatDuration(42_400)).toBe("42s");
+  });
+
+  it("adds seconds to minutes under an hour", () => {
+    expect(formatDuration(185_000)).toBe("3m 5s");
+    expect(formatDuration(3_599_000)).toBe("59m 59s");
+  });
+
+  it("drops seconds from an hour on", () => {
+    expect(formatDuration(3_600_000)).toBe("1h 0m");
+    expect(formatDuration(4_830_000)).toBe("1h 20m");
   });
 });

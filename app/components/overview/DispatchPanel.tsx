@@ -1,36 +1,19 @@
 "use client";
-import { useState } from "react";
+import { Settings2 } from "lucide-react";
+import { useId, useState } from "react";
 import { DispatchSettingsDialog } from "@/app/components/DispatchSettingsDialog";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
-import { QueueBadges } from "@/app/components/QueueBadges";
-import { Badge } from "@/app/components/ui/badge";
+import { QueueStatus } from "@/app/components/QueueStatus";
 import { Button } from "@/app/components/ui/button";
 import { quietSummary } from "@/app/lib/dispatchSummary";
 import { ACTION_LABELS } from "@/app/lib/labels";
 import { queuePreview } from "@/app/lib/queuePreview";
 import { localClock } from "@/shared/local-time";
 import type {
-  BucketGate,
   FullPlanning,
   PublicTask,
   SessionKeeperState,
 } from "@/shared/types";
-
-function Bucket({ name, gate }: { name: string; gate: BucketGate }) {
-  const percent = gate.percent ?? 0;
-  return (
-    <>
-      {name} <strong className="metric">{percent}%</strong>
-      {gate.reserved > 0 && (
-        <>
-          {" "}
-          + <span className="metric">{gate.reserved}%</span> held
-        </>
-      )}{" "}
-      of {gate.ceiling}%
-    </>
-  );
-}
 
 export function DispatchPanel({
   planning,
@@ -48,104 +31,86 @@ export function DispatchPanel({
   onSaved: () => void;
 }) {
   const { timeZone } = useEnvironment();
+  const headingId = useId();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const pending = tasks?.filter((task) => task.status === "pending") ?? [];
-  const counts = [
-    ["pending", String(pending.length)],
-    ["ready", String(pending.filter((t) => t.gate?.status === "ready").length)],
-    [
-      "waiting",
-      String(pending.filter((t) => t.gate?.status === "waiting").length),
-    ],
-    [
-      "running",
-      `${planning.load.running}/${planning.settings.maxConcurrentRuns}`,
-    ],
-  ] as const;
-  const gate = planning.gate;
-  const queueLabel =
-    queueOn === undefined ? "…" : queueOn ? "Queue on" : "Queue off";
+  const count = (status: "ready" | "waiting") =>
+    tasks
+      ? String(pending.filter((task) => task.gate?.status === status).length)
+      : "—";
+  const { settings } = planning;
+  const stats: [string, string][] = [
+    ["Ready", count("ready")],
+    ["Waiting", count("waiting")],
+    ["Running", `${planning.load.running}/${settings.maxConcurrentRuns}`],
+  ];
+  if (settings.keepSessionActive)
+    stats.push([
+      "Session keeper",
+      keeper?.lastStartedAt
+        ? `Pinged ${localClock(keeper.lastStartedAt, timeZone)}`
+        : "On",
+    ]);
+  if (settings.autoApply) stats.push(["Auto-apply", "On"]);
   const rows = tasks ? queuePreview(tasks, now) : null;
   return (
-    <section
-      className="panel span-5 dispatch-panel"
-      data-tone="pink"
-      aria-label="Queue"
-    >
-      <h2 className="panel-label">Queue</h2>
-      <div className="panel-tools">
-        <div className="tool-group">
-          <Badge variant={queueOn ? "success" : "warning"}>{queueLabel}</Badge>
-          <QueueBadges planning={planning} />
+    <section className="section cols-side" aria-labelledby={headingId}>
+      <div className="section-head">
+        <div className="flex items-center gap-4">
+          <h2 className="section-title" id={headingId}>
+            Queue
+          </h2>
+          <QueueStatus planning={planning} queueOn={queueOn} />
         </div>
         <Button
           type="button"
-          variant="outline"
-          size="sm"
+          variant="ghost"
+          size="icon-sm"
+          aria-label={ACTION_LABELS.editSettings}
           onClick={() => setSettingsOpen(true)}
         >
-          {ACTION_LABELS.editSettings}
+          <Settings2 />
         </Button>
       </div>
-      <p className="dispatch-reason">
-        {gate.status === "ready" ? (
-          <>
-            <Bucket name="Session" gate={planning.session} />
-            {" · "}
-            <Bucket name="Weekly" gate={planning.weekly} />
-            {planning.fable && (
-              <>
-                {" · "}
-                <Bucket name="Fable" gate={planning.fable} />
-              </>
-            )}
-          </>
-        ) : (
-          gate.reason
-        )}
-      </p>
-      <p className="dispatch-quiet">
-        {quietSummary(planning.quiet, planning.settings)}
-      </p>
-      {planning.settings.keepSessionActive && keeper?.lastStartedAt && (
-        <p className="dispatch-quiet">
-          Session keeper · last start{" "}
-          {localClock(keeper.lastStartedAt, timeZone)}
-        </p>
+      {planning.gate.status === "waiting" && (
+        <p className="queue-gate">{planning.gate.reason}</p>
       )}
+      <p className="queue-quiet">{quietSummary(planning.quiet, settings)}</p>
       {keeper?.error && (
-        <p role="alert" className="error">
+        <p role="alert" className="error mt-3">
           {keeper.error}
         </p>
       )}
-      <ol className="dispatch-list">
+      <ol className="queue-list">
         {rows?.map((row) => (
           <li
-            className="dispatch-task"
+            className="queue-row"
             data-state={row.state}
             key={row.id}
             title={row.reason}
           >
-            <span className="dispatch-title">{row.title}</span>
-            <span className="dispatch-note">{row.note}</span>
+            <span className="queue-title">{row.title}</span>
+            <span className="queue-note">{row.note}</span>
           </li>
         ))}
         {rows?.length === 0 && (
-          <li className="dispatch-task muted">Queue empty</li>
+          <li className="queue-row" data-state="empty">
+            Nothing queued
+          </li>
         )}
       </ol>
-      <p className="dispatch-counts">
-        {counts.map(([label, value], index) => (
-          <span key={label}>
-            {index > 0 && " · "}
-            <span className="metric">{tasks ? value : "—"}</span> {label}
-          </span>
+      <dl className="stats">
+        {stats.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
         ))}
-      </p>
+      </dl>
       <DispatchSettingsDialog
         key={settingsOpen ? "open" : "closed"}
         open={settingsOpen}
-        settings={planning.settings}
+        settings={settings}
         onClose={() => setSettingsOpen(false)}
         onSaved={onSaved}
       />

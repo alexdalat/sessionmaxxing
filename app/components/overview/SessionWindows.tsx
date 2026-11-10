@@ -1,5 +1,5 @@
 "use client";
-import { type MouseEvent, useState } from "react";
+import { type MouseEvent, useId, useState } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Skeleton } from "@/app/components/ui/skeleton";
 import {
@@ -9,7 +9,7 @@ import {
 } from "@/app/components/ui/tooltip";
 import { TOOLTIP_CLASS } from "@/app/lib/chart";
 import { formatRemaining } from "@/app/lib/duration";
-import { inkAlpha, tokenVar } from "@/app/lib/palette";
+import { blueAlpha, tokenVar } from "@/app/lib/palette";
 import {
   clockOfFraction,
   daySegments,
@@ -34,10 +34,10 @@ const blockLabel = (window: SessionWindow) =>
     ? activeLabel(window)
     : `${Math.round(window.peakPercent)}%`;
 const blockDescription = (window: SessionWindow, timeZone: string) =>
-  `${localClock(window.start, timeZone)} – ${localClock(window.end, timeZone)} · ${
+  `${localClock(window.start, timeZone)} – ${localClock(window.end, timeZone)}, ${
     window.peakPercent === null
       ? `active ${activeLabel(window)}`
-      : `peak ${Math.round(window.peakPercent)}%`
+      : `used ${Math.round(window.peakPercent)}%`
   }`;
 
 export function SessionWindows({
@@ -48,6 +48,7 @@ export function SessionWindows({
   now: number;
 }) {
   const { timeZone } = useEnvironment();
+  const headingId = useId();
   const [hover, setHover] = useState<number | null>(null);
   const track = (event: MouseEvent<HTMLUListElement>) => {
     const element = (event.target as HTMLElement).closest(".windows-track");
@@ -68,29 +69,31 @@ export function SessionWindows({
   const peaks = (windows ?? []).flatMap((w) =>
     w.peakPercent === null ? [] : [w.peakPercent],
   );
-  const summary = [
-    `${Math.round(idleShare * 100)}% of the week idle`,
-    `${used} window${used === 1 ? "" : "s"}`,
-    ...(peaks.length
-      ? [
-          `avg peak ${Math.round(peaks.reduce((sum, peak) => sum + peak, 0) / peaks.length)}%`,
-        ]
-      : []),
-  ].join(" · ");
+  const averagePeak = peaks.length
+    ? Math.round(peaks.reduce((sum, peak) => sum + peak, 0) / peaks.length)
+    : null;
+  const stats = [
+    ["Idle", `${Math.round(idleShare * 100)}%`],
+    ["Windows", String(used)],
+    ...(averagePeak === null ? [] : [["Avg used", `${averagePeak}%`]]),
+  ];
   return (
-    <section
-      className="panel span-7"
-      data-tone="paper"
-      aria-label="Session windows over the last 7 days"
-    >
-      <h2 className="panel-label">Session windows · last 7 days</h2>
-      <div className="panel-tools">
+    <section className="section cols-main" aria-labelledby={headingId}>
+      <div className="section-head">
+        <h2 className="section-title" id={headingId}>
+          Session windows
+        </h2>
         {windows === undefined ? (
-          <Skeleton className="h-3 w-64" />
+          <Skeleton className="h-4 w-56" />
         ) : (
-          <span className="panel-meta">
-            {used ? summary : "No windows recorded yet"}
-          </span>
+          <dl className="stats">
+            {stats.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
         )}
       </div>
       <ul
@@ -100,8 +103,11 @@ export function SessionWindows({
       >
         {dates.map((date) => (
           <li className="windows-row" key={date}>
-            <span className="windows-day">
-              {weekdayOf(date)} <small>{date.slice(5)}</small>
+            <span
+              className="windows-day"
+              data-today={date === today.date || undefined}
+            >
+              {weekdayOf(date)}
             </span>
             <div className="windows-track">
               {segments
@@ -118,7 +124,7 @@ export function SessionWindows({
                           style={{
                             left: pct(segment.from),
                             width: pct(segment.to - segment.from),
-                            background: inkAlpha(step.alpha),
+                            background: blueAlpha(step.alpha),
                             color: tokenVar(step.label),
                           }}
                           role="img"
@@ -142,7 +148,7 @@ export function SessionWindows({
                         <span>
                           {segment.window.peakPercent === null
                             ? "From local transcripts"
-                            : `Peak ${Math.round(segment.window.peakPercent)}% · ${segment.window.samples} sample${segment.window.samples === 1 ? "" : "s"}`}
+                            : `Used ${Math.round(segment.window.peakPercent)}%`}
                         </span>
                         <span>Active {activeLabel(segment.window)}</span>
                       </TooltipContent>

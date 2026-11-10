@@ -12,6 +12,7 @@ import {
 } from "@/app/components/ui/dialog";
 import { Input } from "@/app/components/ui/input";
 import { Label } from "@/app/components/ui/label";
+import { Switch } from "@/app/components/ui/switch";
 import {
   readCachedAnalytics,
   writeCachedAnalytics,
@@ -265,38 +266,27 @@ export function DispatchSettingsDialog({
                   />
                 </div>
               ))}
-              <div className="full">
-                <span className="field-label">
+              <div className="switch-field full">
+                <Switch
+                  id={`${fieldId}-auto-apply`}
+                  checked={draft.autoApply}
+                  onCheckedChange={(autoApply) =>
+                    setDraft({ ...draft, autoApply })
+                  }
+                />
+                <Label htmlFor={`${fieldId}-auto-apply`}>
                   Apply and restart without review
-                </span>
-                <Button
-                  type="button"
-                  role="switch"
-                  aria-checked={draft.autoApply}
-                  variant={draft.autoApply ? "default" : "outline"}
-                  onClick={() =>
-                    setDraft({ ...draft, autoApply: !draft.autoApply })
-                  }
-                >
-                  {draft.autoApply ? "On" : "Off"}
-                </Button>
+                </Label>
               </div>
-              <div className="full">
-                <span className="field-label">Keep session active</span>
-                <Button
-                  type="button"
-                  role="switch"
-                  aria-checked={draft.keepSessionActive}
-                  variant={draft.keepSessionActive ? "default" : "outline"}
-                  onClick={() =>
-                    setDraft({
-                      ...draft,
-                      keepSessionActive: !draft.keepSessionActive,
-                    })
+              <div className="switch-field full">
+                <Switch
+                  id={`${fieldId}-keeper`}
+                  checked={draft.keepSessionActive}
+                  onCheckedChange={(keepSessionActive) =>
+                    setDraft({ ...draft, keepSessionActive })
                   }
-                >
-                  {draft.keepSessionActive ? "On" : "Off"}
-                </Button>
+                />
+                <Label htmlFor={`${fieldId}-keeper`}>Keep session active</Label>
               </div>
               {edition === "full" && (
                 <QuietHoursField
@@ -309,7 +299,7 @@ export function DispatchSettingsDialog({
           <div className="actions">
             <Button
               type="button"
-              variant="outline"
+              variant="secondary"
               onClick={onClose}
               disabled={busy}
             >

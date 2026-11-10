@@ -1,23 +1,16 @@
 "use client";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   Bar,
   BarChart,
   CartesianGrid,
-  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
 } from "recharts";
-import { Label } from "@/app/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/app/components/ui/select";
+import { Legend } from "@/app/components/Legend";
+import { Segmented } from "@/app/components/Segmented";
 import {
   type ActivityRow,
   activitySeries,
@@ -26,9 +19,13 @@ import {
   seriesColor,
   seriesLabel,
 } from "@/app/lib/activitySeries";
-import { formatNumber, sourceRows } from "@/app/lib/analyticsRows";
 import {
-  AXIS_TEXT_COLOR,
+  formatMetric,
+  formatNumber,
+  sourceRows,
+} from "@/app/lib/analyticsRows";
+import {
+  AXIS_PROPS,
   BAR_SEPARATOR,
   CHART_CURSOR_FILL,
   CHART_MARGIN,
@@ -41,82 +38,71 @@ import { FIELD_LABELS } from "@/app/lib/labels";
 import type { Analytics, Mix, SourceActivity } from "@/shared/types";
 import { Heatmap } from "./Heatmap";
 
-function MixList({
-  title,
-  items,
-  tone,
-}: {
-  title: string;
-  items: Mix[];
-  tone: "pink" | "paper";
-}) {
-  const max = Math.max(1, ...items.map((i) => i.responses));
+const CHART_HEIGHT = 260;
+const EXTERNAL_SOURCE_TITLE = "claude.ai and other machines";
+const dayLabel = (date: string) =>
+  new Date(`${date}T00:00:00Z`).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+
+interface MixRow {
+  name: string;
+  responses: number | null;
+  title?: string;
+}
+
+function MixList({ title, rows }: { title: string; rows: MixRow[] }) {
+  const headingId = useId();
+  const max = Math.max(1, ...rows.map((row) => row.responses ?? 0));
   return (
-    <section className="panel span-4" data-tone={tone}>
-      <h2 className="panel-label">{title}</h2>
-      {items.length ? (
+    <section className="section" aria-labelledby={headingId}>
+      <div className="section-head">
+        <h2 className="section-title" id={headingId}>
+          {title}
+        </h2>
+        <span className="muted">Responses</span>
+      </div>
+      {rows.length ? (
         <ul className="mix-list">
-          {items.map((item) => (
-            <li key={item.name}>
-              <div>
-                <span>{item.name}</span>
-                <span className="metric">{formatNumber(item.responses)}</span>
+          {rows.map((row) => (
+            <li key={row.name} title={row.title}>
+              <div className="mix-row">
+                <span>{row.name}</span>
+                <span>
+                  {row.responses === null ? "–" : formatNumber(row.responses)}
+                </span>
               </div>
-              <meter
-                min={0}
-                max={max}
-                value={item.responses}
-                aria-label={`${item.name} responses`}
-              />
+              {row.responses !== null && (
+                <meter
+                  min={0}
+                  max={max}
+                  value={row.responses}
+                  aria-label={`${row.name} responses`}
+                />
+              )}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="muted">No responses in this range.</p>
+        <p className="muted">No responses in this range</p>
       )}
     </section>
   );
 }
 
-const AXIS_TICK = { fill: AXIS_TEXT_COLOR, fontSize: 12 };
-const EXTERNAL_SOURCE_TITLE = "claude.ai and other machines";
+const mixRows = (items: Mix[]): MixRow[] =>
+  items.map((item) => ({ name: item.name, responses: item.responses }));
 
-function SourceMix({ sources }: { sources: SourceActivity[] }) {
-  const rows = sourceRows(sources);
-  const max = Math.max(1, ...rows.map((row) => row.responses));
-  return (
-    <section className="panel span-4" data-tone="pink">
-      <h2 className="panel-label">Source mix · responses</h2>
-      <ul className="mix-list">
-        {rows.map((row) => (
-          <li
-            key={row.label}
-            title={
-              row.measured
-                ? `${formatNumber(row.activeMinutes)} active minutes · ${formatNumber(Math.round(row.tokens))} weighted tokens`
-                : EXTERNAL_SOURCE_TITLE
-            }
-          >
-            <div>
-              <span>{row.label}</span>
-              <span className="metric">
-                {row.measured ? formatNumber(row.responses) : "–"}
-              </span>
-            </div>
-            {row.measured && (
-              <meter
-                min={0}
-                max={max}
-                value={row.responses}
-                aria-label={`${row.label} responses`}
-              />
-            )}
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
+const sourceMixRows = (sources: SourceActivity[]): MixRow[] =>
+  sourceRows(sources).map((row) => ({
+    name: row.label,
+    responses: row.measured ? row.responses : null,
+    title: row.measured
+      ? `${formatNumber(row.activeMinutes)} active minutes, ${formatNumber(Math.round(row.tokens))} weighted tokens`
+      : EXTERNAL_SOURCE_TITLE,
+  }));
 
 export function AnalyticsView({
   data,
@@ -125,79 +111,71 @@ export function AnalyticsView({
   data: Analytics;
   quietStartHours?: number;
 }) {
+  const chartHeadingId = useId();
   const [breakdown, setBreakdown] = useState<Breakdown>("source");
   const { keys, rows } = activitySeries(data.daily, breakdown);
+  const kpis: [string, number][] = [
+    ["Active minutes", data.totals.activeMinutes],
+    ["Responses", data.totals.responses],
+    [
+      "Input + output tokens",
+      data.totals.inputTokens + data.totals.outputTokens,
+    ],
+    ["Cache-read tokens", data.totals.cacheReadTokens],
+  ];
   return (
     <>
-      {[
-        ["Active minutes", data.totals.activeMinutes],
-        ["Responses", data.totals.responses],
-        [
-          "Input + output tokens",
-          data.totals.inputTokens + data.totals.outputTokens,
-        ],
-        ["Cache-read tokens", data.totals.cacheReadTokens],
-      ].map(([label, value]) => (
-        <section className="panel span-2 stat" data-tone="paper" key={label}>
-          <h2 className="panel-label">{label}</h2>
-          <strong className="metric">{formatNumber(Number(value))}</strong>
-        </section>
-      ))}
+      <section className="kpis" aria-label="Totals">
+        {kpis.map(([label, value]) => (
+          <div className="kpi" key={label}>
+            <p className="kpi-label">{label}</p>
+            <p className="kpi-figure">
+              <span className="kpi-value" title={formatNumber(value)}>
+                {formatMetric(value)}
+              </span>
+            </p>
+          </div>
+        ))}
+      </section>
       {!data.totals.responses && (
-        <section className="panel span-12" data-tone="pink">
-          <h2 className="empty-heading">No Claude activity in this range</h2>
-        </section>
+        <p className="empty">No Claude activity in this range</p>
       )}
       <Heatmap data={data} quietStartHours={quietStartHours} />
-      <figure
-        className="panel span-12"
-        data-tone="paper"
-        aria-label={`Daily active minutes over the last ${data.days} days by ${breakdown}`}
-      >
-        <h2 className="panel-label">Active minutes</h2>
-        <div className="panel-tools">
-          <div className="grid gap-2">
-            <Label htmlFor="activity-breakdown" className="sr-only">
-              {FIELD_LABELS.breakdown}
-            </Label>
-            <Select
+      <section className="section" aria-labelledby={chartHeadingId}>
+        <div className="section-head">
+          <h2 className="section-title" id={chartHeadingId}>
+            Active minutes
+          </h2>
+          <div className="section-tools">
+            <Legend
+              items={keys.map((key, index) => ({
+                label: seriesLabel(breakdown, key),
+                color: seriesColor(breakdown, key, index),
+              }))}
+            />
+            <Segmented
+              label={FIELD_LABELS.breakdown}
               value={breakdown}
-              onValueChange={(value) => setBreakdown(value as Breakdown)}
-            >
-              <SelectTrigger id="activity-breakdown">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {BREAKDOWNS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              options={BREAKDOWNS}
+              onChange={setBreakdown}
+            />
           </div>
         </div>
         <div className="chart">
           <ResponsiveContainer
             width="100%"
-            height={240}
-            initialDimension={{ width: 700, height: 240 }}
+            height="100%"
+            initialDimension={{ width: 900, height: CHART_HEIGHT }}
           >
             <BarChart data={rows} margin={CHART_MARGIN} accessibilityLayer>
               <CartesianGrid stroke={GRID_COLOR} vertical={false} />
               <XAxis
+                {...AXIS_PROPS}
                 dataKey="date"
-                tickFormatter={(date) => date.slice(5)}
-                stroke={AXIS_TEXT_COLOR}
-                tick={AXIS_TICK}
-                minTickGap={25}
+                tickFormatter={dayLabel}
+                minTickGap={24}
               />
-              <YAxis
-                stroke={AXIS_TEXT_COLOR}
-                tick={AXIS_TICK}
-                allowDecimals={false}
-                width={50}
-              />
+              <YAxis {...AXIS_PROPS} allowDecimals={false} width={44} />
               <Tooltip
                 formatter={(value, name) => [
                   `${formatNumber(Number(value))} min`,
@@ -205,17 +183,17 @@ export function AnalyticsView({
                 ]}
                 labelFormatter={(date, payload) => {
                   const row = payload[0]?.payload as ActivityRow | undefined;
+                  const day = dayLabel(String(date));
                   return row
-                    ? `${date} · ${formatNumber(row.activeMinutes)} min · ${formatNumber(row.responses)} responses`
-                    : date;
+                    ? `${day} · ${formatNumber(row.activeMinutes)} min · ${formatNumber(row.responses)} responses`
+                    : day;
                 }}
                 contentStyle={TOOLTIP_STYLE}
                 itemStyle={TOOLTIP_ITEM_STYLE}
                 labelStyle={TOOLTIP_LABEL_STYLE}
                 cursor={{ fill: CHART_CURSOR_FILL }}
-                separator=": "
+                separator=" "
               />
-              <Legend itemSorter={() => 0} />
               {keys.map((key, index) => (
                 <Bar
                   key={key}
@@ -230,21 +208,17 @@ export function AnalyticsView({
             </BarChart>
           </ResponsiveContainer>
         </div>
-      </figure>
-      <MixList title="Model mix · responses" items={data.models} tone="pink" />
-      <MixList
-        title="Project mix · responses"
-        items={data.projects}
-        tone="paper"
-      />
-      <SourceMix sources={data.sources} />
+      </section>
+      <div className="trio">
+        <MixList title="Models" rows={mixRows(data.models)} />
+        <MixList title="Projects" rows={mixRows(data.projects)} />
+        <MixList title="Sources" rows={sourceMixRows(data.sources)} />
+      </div>
       {data.health.warnings > 0 && (
-        <section className="panel span-12" data-tone="paper" role="status">
-          <h2 className="panel-label">Warning</h2>
-          <p className="warning-message">
-            {data.health.warnings} malformed transcript records were skipped.
-          </p>
-        </section>
+        <p className="warning" role="status">
+          Skipped {formatNumber(data.health.warnings)} malformed transcript
+          records
+        </p>
       )}
     </>
   );

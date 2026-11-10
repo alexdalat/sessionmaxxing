@@ -5,7 +5,7 @@ const result = execFileSync(
   ["--session", "sessionmaxxing", "eval", "--stdin"],
   {
     encoding: "utf8",
-    input: `JSON.stringify({ viewport: document.documentElement.clientWidth, width: document.documentElement.scrollWidth, metricsFit: [...document.querySelectorAll('.stat')].every(element => element.scrollWidth <= element.clientWidth) })`,
+    input: `JSON.stringify({ viewport: document.documentElement.clientWidth, width: document.documentElement.scrollWidth, metricsFit: [...document.querySelectorAll('.kpi')].every(element => element.scrollWidth <= element.clientWidth) })`,
   },
 );
 const parsed = JSON.parse(result);

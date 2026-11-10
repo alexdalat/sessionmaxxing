@@ -15,8 +15,8 @@ import {
 
 export type Breakdown = "source" | "model";
 export const BREAKDOWNS: { value: Breakdown; label: string }[] = [
-  { value: "source", label: "By source" },
-  { value: "model", label: "By model" },
+  { value: "source", label: "Source" },
+  { value: "model", label: "Model" },
 ];
 export const MAX_MODEL_SERIES = 4;
 export const OTHER_SERIES = "Other";

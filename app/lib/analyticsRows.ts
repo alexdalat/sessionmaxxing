@@ -8,6 +8,15 @@ import {
 export const formatNumber = (value: number) =>
   new Intl.NumberFormat("en-US").format(value);
 
+const COMPACT_FROM = 100_000;
+const compact = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumSignificantDigits: 3,
+});
+/** Grouped digits below 100,000, three significant digits with a suffix from there: 456,789 → 457K. */
+export const formatMetric = (value: number) =>
+  Math.abs(value) < COMPACT_FROM ? formatNumber(value) : compact.format(value);
+
 export interface SourceRow {
   label: string;
   responses: number;

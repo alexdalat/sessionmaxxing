@@ -410,7 +410,7 @@ export function TaskFormDialog({
             )}
           </div>
           <div className="actions">
-            <Button type="button" variant="outline" onClick={onClose}>
+            <Button type="button" variant="secondary" onClick={onClose}>
               {ACTION_LABELS.discardChanges}
             </Button>
             <Button type="submit" disabled={busy || savingMethod}>

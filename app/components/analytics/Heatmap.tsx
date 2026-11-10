@@ -1,14 +1,20 @@
 "use client";
+import { useId } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
+import { Legend, type LegendItem } from "@/app/components/Legend";
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from "@/app/components/ui/tooltip";
 import { useClock } from "@/app/hooks/useClock";
-import { formatNumber, heatmapTotals } from "@/app/lib/analyticsRows";
+import {
+  formatMetric,
+  formatNumber,
+  heatmapTotals,
+} from "@/app/lib/analyticsRows";
 import { TOOLTIP_CLASS } from "@/app/lib/chart";
-import { INSET, inkAlpha } from "@/app/lib/palette";
+import { blueAlpha, FIELD, INK, ORANGE } from "@/app/lib/palette";
 import { allowedStartHours } from "@/app/lib/quietHours";
 import { localCell, WEEKDAYS } from "@/app/lib/time";
 import type { Analytics, HeatCell, HeatShare } from "@/shared/types";
@@ -24,10 +30,8 @@ import {
 const HOURS_PER_DAY = 24;
 const CELL_BASE_ALPHA = 0.12;
 const CELL_RANGE_ALPHA = 0.88;
-const TOTAL_BASE_ALPHA = 0.04;
-const TOTAL_RANGE_ALPHA = 0.28;
-const shade = (value: number, max: number, base: number, range: number) =>
-  value ? inkAlpha(base + (range * value) / max) : INSET;
+const shade = (value: number, max: number) =>
+  value ? blueAlpha(CELL_BASE_ALPHA + (CELL_RANGE_ALPHA * value) / max) : FIELD;
 const pct = (fraction: number) => `${Math.round(fraction * 100)}%`;
 const minutes = (value: number) => `${formatNumber(Math.round(value))} min`;
 const cellTitle = (cell: HeatCell) =>
@@ -41,7 +45,7 @@ function Row({ label, value }: { label: string; value: string }) {
   return (
     <span className="heat-row">
       <span>{label}</span>
-      <span className="metric">{value}</span>
+      <span>{value}</span>
     </span>
   );
 }
@@ -100,9 +104,8 @@ export function Heatmap({
   const { timeZone } = useEnvironment();
   const now = localCell(useClock(), timeZone);
   const max = Math.max(1, ...data.heatmap.map((cell) => cell.activeMinutes));
+  const headingId = useId();
   const totals = heatmapTotals(data.heatmap);
-  const dayMax = Math.max(1, ...totals.days);
-  const hourMax = Math.max(1, ...totals.hours);
   const quiet =
     quietStartHours === undefined
       ? new Set<number>()
@@ -114,23 +117,20 @@ export function Heatmap({
     ]
       .filter(Boolean)
       .join(" ");
+  const legend: LegendItem[] = [
+    { label: "Now", color: INK, shape: "ring" },
+    ...(quietStartHours === undefined
+      ? []
+      : [{ label: "Quiet start", color: ORANGE }]),
+    { label: "Dispatched", color: ORANGE, shape: "bar" },
+  ];
   return (
-    <section className="panel span-12" data-tone="paper">
-      <h2 className="panel-label">Busy hours by weekday</h2>
-      <div className="panel-tools">
-        <ul className="heat-legend" aria-label="Legend">
-          <li>
-            <span className="heat-key now" /> Now
-          </li>
-          {quietStartHours !== undefined && (
-            <li>
-              <span className="heat-key quiet" /> Quiet start
-            </li>
-          )}
-          <li>
-            <span className="heat-key dispatched" /> Dispatched
-          </li>
-        </ul>
+    <section className="section" aria-labelledby={headingId}>
+      <div className="section-head">
+        <h2 className="section-title" id={headingId}>
+          Busy hours
+        </h2>
+        <Legend items={legend} />
       </div>
       <div className="table-scroll">
         <table className="heatmap">
@@ -163,12 +163,7 @@ export function Heatmap({
                             type="button"
                             className={flag(cell.hour, d)}
                             style={{
-                              backgroundColor: shade(
-                                cell.activeMinutes,
-                                max,
-                                CELL_BASE_ALPHA,
-                                CELL_RANGE_ALPHA,
-                              ),
+                              backgroundColor: shade(cell.activeMinutes, max),
                             }}
                             aria-label={cellDescription(cell)}
                           >
@@ -187,41 +182,18 @@ export function Heatmap({
                       </Tooltip>
                     </td>
                   ))}
-                <td
-                  className="heat-total metric"
-                  style={{
-                    backgroundColor: shade(
-                      totals.days[d],
-                      dayMax,
-                      TOTAL_BASE_ALPHA,
-                      TOTAL_RANGE_ALPHA,
-                    ),
-                  }}
-                >
-                  {formatNumber(totals.days[d])}
-                </td>
+                <td className="heat-total">{formatMetric(totals.days[d])}</td>
               </tr>
             ))}
             <tr className="heat-totals">
               <th scope="row">Total</th>
               {HOURS.map((hour) => (
-                <td
-                  key={hour}
-                  className="heat-total metric"
-                  style={{
-                    backgroundColor: shade(
-                      totals.hours[hour],
-                      hourMax,
-                      TOTAL_BASE_ALPHA,
-                      TOTAL_RANGE_ALPHA,
-                    ),
-                  }}
-                >
-                  {formatNumber(totals.hours[hour])}
+                <td key={hour} className="heat-total">
+                  {formatMetric(totals.hours[hour])}
                 </td>
               ))}
-              <td className="heat-total heat-grand metric">
-                {formatNumber(totals.total)}
+              <td className="heat-total heat-grand">
+                {formatMetric(totals.total)}
               </td>
             </tr>
           </tbody>

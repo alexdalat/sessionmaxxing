@@ -11,7 +11,11 @@ import {
 } from "@/app/lib/queuePreview";
 import { windowRangeLabel } from "@/app/lib/schedule";
 import { localTimestamp } from "@/shared/local-time";
-import { formatTokens, type PublicTask } from "@/shared/types";
+import {
+  DEFAULT_MAX_TURNS,
+  formatTokens,
+  type PublicTask,
+} from "@/shared/types";
 
 const stateVariants: Record<PreviewState, "success" | "warning"> = {
   running: "success",
@@ -38,60 +42,72 @@ export function TaskCard({
   const { timeZone, edition } = useEnvironment();
   const state = previewState(task);
   const wait = waitNote(task, now);
+  const stats: [string, string][] = [];
+  if (task.priority !== 0) stats.push(["Priority", String(task.priority)]);
+  if (task.maxTurns !== DEFAULT_MAX_TURNS)
+    stats.push(["Max turns", String(task.maxTurns)]);
+  if (edition === "full" && task.tokens !== null)
+    stats.push(["Tokens", formatTokens(task.tokens)]);
+  if (edition === "full" && task.sessionCostPercent !== null)
+    stats.push(["Session", `${task.sessionCostPercent}%`]);
+  if (task.preferredWindowStart !== null)
+    stats.push([
+      "Window",
+      windowRangeLabel(task.preferredWindowStart, timeZone, now),
+    ]);
+  if (task.earliestStart)
+    stats.push(["After", localTimestamp(task.earliestStart, timeZone)]);
+  if (dependencies.length > 0)
+    stats.push(["Depends on", dependencies.join(", ")]);
   return (
-    <article className={`task-card${isLeaving ? " leaving" : ""}`}>
-      <div>
+    <li className={`task-card${isLeaving ? " leaving" : ""}`}>
+      <div className="task-body">
         <div className="task-title">
           <h3>{task.title}</h3>
-          {isNext && <Badge variant="success">Next</Badge>}
+          {isNext && <span className="task-tag">Next</span>}
           {task.review === "needed" && (
-            <Badge variant="warning">Needs review</Badge>
-          )}
-        </div>
-        <p>{task.model}</p>
-        <p className="muted task-workdir">{task.workdir}</p>
-        <details>
-          <summary>{ACTION_LABELS.showPrompt}</summary>
-          <pre className="task-prompt">{task.prompt}</pre>
-        </details>
-        <div className="task-schedule">
-          <span>Priority {task.priority}</span>
-          <span>max {task.maxTurns} turns</span>
-          {edition === "full" && task.tokens !== null && (
-            <span>
-              {formatTokens(task.tokens)} tokens
-              {task.sessionCostPercent === null
-                ? ""
-                : ` · ${task.sessionCostPercent}%`}
+            <span className="task-tag" data-tone="attention">
+              Needs review
             </span>
           )}
-          <span>
-            {task.preferredWindowStart === null
-              ? "Any hour"
-              : windowRangeLabel(task.preferredWindowStart, timeZone, now)}
-          </span>
-          {task.earliestStart && (
-            <span>After {localTimestamp(task.earliestStart, timeZone)}</span>
-          )}
-          {dependencies.length > 0 && (
-            <span>Depends on {dependencies.join(", ")}</span>
-          )}
+        </div>
+        <p className="task-where">
+          <span>{task.model}</span>
+          <span className="mono">{task.workdir}</span>
+        </p>
+        {stats.length > 0 && (
+          <dl className="stats">
+            {stats.map(([label, value]) => (
+              <div key={label}>
+                <dt>{label}</dt>
+                <dd>{value}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        <div className="disclosures">
+          <details>
+            <summary>{ACTION_LABELS.showPrompt}</summary>
+            <pre className="code-block">{task.prompt}</pre>
+          </details>
         </div>
       </div>
-      <div className="task-budget">
+      <div className="task-state">
         {task.gate && (
           <>
-            <div className="task-state">
+            <p className="flex flex-wrap items-baseline gap-x-2">
               <Badge variant={stateVariants[state]}>
                 {STATE_LABELS[state]}
               </Badge>
-              {wait && <Badge variant="outline">{wait}</Badge>}
-            </div>
-            <span className="muted">{task.gate.reason}</span>
+              {wait && <span className="muted">{wait}</span>}
+            </p>
+            {state !== "running" && (
+              <span className="muted">{task.gate.reason}</span>
+            )}
           </>
         )}
       </div>
       {children}
-    </article>
+    </li>
   );
 }

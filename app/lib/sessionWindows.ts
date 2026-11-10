@@ -17,10 +17,10 @@ export function clockOfFraction(fraction: number) {
 const PERCENT_SCALE = 100;
 
 export const WINDOW_ALPHA_STEPS = [
-  { from: 0, alpha: 0.18, label: "ink" },
-  { from: 25, alpha: 0.4, label: "ink" },
-  { from: 50, alpha: 0.75, label: "paper" },
-  { from: 75, alpha: 1, label: "paper" },
+  { from: 0, alpha: 0.14, label: "ink" },
+  { from: 25, alpha: 0.32, label: "ink" },
+  { from: 50, alpha: 0.6, label: "ink" },
+  { from: 75, alpha: 1, label: "page" },
 ] as const;
 
 export function quantizeWindowAlpha(percent: number) {

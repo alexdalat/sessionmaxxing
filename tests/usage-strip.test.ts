@@ -197,6 +197,58 @@ describe("usageStripRows", () => {
     );
   });
 
+  it("adds a Fable row with its own pace when the Fable window is reported", () => {
+    const usage = snapshot({
+      fable: { percent: 30, resetsAt: isoAfter(50 * 60 * MINUTE_MS) },
+    });
+    const rows = usageStripRows(
+      {
+        ...planning(gate(), gate(), usage),
+        fable: gate({ percent: 30, ceiling: 60, pace: 50 }),
+      },
+      NOW,
+    );
+    expect(rows.map((row) => row.bucket)).toEqual([
+      "session",
+      "weekly",
+      "fable",
+    ]);
+    expect(rows[2]).toMatchObject({
+      label: "Fable weekly",
+      percentText: "30%",
+      paceText: "20% under pace",
+      resetText: "2d 2h",
+    });
+  });
+
+  it("leaves the Fable row out when the Fable window is not reported", () => {
+    const rows = usageStripRows(
+      { ...planning(gate(), gate()), fable: null },
+      NOW,
+    );
+    expect(rows.map((row) => row.bucket)).toEqual(["session", "weekly"]);
+  });
+
+  it("draws held points from the top of the fill up to the full bar", () => {
+    const [roomy] = usageStripRows(
+      planning(gate({ percent: 42, reserved: 10 }), gate()),
+      NOW,
+    );
+    const [crowded] = usageStripRows(
+      planning(gate({ percent: 95, reserved: 10 }), gate()),
+      NOW,
+    );
+    expect(roomy.held).toBe(10);
+    expect(crowded.held).toBe(5);
+  });
+
+  it("writes the reset as a note for the KPI", () => {
+    const started = usageStripRows(planning(gate(), gate()), NOW);
+    const idle = usageStripRows(planning(gate(), gate(), null), NOW);
+    expect(started[0].resetNote).toBe("Resets in 2h 5m");
+    expect(idle[0].resetNote).toBe("Not started");
+  });
+
   it("omits the reset, held and pace parts when they are absent", () => {
     const rows = usageStripRows(
       planning(gate({ percent: null }), gate(), null),
@@ -217,6 +269,14 @@ describe("fetchedLabel", () => {
   it("reports the age of a fresh snapshot", () => {
     expect(fetchedLabel(snapshot(), NOW)).toEqual({
       text: "Fetched 3m ago",
+      stale: false,
+    });
+  });
+
+  it("reports a snapshot under a minute old as fetched just now", () => {
+    const usage = snapshot({ fetchedAt: isoAfter(-30_000) });
+    expect(fetchedLabel(usage, NOW)).toEqual({
+      text: "Fetched just now",
       stale: false,
     });
   });
