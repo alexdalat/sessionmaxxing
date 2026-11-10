@@ -180,11 +180,14 @@ it("resumes the stopped Claude session with the resume prompt, headless instruct
   expect(args.slice(-2)).toEqual(["--resume", sessionId]);
   expect(args).not.toContain("--session-id");
 });
-it("recognizes the session and weekly limit messages Claude Code ends a run with", () => {
+it("recognizes the session, 5-hour and weekly limit messages Claude Code ends a run with", () => {
   expect(
     isLimitStop(
       "You've hit your session limit · resets 5:50am (America/Chicago)",
     ),
+  ).toBe(true);
+  expect(
+    isLimitStop("You've hit your 5-hour limit · resets 4am (America/Chicago)"),
   ).toBe(true);
   expect(isLimitStop("You’ve hit your weekly limit · resets Oct 11, 4am")).toBe(
     true,

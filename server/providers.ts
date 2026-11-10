@@ -51,7 +51,7 @@ export const withAutoApply = (task: Task, method: RestartMethod): Task => ({
   prompt: `${task.prompt}\n\n${autoApplyInstruction(method)}`,
 });
 /** The final message Claude Code prints when a usage limit ends a run. */
-const LIMIT_STOP = /^You['’]ve hit your (?:session|weekly) limit\b/;
+const LIMIT_STOP = /^You['’]ve hit your (?:session|5-hour|weekly) limit\b/;
 export const isLimitStop = (summary: string | null) =>
   summary !== null && LIMIT_STOP.test(summary);
 export const RESUME_PROMPT =
