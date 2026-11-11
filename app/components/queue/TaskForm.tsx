@@ -38,6 +38,7 @@ import { zoneName } from "@/shared/local-time";
 import type { PublicTask, RestartMethod, TaskInput } from "@/shared/types";
 import {
   AUTO_TOKENS,
+  DEFAULT_COMMIT,
   DEFAULT_MAX_TURNS,
   DEFAULT_MODEL,
   formatTokens,
@@ -84,6 +85,7 @@ export function TaskFormDialog({
     taskTokens === null ? AUTO_TOKENS : String(taskTokens),
   );
   const [dependsOn, setDependsOn] = useState<string[]>(task?.dependsOn ?? []);
+  const [commit, setCommit] = useState(task?.commit ?? DEFAULT_COMMIT);
   const [probe, setProbe] = useState(workdir.trim());
   const [loaded, setLoaded] = useState<LoadedMethod>();
   const [restartKind, setRestartKind] = useState<RestartKind>("none");
@@ -178,6 +180,7 @@ export function TaskFormDialog({
               preferredWindowStart:
                 windowStart === ANY_WINDOW ? null : Number(windowStart),
               dependsOn,
+              commit,
             };
             const draft = restartDraft(restartKind, commandText);
             if (
@@ -280,6 +283,16 @@ export function TaskFormDialog({
                 />
               </div>
             )}
+            <div className="full flex items-center gap-2">
+              <Checkbox
+                id={`${fieldId}-commit`}
+                checked={commit}
+                onCheckedChange={(checked) => setCommit(checked === true)}
+              />
+              <Label htmlFor={`${fieldId}-commit`} className="font-normal">
+                {FIELD_LABELS.commit}
+              </Label>
+            </div>
             <div className="grid gap-2">
               <Label htmlFor={`${fieldId}-model`}>{FIELD_LABELS.model}</Label>
               <Select

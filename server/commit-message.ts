@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   COMMIT_SUBJECT_MAX,
+  CONVENTIONAL_RULES,
   CONVENTIONAL_SUBJECT,
   type Run,
 } from "../shared/types.js";
@@ -32,8 +33,7 @@ function suggestionPrompt(run: CommitRun): string {
   return `Write the git commit subject for the work below.
 
 Rules:
-- Conventional Commits: "<type>: <subject>" or "<type>(<scope>): <subject>", type one of feat, fix, refactor, perf, test, docs, chore, style, build, ci.
-- One line, at most ${COMMIT_SUBJECT_MAX} characters, imperative mood, lowercase after the colon, no trailing period.
+- ${CONVENTIONAL_RULES}
 - Name the change a reader of git log needs, not the process that produced it.
 
 Task title: ${run.title}

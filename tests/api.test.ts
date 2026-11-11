@@ -483,6 +483,50 @@ it("redirects a route without a trailing slash to its directory", async () => {
     await temp.cleanup();
   }
 });
+it("defaults the commit option on, accepts an opt-out on create and edit, and rejects a non-boolean", async () => {
+  const { temporary, taskInput } = await import("./helpers");
+  const { QueueStore } = await import("../server/queue.js");
+  const { Runner } = await import("../server/runner.js");
+  const temp = await temporary();
+  const queue = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+  const runner = await Runner.open(queue, temp.path);
+  const app = await createApp({ timeZone: TEST_TIME_ZONE, queue, runner });
+  try {
+    const create = (payload: object) =>
+      app.inject({ method: "POST", url: "/api/tasks", payload });
+    const defaulted = await create(taskInput(temp.path));
+    expect(defaulted.statusCode).toBe(201);
+    expect(defaulted.json().commit).toBe(true);
+    const optedOut = await create({ ...taskInput(temp.path), commit: false });
+    expect(optedOut.json().commit).toBe(false);
+
+    const patch = (payload: object) =>
+      app.inject({
+        method: "PATCH",
+        url: `/api/tasks/${defaulted.json().id}`,
+        payload,
+      });
+    const off = await patch({ commit: false });
+    expect(off.statusCode).toBe(200);
+    expect(off.json().commit).toBe(false);
+    expect((await patch({ commit: true })).json().commit).toBe(true);
+    expect((await patch({ commit: "yes" })).statusCode).toBe(400);
+    expect(
+      (await create({ ...taskInput(temp.path), commit: "yes" })).statusCode,
+    ).toBe(400);
+
+    const reopened = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    expect(
+      reopened.snapshot().tasks.map((task) => [task.id, task.commit]),
+    ).toEqual([
+      [defaulted.json().id, true],
+      [optedOut.json().id, false],
+    ]);
+  } finally {
+    await app.close();
+    await temp.cleanup();
+  }
+});
 it("preserves an unscheduled null window and rejects coerced body values", async () => {
   const { temporary, taskInput } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");
@@ -1407,7 +1451,15 @@ it("fits the session rates from official samples and local transcripts, and pric
 });
 
 /** A finished run that edited notes.md and added added.ts next to other.md, which was already dirty. */
-async function finishedRun(suggestCommit: (run: CommitRun) => Promise<string>) {
+type RunGit = (args: string[]) => Promise<string>;
+async function editNotes(workdir: string) {
+  await writeFile(`${workdir}/notes.md`, "one\ntwo\n");
+  await writeFile(`${workdir}/added.ts`, "export {};\n");
+}
+async function finishedRun(
+  suggestCommit: (run: CommitRun) => Promise<string>,
+  work: (workdir: string, git: RunGit) => Promise<void> = editNotes,
+) {
   const { taskInput, fakeChild } = await import("./helpers");
   const { QueueStore } = await import("../server/queue.js");
   const { Runner } = await import("../server/runner.js");
@@ -1441,8 +1493,7 @@ async function finishedRun(suggestCommit: (run: CommitRun) => Promise<string>) {
     })
   ).json();
   await app.inject({ method: "POST", url: `/api/tasks/${task.id}/run` });
-  await writeFile(`${workdir}/notes.md`, "one\ntwo\n");
-  await writeFile(`${workdir}/added.ts`, "export {};\n");
+  await work(workdir, git);
   child.emit("close", 0, null);
   await runner.waitForIdle();
   const run = (await app.inject("/api/runs")).json().runs[0];
@@ -1485,6 +1536,28 @@ it("suggests a commit message from the run's title and changed files", async () 
   }
 });
 
+it("has nothing to commit after a run that committed its own work and left a clean tree", async () => {
+  const { app, run, cleanup } = await finishedRun(
+    async () => "feat: unused",
+    async (workdir, git) => {
+      await editNotes(workdir);
+      await writeFile(`${workdir}/other.md`, "base\n");
+      await git(["add", "-A"]);
+      await git(["commit", "-m", "feat(notes): add the second note"]);
+    },
+  );
+  try {
+    expect(run.changes).toMatchObject({ branch: "main", commits: 1 });
+    const response = await app.inject({
+      method: "POST",
+      url: `/api/runs/${run.id}/commit-message`,
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json().error).toBe("This run has nothing left to commit.");
+  } finally {
+    await cleanup();
+  }
+});
 it("reports a failed suggestion as a bad gateway with the model's error", async () => {
   const { app, run, cleanup } = await finishedRun(async () => {
     throw new Error(

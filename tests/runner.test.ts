@@ -696,10 +696,19 @@ it("appends the apply instruction to a dispatched prompt only while the override
     const second = await store.create(taskInput(temp.path));
     await finish(second.id);
     expect(launched[1]).toBe(
-      `${task.prompt}\n\n${autoApplyInstruction({ kind: "none" })}`,
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "none" }, true)}`,
     );
     expect(store.snapshot().tasks.find((t) => t.id === second.id)?.prompt).toBe(
       task.prompt,
+    );
+
+    const optedOut = await store.create({
+      ...taskInput(temp.path),
+      commit: false,
+    });
+    await finish(optedOut.id);
+    expect(launched[2]).toBe(
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "none" }, false)}`,
     );
     await runner.close();
   } finally {
@@ -729,7 +738,7 @@ it("tells an applied run the restart method of its work directory", async () => 
     child.emit("close", 0, null);
     await runner.waitForIdle();
     expect(launched).toEqual([
-      `${task.prompt}\n\n${autoApplyInstruction({ kind: "compose" })}`,
+      `${task.prompt}\n\n${autoApplyInstruction({ kind: "compose" }, true)}`,
     ]);
     expect(store.snapshot().tasks.find((t) => t.id === task.id)?.prompt).toBe(
       task.prompt,

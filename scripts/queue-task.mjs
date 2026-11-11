@@ -23,6 +23,7 @@ const USAGE = `Usage: sessionmaxxing-queue --title "..." (--prompt "..." | --pro
   [--tokens N|auto]      expected weighted tokens; auto lets the server estimate them (full edition only)
   [--window HH]          0-23; omit for any hour
   [--depends-on ID[,ID]] run only after these queued task ids finish
+  [--no-commit]          with auto-apply on, leave the work uncommitted instead of committing and pushing it
   [--after ISO] [--dry-run]
   [--url URL]            default: $SESSIONMAXXING_URL, else http://127.0.0.1:4317
   $SESSIONMAXXING_PATH_MAP  from=to[,from=to] absolute prefixes; rewrites --workdir for a server that sees these folders elsewhere`;
@@ -51,10 +52,15 @@ function fail(message) {
 function parseArgs(argv) {
   const values = {};
   let dryRun = false;
+  let commit = true;
   for (let index = 0; index < argv.length; index++) {
     const flag = argv[index];
     if (flag === "--dry-run") {
       dryRun = true;
+      continue;
+    }
+    if (flag === "--no-commit") {
+      commit = false;
       continue;
     }
     if (flag === "--help" || flag === "-h") {
@@ -67,7 +73,7 @@ function parseArgs(argv) {
     if (value === undefined) fail(`${flag} needs a value.`);
     values[flag] = value;
   }
-  return { values, dryRun };
+  return { values, dryRun, commit };
 }
 
 function taskIds(raw) {
@@ -121,7 +127,7 @@ function dashboardPath(path, pathMap) {
   return pair ? pair[1] + path.slice(pair[0].length) : path;
 }
 
-function buildBody(values) {
+function buildBody(values, commit) {
   if (!values["--title"]) fail(`--title is required.\n${USAGE}`);
   if (values["--prompt"] !== undefined && values["--prompt-file"] !== undefined)
     fail("Pass --prompt or --prompt-file, not both.");
@@ -154,6 +160,7 @@ function buildBody(values) {
         ? AUTO_TOKENS
         : integer(values["--tokens"], "--tokens", MIN_TOKENS, MAX_TOKENS),
     dependsOn: taskIds(values["--depends-on"]),
+    commit,
   };
   if (values["--model"] !== undefined) body.model = values["--model"];
   return body;
@@ -189,8 +196,8 @@ function quietLabel(quiet) {
   return quiet.startHours.map(hourLabel).join(" ");
 }
 
-const { values, dryRun } = parseArgs(process.argv.slice(2));
-const body = buildBody(values);
+const { values, dryRun, commit } = parseArgs(process.argv.slice(2));
+const body = buildBody(values, commit);
 if (dryRun) {
   console.log(JSON.stringify(body, null, 2));
   process.exit(0);

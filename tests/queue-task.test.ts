@@ -50,8 +50,24 @@ it("builds the task body from flags without posting when asked for a dry run", a
     maxTurns: 5,
     tokens: 40000,
     dependsOn: [],
+    commit: true,
     model: "claude-fable-5-1",
   });
+});
+
+it("asks the run to commit unless --no-commit is given", async () => {
+  const dryRun = (...flags: string[]) =>
+    run(process.execPath, [
+      SCRIPT,
+      "--title",
+      "Rename the parser",
+      "--prompt",
+      PROMPT,
+      ...flags,
+      "--dry-run",
+    ]);
+  expect(JSON.parse((await dryRun()).stdout).commit).toBe(true);
+  expect(JSON.parse((await dryRun("--no-commit")).stdout).commit).toBe(false);
 });
 
 it("rejects the removed --provider flag", async () => {

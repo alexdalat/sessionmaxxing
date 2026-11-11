@@ -74,11 +74,12 @@ describe("ACTION_LABELS", () => {
 });
 
 describe("FIELD_LABELS", () => {
-  it("names the five field controls", () => {
+  it("names the six field controls", () => {
     expect(FIELD_LABELS).toEqual({
       range: "Range",
       breakdown: "Breakdown",
       model: "Model",
+      commit: "Commit",
       filterTasks: "Filter tasks",
       darkMode: "Dark mode",
     });

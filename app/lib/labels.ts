@@ -34,6 +34,7 @@ export const FIELD_LABELS = {
   range: "Range",
   breakdown: "Breakdown",
   model: "Model",
+  commit: "Commit",
   filterTasks: "Filter tasks",
   darkMode: "Dark mode",
 } as const;

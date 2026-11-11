@@ -68,6 +68,7 @@ const properties = {
     maxItems: MAX_DEPENDENCIES,
     items: idSchema,
   },
+  commit: { type: "boolean" },
 };
 const LITE_TOKENS_REFUSED =
   "The lite edition has no token cost; remove tokens from the request.";

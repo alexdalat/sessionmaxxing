@@ -296,6 +296,7 @@ const queued = (
   maxTurns: 40,
   tokens: 100_000,
   dependsOn: [],
+  commit: true,
   sessionCostPercent: 13.8,
   gate: { status: gate, reason: gate, eligibleAt },
 });

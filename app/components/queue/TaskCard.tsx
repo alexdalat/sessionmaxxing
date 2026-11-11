@@ -2,7 +2,7 @@
 import type { ReactNode } from "react";
 import { useEnvironment } from "@/app/components/EnvironmentProvider";
 import { Badge } from "@/app/components/ui/badge";
-import { ACTION_LABELS } from "@/app/lib/labels";
+import { ACTION_LABELS, FIELD_LABELS } from "@/app/lib/labels";
 import {
   type PreviewState,
   previewState,
@@ -12,6 +12,7 @@ import {
 import { windowRangeLabel } from "@/app/lib/schedule";
 import { localTimestamp } from "@/shared/local-time";
 import {
+  DEFAULT_COMMIT,
   DEFAULT_MAX_TURNS,
   formatTokens,
   type PublicTask,
@@ -57,6 +58,8 @@ export function TaskCard({
     ]);
   if (task.earliestStart)
     stats.push(["After", localTimestamp(task.earliestStart, timeZone)]);
+  if (task.commit !== DEFAULT_COMMIT)
+    stats.push([FIELD_LABELS.commit, task.commit ? "On" : "Off"]);
   if (dependencies.length > 0)
     stats.push(["Depends on", dependencies.join(", ")]);
   return (
