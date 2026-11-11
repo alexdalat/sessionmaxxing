@@ -10,6 +10,7 @@
       "!!artifacts",
       "!!tests/.tmp",
       "!!.claude",
+      "!!.gsd",
       "!!.next",
       "!!out",
       "!!next-env.d.ts"

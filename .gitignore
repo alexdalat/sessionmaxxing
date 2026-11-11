@@ -13,4 +13,5 @@ next-env.d.ts
 .env
 compose.override.yaml
 .planning/
+.gsd/
 reports/
