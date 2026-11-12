@@ -602,6 +602,7 @@ const finishedRun = (
   taskId: "b".repeat(24),
   title: "Fix a test",
   prompt: "Rename the parser.",
+  workdir: "/home/user/project",
   estimatedTokens: 120_000,
   model: "opus",
   status: "completed",

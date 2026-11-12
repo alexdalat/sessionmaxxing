@@ -1037,6 +1037,12 @@
   .task-where .mono {
     overflow-wrap: anywhere;
   }
+  .run-workdir {
+    margin-top: 2px;
+    font-size: 13px;
+    color: var(--ink-muted);
+    overflow-wrap: anywhere;
+  }
   .task-body > .stats,
   .task-body > .disclosures {
     margin-top: 12px;

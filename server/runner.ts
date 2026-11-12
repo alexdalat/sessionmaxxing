@@ -233,6 +233,9 @@ export class Runner {
   ) {
     const runner = new Runner(store, join(directory, "runs"), options);
     await mkdir(runner.directory, { recursive: true, mode: 0o700 });
+    const taskWorkdirs = new Map(
+      store.snapshot().tasks.map((task) => [task.id, task.workdir]),
+    );
     for (const name of await readdir(runner.directory)) {
       if (!/^[a-f0-9]{24}\.json$/.test(name)) continue;
       const file = join(runner.directory, name);
@@ -261,6 +264,8 @@ export class Runner {
         taskId: saved.taskId,
         title: saved.title,
         prompt: saved.prompt ?? null,
+        // Runs recorded before work directories were stored take their task's current one.
+        workdir: saved.workdir ?? taskWorkdirs.get(saved.taskId) ?? null,
         estimatedTokens: saved.estimatedTokens ?? null,
         model: saved.model,
         status: saved.status,
@@ -276,6 +281,8 @@ export class Runner {
         reviewedAt: saved.reviewedAt ?? null,
         preview: new OutputPreview(preview).lines(),
       };
+      if (saved.workdir == null && run.workdir !== null)
+        await runner.persist(run);
       if (run.status === "running") {
         run.status = "failed";
         run.endedAt = runner.now().toISOString();
@@ -477,6 +484,7 @@ export class Runner {
       taskId: task.id,
       title: task.title,
       prompt: task.prompt,
+      workdir: task.workdir,
       estimatedTokens: task.tokens,
       model: task.model,
       status: "running",

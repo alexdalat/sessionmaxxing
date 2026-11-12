@@ -326,7 +326,8 @@ it("creates, edits, reorders, runs, cancels, retries and deletes through validat
     const runs = await app.inject("/api/runs");
     expect(runs.json().runs[0].status).toBe("cancelled");
     expect(runs.json().runs[0].prompt).toBe(submitted.prompt);
-    expect(runs.body).not.toMatch(/workdir|env/);
+    expect(runs.json().runs[0].workdir).toBe(temp.path);
+    expect(runs.body).not.toMatch(/env/);
     expect(
       (await app.inject({ method: "DELETE", url: `/api/tasks/${task.id}` }))
         .statusCode,

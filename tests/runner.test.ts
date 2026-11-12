@@ -375,6 +375,7 @@ it("loads a run recorded before session ids were tracked and reports no dispatch
         taskId: "c".repeat(24),
         title: "Legacy run",
         prompt: null,
+        workdir: null,
         estimatedTokens: null,
         model: "opus",
         status: "completed",
@@ -446,6 +447,63 @@ async function runWithTokens(
   await runner.close();
   return { run, persisted, error, taskStatus };
 }
+
+it("gives a run recorded before work directories were stored its task's work directory and keeps it after the task is deleted", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    const task = await store.create(taskInput(temp.path));
+    const id = "b".repeat(24);
+    await mkdir(`${temp.path}/runs`, { recursive: true });
+    await writeFile(
+      `${temp.path}/runs/${id}.json`,
+      JSON.stringify({
+        id,
+        taskId: task.id,
+        title: task.title,
+        model: "opus",
+        status: "completed",
+        startedAt: "2026-09-01T10:00:00.000Z",
+        endedAt: "2026-09-01T10:05:00.000Z",
+        durationMs: 300_000,
+        exitCode: 0,
+        error: null,
+      }),
+    );
+    await writeFile(`${temp.path}/runs/${id}.log`, JSON.stringify([]));
+    const runner = await Runner.open(store, temp.path);
+    expect(runner.list()[0].workdir).toBe(temp.path);
+    await runner.close();
+    await store.delete(task.id);
+    const reopened = await Runner.open(store, temp.path);
+    expect(reopened.list()[0].workdir).toBe(temp.path);
+    await reopened.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
+
+it("keeps the work directory a run was dispatched in across a restart", async () => {
+  const temp = await temporary();
+  try {
+    const store = await QueueStore.open(temp.path, TEST_WORKDIR_ROOT);
+    const task = await store.create(taskInput(temp.path));
+    const child = fakeChild();
+    const runner = await Runner.open(store, temp.path, {
+      launch: () => child,
+    });
+    runner.setPlanner(serial);
+    await runner.start(task.id);
+    child.emit("close", 0, null);
+    await runner.waitForIdle();
+    await runner.close();
+    const reopened = await Runner.open(store, temp.path);
+    expect(reopened.list()[0].workdir).toBe(task.workdir);
+    await reopened.close();
+  } finally {
+    await temp.cleanup();
+  }
+});
 
 it("records no provider on a new run", async () => {
   const temp = await temporary();

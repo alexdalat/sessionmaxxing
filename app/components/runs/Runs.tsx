@@ -224,6 +224,9 @@ export function Runs() {
                 <div className="run-head">
                   <div className="min-w-0">
                     <h2 className="run-title">{run.title}</h2>
+                    {run.workdir && (
+                      <p className="run-workdir mono">{run.workdir}</p>
+                    )}
                     <div className="run-states">
                       <Badge variant={status.variant}>{status.label}</Badge>
                       {needsReview(run) && (

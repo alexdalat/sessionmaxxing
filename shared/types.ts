@@ -399,6 +399,8 @@ export interface Run {
   title: string;
   /** The prompt the run was dispatched with; null for runs recorded before prompts were stored. */
   prompt: string | null;
+  /** The work directory the run was dispatched in; null for a run recorded before work directories were stored whose task was deleted. */
+  workdir: string | null;
   /** Weighted tokens the task was estimated to consume when it started; null for runs recorded before weighted estimates were tracked. */
   estimatedTokens: number | null;
   model: string;
